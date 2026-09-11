@@ -1,0 +1,70 @@
+﻿NAMES: SATYA SIBA NAYAK & SNEHA JAISWAL
+PRN: 1272240768 &1272240759
+TYBCA DIV: 'C'
+PROJECT BASED LEARNING: SYNOPSIS
+DEBTTRACKER (DEBTSYNC)
+
+
+Smart inter-student ledger, interest engine, and debt management portal for students
+Manual, informal tracking of money lent and borrowed among university students frequently leads to accounting discrepancies, forgotten debts, and social friction.
+"DebtTracker" is a full-stack, web-based inter-student financial management system designed to bring transparency and automation to student micro-loans and shared ledgers.
+The platform converts informal cash transfers into a secure, centralized digital ledger where both creditors (lenders) and debtors (borrowers) maintain real-time visibility over active balances.
+Its primary objective is two-fold: to empower lenders to effortlessly record interest-free or interest-bearing credit (supporting simple and continuous compound interest models across weekly, monthly, or yearly schedules) and to provide debtors with an open self-service lookup portal where they can check their live dues, review repayment histories, process smart bulk payments, and inspect dynamic financial growth charts.
+
+
+Existing System and Need for System
+Currently, university students ( or anybody else)  rely on fragmented, unstructured methods to track expenses and credit, such as physical notebooks, mental notes, Excel spreadsheets, or casual chat logs in messaging apps.
+
+
+Drawbacks of Existing Systems:
+* Lack of Real-Time Visibility: Debtors rarely know their exact outstanding balance without asking the lender directly, leading to miscommunication.
+* Manual Calculation Errors:Calculating simple or compound interest by hand over different periods is tedious and prone to mistakes.
+* Settlement Bottlenecks: Clearing multiple distinct debt entries simultaneously involves manual computations to figure out which credit repayments should take priority.
+* No Verification Trail: Informal agreements lack clear repayment logs or audit activity histories, making disputes hard to resolve.
+The Need: The core objective of the platform is to simplify peer-to-peer financial obligations by providing an organized framework for tracking expenditures, managing credit agreements, and calculating interest. Furthermore, there is a critical need for an open-source, trustable platform that ensures security and transparency. Consequently, a centralized, readily accessible web portal is essential to handle automated interest computations, efficient batch settlement allocations, and transparent interactive dashboards for monitoring all financial liabilities comprehensively from initiation to closure.
+Scope of System
+* Role-Based Access & Identity Lookup: Phone number and name-based lookup mechanism with built-in disambiguation to view personal ledger details without complex onboarding barriers.
+* Flexible Debt Engine: Creation and management of debt records supporting interest-free models along with custom interest-bearing records (simple and exponential compound interest).
+* Debtor Self-Service Portal: An independent, full-screen dashboard for borrowers to view total outstanding dues, principal totals, and total repaid funds.
+* Smart Bulk Payment Allocation: An automated payment engine that distributes bulk batch payments across multiple active debts, prioritizing highest-interest records first to minimize total borrower liability.
+* Visual Analytics & Live Accrual Speed Ticker: Real-time metrics showing exact daily and monthly interest growth rates (+₹/day, +₹/month), financial split visual bars (Principal vs. Interest vs. Paid), and interactive time-series growth projection graphs (30D, 90D, 1Y).
+* Audit Activity & Repayment Logs: Immutable activity tracking capturing debt creation, partial payments, note updates, and full settlements.
+
+
+Operating Environment - Hardware and Software
+Hardware Requirements:
+* Processor: Intel Core i3 / AMD Ryzen 3 or equivalent (minimum)
+* RAM: 4GB (8GB recommended for optimal browser rendering and database operations)
+* Storage: 500MB free disk space
+Software Requirements:
+* Operating System: Windows 10/11, macOS, or Linux
+* Web Browser: Google Chrome, Mozilla Firefox, Safari, or Microsoft Edge (with JS enabled)
+* Backend Database: Cloud PostgreSQL Instance (Supabase DB Engine) or NoSQL
+* Frontend Runtime: Modern Web Engine supporting PWA (Progressive Web App) specifications
+Brief Description of Technology Used
+* Frontend Architecture: HTML5, CSS3, JavaScript (ES6+)
+system optimized for mobile touch interaction and desktop layouts. Deployed with PWA support for native-like responsiveness.
+* Database & Cloud Services: Cloud PostgreSQL (Supabase BaaS) [Projected]
+Utilizes a relational schema (people, debts, payments, activity_log) with foreign key constraints, enabling transactional integrity (ACID compliance), high-speed queries, and automated RESTful API endpoints.
+* Data Visualization: Chart.js & Chartjs-Adapter-Date-FNS
+Integrated client-side visualization library used to render dynamic time-series line graphs, projected financial trajectories, and proportional split progress bars.
+Proposed System
+The proposed "DebtTracker" system entirely replaces manual, error-prone record-keeping with an automated web platform.
+By combining a responsive vanilla JavaScript frontend with a cloud-hosted relational PostgreSQL database, the system automates the entire micro-loan lifecycle: from initial debt logging and dynamic compound interest accrual to borrower self-service lookups and algorithmic bulk payment settlement.
+
+
+Feasibility Study
+   * Technical Feasibility: The project utilizes standard, proven web standards (HTML/CSS/JS, PostgreSQL, Supabase SDK, Chart.js). The serverless cloud infrastructure eliminates manual server maintenance, making technical execution highly feasible.
+   * Economic Feasibility: The system relies entirely on open-source libraries and cloud free-tier hosting services (Supabase PostgreSQL), incurring zero operational or software licensing costs during development.
+   * Operational Feasibility: The clean, mobile-first interface and zero-friction phone/name lookup system ensure students can adopt and interact with the platform seamlessly without formal training.
+
+
+Objectives of Proposed System
+   * To eliminate manual bookkeeping errors and interpersonal disputes through automated, mathematically precise interest accrual.
+   * To provide borrowers with a transparent, self-service portal to check live balances, accrual speeds, and payment histories anytime.
+   * To streamline debt clearance using smart bulk payment allocation algorithms that pay off high-interest debts first.
+   * To empower users with intuitive visual analytics, including daily/monthly accrual tickers and multi-range financial growth projection charts.
+Users of System
+   * Lenders (Creditors): Students creating debt entries, setting interest terms (0% or simple/compound rates), evaluating overall portfolio yields, and verifying incoming payments.
+   * Borrowers (Debtors): Students looking up their account via phone/name to inspect current dues, view interest breakdowns, track repayments, and submit bulk settlements.
+   * Administrators: Platform owners managing user entries, PIN-protected admin portfolio dashboards, database integrity, and system-wide activity logs.

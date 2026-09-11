@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>DebtSync - Insights &amp; Performance</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-surface-variant": "#3f484a",
+                        "on-tertiary-container": "#7fd4de",
+                        "secondary-fixed-dim": "#7bd5d4",
+                        "primary": "#004349",
+                        "surface-variant": "#dae3f4",
+                        "on-surface": "#131c28",
+                        "outline": "#6f797a",
+                        "on-secondary-container": "#006e6e",
+                        "surface-container-high": "#e0e9f9",
+                        "primary-fixed-dim": "#8fd1d9",
+                        "on-background": "#131c28",
+                        "error": "#ba1a1a",
+                        "tertiary-fixed": "#9bf0fa",
+                        "surface-dim": "#d1daeb",
+                        "primary-fixed": "#abeef6",
+                        "surface-container-low": "#eff4ff",
+                        "surface-bright": "#f8f9ff",
+                        "surface": "#f8f9ff",
+                        "on-error": "#ffffff",
+                        "on-tertiary-fixed": "#001f23",
+                        "outline-variant": "#bfc8c9",
+                        "on-error-container": "#93000a",
+                        "inverse-on-surface": "#eaf1ff",
+                        "surface-container": "#e5eeff",
+                        "on-secondary-fixed-variant": "#00504f",
+                        "surface-container-lowest": "#ffffff",
+                        "secondary-fixed": "#98f2f0",
+                        "on-primary": "#ffffff",
+                        "secondary": "#006a69",
+                        "surface-tint": "#20686f",
+                        "on-primary-fixed": "#002023",
+                        "tertiary-fixed-dim": "#7fd4de",
+                        "error-container": "#ffdad6",
+                        "on-primary-fixed-variant": "#004f55",
+                        "on-tertiary": "#ffffff",
+                        "inverse-surface": "#28313d",
+                        "background": "#f8f9ff",
+                        "surface-container-highest": "#dae3f4",
+                        "secondary-container": "#95efed",
+                        "on-secondary": "#ffffff",
+                        "on-secondary-fixed": "#002020",
+                        "tertiary": "#004349",
+                        "on-tertiary-fixed-variant": "#004f56",
+                        "on-primary-container": "#90d2da",
+                        "tertiary-container": "#005c64",
+                        "primary-container": "#0d5c63",
+                        "inverse-primary": "#8fd1d9"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "container-max": "1200px",
+                        "md": "24px",
+                        "base": "4px",
+                        "sm": "16px",
+                        "gutter": "20px",
+                        "lg": "40px",
+                        "xs": "8px",
+                        "xl": "64px"
+                    },
+                    "fontFamily": {
+                        "body-sm": ["Hanken Grotesk"],
+                        "headline-lg-mobile": ["Hanken Grotesk"],
+                        "headline-md": ["Hanken Grotesk"],
+                        "numeric-ticker": ["JetBrains Mono"],
+                        "headline-lg": ["Hanken Grotesk"],
+                        "headline-xl": ["Hanken Grotesk"],
+                        "body-lg": ["Hanken Grotesk"],
+                        "body-md": ["Hanken Grotesk"],
+                        "label-mono": ["JetBrains Mono"]
+                    },
+                    "fontSize": {
+                        "body-sm": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
+                        "headline-lg-mobile": ["24px", { "lineHeight": "32px", "fontWeight": "600" }],
+                        "headline-md": ["20px", { "lineHeight": "28px", "fontWeight": "600" }],
+                        "numeric-ticker": ["24px", { "lineHeight": "32px", "fontWeight": "700" }],
+                        "headline-lg": ["32px", { "lineHeight": "40px", "fontWeight": "600" }],
+                        "headline-xl": ["40px", { "lineHeight": "48px", "fontWeight": "700" }],
+                        "body-lg": ["18px", { "lineHeight": "28px", "fontWeight": "400" }],
+                        "body-md": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
+                        "label-mono": ["13px", { "lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500" }]
+                    }
+                }
+            }
+        }
+    </script>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700&amp;family=JetBrains+Mono:wght@500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .filled-icon {
+            font-variation-settings: 'FILL' 1;
+        }
+        body { background-color: #f8f9ff; }
+        
+        /* Custom Sparkline Animations */
+        @keyframes drawLine {
+            to { stroke-dashoffset: 0; }
+        }
+        .sparkline-path {
+            stroke-dasharray: 1000;
+            stroke-dashoffset: 1000;
+            animation: drawLine 2s ease-out forwards;
+        }
+    </style>
+</head>
+<body class="text-on-surface flex flex-col md:flex-row min-h-screen">
+<!-- Desktop SideNav (Shared Component) -->
+<nav class="hidden md:flex flex-col p-sm border-r border-outline-variant dark:border-on-surface-variant bg-surface-container dark:bg-surface-container-highest fixed left-0 top-0 h-full w-60 z-40">
+<div class="mb-lg">
+<h1 class="font-headline-md text-headline-md font-bold text-primary dark:text-primary-fixed-dim">DebtSync</h1>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Trust &amp; Precision</p>
+</div>
+<ul class="flex flex-col gap-sm flex-grow">
+<li class="">
+<a class="flex items-center gap-sm p-sm rounded hover:bg-surface-container-high dark:hover:bg-surface-variant transition-all duration-200 cursor-pointer active:translate-x-1 font-label-mono text-label-mono text-on-surface-variant dark:text-outline-variant" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+                    Dashboard
+                </a>
+</li>
+<li class="">
+<a class="flex items-center gap-sm p-sm rounded hover:bg-surface-container-high dark:hover:bg-surface-variant transition-all duration-200 cursor-pointer active:translate-x-1 font-label-mono text-label-mono text-on-surface-variant dark:text-outline-variant" href="#">
+<span class="material-symbols-outlined">group</span>
+                    Directory
+                </a>
+</li>
+<li class="">
+<a class="flex items-center gap-sm p-sm rounded hover:bg-surface-container-high dark:hover:bg-surface-variant transition-all duration-200 cursor-pointer active:translate-x-1 font-label-mono text-label-mono text-on-surface-variant dark:text-outline-variant" href="#">
+<span class="material-symbols-outlined">receipt_long</span>
+                    Transactions
+                </a>
+</li>
+<li class="">
+<a class="flex items-center gap-sm p-sm rounded hover:bg-surface-container-high dark:hover:bg-surface-variant transition-all duration-200 cursor-pointer active:translate-x-1 font-label-mono text-label-mono text-primary dark:text-primary-fixed-dim font-bold" href="#">
+<span class="material-symbols-outlined filled-icon">analytics</span>
+                    Analytics
+                </a>
+</li>
+</ul>
+<div class="mt-auto">
+<button class="w-full bg-primary text-on-primary font-label-mono text-label-mono py-sm rounded-lg mb-md hover:bg-primary-container transition-colors shadow-sm">
+                New Transaction
+            </button>
+<ul class="flex flex-col gap-sm border-t border-outline-variant pt-sm">
+<li class="">
+<a class="flex items-center gap-sm p-sm rounded hover:bg-surface-container-high transition-all font-label-mono text-label-mono text-on-surface-variant" href="#">
+<span class="material-symbols-outlined">help_outline</span> Support
+                    </a>
+</li>
+<li class="">
+<a class="flex items-center gap-sm p-sm rounded hover:bg-surface-container-high transition-all font-label-mono text-label-mono text-on-surface-variant" href="#">
+<span class="material-symbols-outlined">logout</span> Sign Out
+                    </a>
+</li>
+</ul>
+</div>
+</nav>
+<!-- Mobile TopAppBar (Shared Component Equivalent) -->
+<header class="md:hidden flex justify-between items-center w-full px-md h-16 sticky top-0 z-50 bg-surface dark:bg-surface-dim border-b border-outline-variant">
+<h1 class="font-headline-md text-headline-md font-bold text-primary dark:text-primary-fixed-dim">DebtSync</h1>
+<div class="flex gap-sm text-primary">
+<span class="material-symbols-outlined cursor-pointer">notifications</span>
+<span class="material-symbols-outlined cursor-pointer">settings</span>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="flex-1 md:ml-60 p-md md:p-lg w-full max-w-container-max mx-auto">
+<header class="mb-lg">
+<div class="flex items-center gap-xs text-label-mono text-on-surface-variant uppercase tracking-widest mb-xs"><span class="material-symbols-outlined text-sm">dashboard</span> Dashboard <span class="material-symbols-outlined text-sm">chevron_right</span> Analytics</div>
+<h2 class="font-headline-lg-mobile md:font-headline-lg text-headline-lg-mobile md:text-headline-lg text-on-surface mb-xs">Insights &amp; Performance</h2>
+<p class="font-body-md text-body-md text-on-surface-variant">Comprehensive analysis of your lending ecosystem efficiency.</p>
+</header>
+<!-- Bento Grid Layout -->
+<div class="grid grid-cols-1 md:grid-cols-12 gap-md">
+<!-- Repayment Velocity (Gauge equivalent) -->
+<div class="col-span-1 md:col-span-4 bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-md shadow-sm relative overflow-hidden flex flex-col justify-between">
+<div class="absolute top-0 right-0 p-sm opacity-10">
+<span class="material-symbols-outlined text-9xl text-primary">speed</span>
+</div>
+<div>
+<h3 class="font-label-mono text-label-mono text-on-surface-variant mb-sm uppercase tracking-wider">Repayment Velocity</h3>
+<div class="flex items-baseline gap-xs">
+<span class="font-headline-xl text-headline-xl text-primary">85%</span>
+<span class="font-body-sm text-body-sm text-tertiary">On Time</span>
+</div>
+</div>
+<div class="mt-xl">
+<div class="w-full bg-surface-variant h-2 rounded-full overflow-hidden flex">
+<div class="bg-secondary h-full rounded-full" style="width: 85%"></div>
+<div class="bg-error h-full rounded-r-full opacity-50" style="width: 15%"></div>
+</div>
+<div class="flex justify-between mt-xs font-label-mono text-[10px] text-on-surface-variant">
+<span class="">Healthy Range</span>
+<span class="">Risk Zone</span>
+</div>
+</div>
+</div>
+<!-- Interest Yield Breakdown -->
+<div class="col-span-1 md:col-span-8 bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-md shadow-sm flex flex-col justify-between">
+<div class="flex justify-between items-start mb-md">
+<div>
+<h3 class="font-label-mono text-label-mono text-on-surface-variant mb-xs uppercase tracking-wider">Interest Yield</h3>
+<div class="font-numeric-ticker text-numeric-ticker text-on-surface">₹14,250<span class="opacity-50">.00</span></div>
+</div>
+<div class="flex gap-sm">
+<div class="flex items-center gap-xs">
+<span class="w-3 h-3 rounded-full bg-primary inline-block"></span>
+<span class="font-label-mono text-[11px] text-on-surface-variant">Compound</span>
+</div>
+<div class="flex items-center gap-xs">
+<span class="w-3 h-3 rounded-full bg-tertiary-fixed-dim inline-block"></span>
+<span class="font-label-mono text-[11px] text-on-surface-variant">Simple</span>
+</div>
+</div>
+</div>
+<!-- Simple Sparkline representation -->
+<div class="h-32 w-full mt-auto relative">
+<svg class="w-full h-full" preserveaspectratio="none" viewbox="0 0 100 100">
+<!-- Compound Path -->
+<path class="sparkline-path" d="M0,80 Q20,70 40,50 T80,20 T100,10" fill="none" stroke="#004349" stroke-linecap="round" stroke-width="3"></path>
+<!-- Simple Path -->
+<path class="sparkline-path" d="M0,90 L20,85 L40,80 L60,75 L80,70 L100,65" fill="none" stroke="#7fd4de" stroke-dasharray="4,4" stroke-linecap="round" stroke-width="2"></path>
+</svg>
+<div class="absolute inset-0 bg-gradient-to-t from-surface-container-lowest to-transparent pointer-events-none"></div>
+</div>
+</div>
+<!-- Network Trust Score -->
+<div class="col-span-1 md:col-span-5 bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-md shadow-sm">
+<div class="flex items-center gap-sm mb-md">
+<span class="material-symbols-outlined text-secondary p-xs bg-surface-variant rounded-lg">verified_user</span>
+<h3 class="font-label-mono text-label-mono text-on-surface-variant uppercase tracking-wider">Network Trust Score</h3>
+</div>
+<div class="flex items-center justify-center py-md">
+<div class="relative w-40 h-40 flex items-center justify-center rounded-full border-4 border-surface-variant">
+<div class="absolute inset-0 rounded-full border-4 border-t-secondary border-r-secondary border-b-secondary border-l-transparent transform -rotate-45"></div>
+<div class="text-center">
+<span class="block font-headline-xl text-headline-xl text-secondary">780</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">Excellent</span>
+</div>
+</div>
+</div>
+<p class="font-body-sm text-body-sm text-center text-on-surface-variant mt-sm">Based on 142 successful repayment cycles across 12 active peers.</p>
+</div>
+<!-- Projected Liquidity Table -->
+<div class="col-span-1 md:col-span-7 bg-surface-container-lowest border border-outline-variant/30 rounded-xl shadow-sm overflow-hidden flex flex-col">
+<div class="p-md border-b border-outline-variant/30 flex justify-between items-center">
+<h3 class="font-label-mono text-label-mono text-on-surface-variant uppercase tracking-wider">6-Month Liquidity Forecast</h3>
+<button class="text-primary hover:text-secondary font-label-mono text-label-mono flex items-center gap-xs">
+                        Export <span class="material-symbols-outlined text-sm">download</span>
+</button>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface font-label-mono text-[11px] text-on-surface-variant uppercase tracking-wider">
+<th class="p-sm font-medium">Month</th>
+<th class="p-sm font-medium">Expected Inflow</th>
+<th class="p-sm font-medium">Risk Adj.</th>
+<th class="p-sm font-medium">Status</th>
+</tr>
+</thead>
+<tbody class="font-body-sm text-body-sm divide-y divide-outline-variant/20">
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="p-sm font-medium">November</td>
+<td class="p-sm font-numeric-ticker text-sm">₹4,200.00</td>
+<td class="p-sm text-on-surface-variant">-₹150.00</td>
+<td class="p-sm"><span class="bg-secondary/10 text-secondary px-2 py-1 rounded-full text-xs">High Certainty</span></td>
+</tr>
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="p-sm font-medium">December</td>
+<td class="p-sm font-numeric-ticker text-sm">₹3,850.00</td>
+<td class="p-sm text-on-surface-variant">-₹210.00</td>
+<td class="p-sm"><span class="bg-secondary/10 text-secondary px-2 py-1 rounded-full text-xs">High Certainty</span></td>
+</tr>
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="p-sm font-medium">January</td>
+<td class="p-sm font-numeric-ticker text-sm">₹5,100.00</td>
+<td class="p-sm text-on-surface-variant">-₹400.00</td>
+<td class="p-sm"><span class="bg-surface-variant text-on-surface-variant px-2 py-1 rounded-full text-xs">Moderate</span></td>
+</tr>
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="p-sm font-medium">February</td>
+<td class="p-sm font-numeric-ticker text-sm">₹4,000.00</td>
+<td class="p-sm text-on-surface-variant">-₹350.00</td>
+<td class="p-sm"><span class="bg-surface-variant text-on-surface-variant px-2 py-1 rounded-full text-xs">Moderate</span></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+</main>
+<!-- Mobile BottomNav (Conceptual, hidden on desktop to follow rules) -->
+<nav class="md:hidden fixed bottom-0 w-full bg-surface-container border-t border-outline-variant flex justify-around py-sm z-50">
+<!-- Simplified for brevity, typically would match SideNav links -->
+<a class="flex flex-col items-center text-on-surface-variant" href="#"><span class="material-symbols-outlined">dashboard</span><span class="text-[10px]">Dash</span></a>
+<a class="flex flex-col items-center text-primary" href="#"><span class="material-symbols-outlined filled-icon">analytics</span><span class="text-[10px] font-bold">Analytics</span></a>
+</nav>
+</body></html>

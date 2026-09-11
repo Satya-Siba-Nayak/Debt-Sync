@@ -1,0 +1,141 @@
+@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap');
+@import "tailwindcss";
+
+/* ═══════════════════════════════════════════════════════
+   DebtSync Design System — Secure Ledger Aesthetics
+   ═══════════════════════════════════════════════════════ */
+
+:root {
+  /* Light Theme Palette */
+  --primary: #004349;
+  --primary-container: #0d5c63;
+  --on-primary: #ffffff;
+  --on-primary-container: #90d2da;
+  --primary-fixed-dim: #8fd1d9;
+
+  --secondary: #006a69;
+  --secondary-container: #95efed;
+  --on-secondary: #ffffff;
+  --on-secondary-container: #006e6e;
+
+  --surface: #f8f9ff;
+  --surface-dim: #d1daeb;
+  --surface-container-lowest: #ffffff;
+  --surface-container-low: #eff4ff;
+  --surface-container: #e5eeff;
+  --surface-container-high: #e0e9f9;
+  --surface-container-highest: #dae3f4;
+  --on-surface: #131c28;
+  --on-surface-variant: #3f484a;
+
+  --outline: #6f797a;
+  --outline-variant: #bfc8c9;
+
+  --error: #ba1a1a;
+  --error-container: #ffdad6;
+  --on-error-container: #93000a;
+  --success: #2e7d32;
+
+  --background: #f8f9ff;
+  --on-background: #131c28;
+}
+
+.dark {
+  /* Dark Theme Palette (from secure_ledger_aesthetics_1) */
+  --primary: #74ffff;
+  --primary-container: #00e5e5;
+  --on-primary: #003737;
+  --on-primary-container: #006262;
+  --primary-fixed-dim: #00dddd;
+
+  --secondary: #4fdad9;
+  --secondary-container: #004f50;
+  --on-secondary: #003737;
+  --on-secondary-container: #98f2f0;
+
+  --surface: #0A0C10;
+  --surface-dim: #111318;
+  --surface-container-lowest: #161B22;
+  --surface-container-low: #1c2128;
+  --surface-container: #21262D;
+  --surface-container-high: #30363D;
+  --surface-container-highest: #484f58;
+  --on-surface: #F0F6FC;
+  --on-surface-variant: #8B949E;
+
+  --outline: #849493;
+  --outline-variant: #30363D;
+
+  --error: #F85149;
+  --error-container: #490202;
+  --on-error-container: #ffdad6;
+  --success: #3FB950;
+
+  --background: #0A0C10;
+  --on-background: #F0F6FC;
+}
+
+@theme {
+  --color-primary: var(--primary);
+  --color-primary-container: var(--primary-container);
+  --color-on-primary: var(--on-primary);
+  --color-on-primary-container: var(--on-primary-container);
+  --color-primary-fixed-dim: var(--primary-fixed-dim);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-container: var(--secondary-container);
+  --color-on-secondary: var(--on-secondary);
+  --color-on-secondary-container: var(--on-secondary-container);
+
+  --color-surface: var(--surface);
+  --color-surface-dim: var(--surface-dim);
+  --color-surface-container-lowest: var(--surface-container-lowest);
+  --color-surface-container-low: var(--surface-container-low);
+  --color-surface-container: var(--surface-container);
+  --color-surface-container-high: var(--surface-container-high);
+  --color-surface-container-highest: var(--surface-container-highest);
+  --color-on-surface: var(--on-surface);
+  --color-on-surface-variant: var(--on-surface-variant);
+
+  --color-outline: var(--outline);
+  --color-outline-variant: var(--outline-variant);
+
+  --color-error: var(--error);
+  --color-error-container: var(--error-container);
+  --color-on-error-container: var(--on-error-container);
+  --color-success: var(--success);
+
+  --color-background: var(--background);
+  --color-on-background: var(--on-background);
+
+  --font-heading: 'Hanken Grotesk', sans-serif;
+  --font-body: 'Hanken Grotesk', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--on-background);
+  font-family: 'Hanken Grotesk', sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+/* Glass card styling */
+.glass-card {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 67, 73, 0.08);
+}
+
+.dark .glass-card {
+  background: rgba(22, 27, 34, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ticker-decimals {
+  opacity: 0.6;
+}

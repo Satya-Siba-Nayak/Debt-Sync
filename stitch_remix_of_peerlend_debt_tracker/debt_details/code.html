@@ -1,0 +1,446 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>DebtSync - Individual Debt Detail</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700&amp;family=JetBrains+Mono:wght@500;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "surface-container-highest": "#dae3f4",
+                      "primary-container": "#0d5c63",
+                      "on-error-container": "#93000a",
+                      "surface-container": "#e5eeff",
+                      "tertiary-fixed-dim": "#7fd4de",
+                      "surface-dim": "#d1daeb",
+                      "error": "#ba1a1a",
+                      "surface-variant": "#dae3f4",
+                      "primary-fixed": "#abeef6",
+                      "on-primary": "#ffffff",
+                      "secondary-fixed-dim": "#7bd5d4",
+                      "primary-fixed-dim": "#8fd1d9",
+                      "background": "#f8f9ff",
+                      "on-primary-container": "#90d2da",
+                      "tertiary": "#004349",
+                      "surface-container-lowest": "#ffffff",
+                      "on-secondary": "#ffffff",
+                      "on-primary-fixed": "#002023",
+                      "on-tertiary-fixed-variant": "#004f56",
+                      "surface": "#f8f9ff",
+                      "on-primary-fixed-variant": "#004f55",
+                      "secondary-container": "#95efed",
+                      "on-secondary-fixed": "#002020",
+                      "tertiary-container": "#005c64",
+                      "surface-container-high": "#e0e9f9",
+                      "on-background": "#131c28",
+                      "error-container": "#ffdad6",
+                      "on-surface-variant": "#3f484a",
+                      "on-secondary-fixed-variant": "#00504f",
+                      "tertiary-fixed": "#9bf0fa",
+                      "surface-container-low": "#eff4ff",
+                      "on-tertiary": "#ffffff",
+                      "inverse-primary": "#8fd1d9",
+                      "surface-tint": "#20686f",
+                      "on-surface": "#131c28",
+                      "on-error": "#ffffff",
+                      "outline-variant": "#bfc8c9",
+                      "on-secondary-container": "#006e6e",
+                      "inverse-surface": "#28313d",
+                      "surface-bright": "#f8f9ff",
+                      "secondary": "#006a69",
+                      "outline": "#6f797a",
+                      "secondary-fixed": "#98f2f0",
+                      "on-tertiary-container": "#7fd4de",
+                      "primary": "#004349",
+                      "on-tertiary-fixed": "#001f23",
+                      "inverse-on-surface": "#eaf1ff"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.125rem",
+                      "lg": "0.25rem",
+                      "xl": "0.5rem",
+                      "full": "0.75rem"
+              },
+              "spacing": {
+                      "md": "24px",
+                      "sm": "16px",
+                      "xl": "64px",
+                      "lg": "40px",
+                      "container-max": "1200px",
+                      "base": "4px",
+                      "gutter": "20px",
+                      "xs": "8px"
+              },
+              "fontFamily": {
+                      "body-sm": [
+                              "Hanken Grotesk"
+                      ],
+                      "headline-md": [
+                              "Hanken Grotesk"
+                      ],
+                      "body-md": [
+                              "Hanken Grotesk"
+                      ],
+                      "body-lg": [
+                              "Hanken Grotesk"
+                      ],
+                      "label-mono": [
+                              "JetBrains Mono"
+                      ],
+                      "headline-xl": [
+                              "Hanken Grotesk"
+                      ],
+                      "headline-lg-mobile": [
+                              "Hanken Grotesk"
+                      ],
+                      "headline-lg": [
+                              "Hanken Grotesk"
+                      ],
+                      "numeric-ticker": [
+                              "JetBrains Mono"
+                      ]
+              },
+              "fontSize": {
+                      "body-sm": [
+                              "14px",
+                              {
+                                      "lineHeight": "20px",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "headline-md": [
+                              "20px",
+                              {
+                                      "lineHeight": "28px",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "body-md": [
+                              "16px",
+                              {
+                                      "lineHeight": "24px",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "body-lg": [
+                              "18px",
+                              {
+                                      "lineHeight": "28px",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "label-mono": [
+                              "13px",
+                              {
+                                      "lineHeight": "16px",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "headline-xl": [
+                              "40px",
+                              {
+                                      "lineHeight": "48px",
+                                      "fontWeight": "700"
+                              }
+                      ],
+                      "headline-lg-mobile": [
+                              "24px",
+                              {
+                                      "lineHeight": "32px",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "headline-lg": [
+                              "32px",
+                              {
+                                      "lineHeight": "40px",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "numeric-ticker": [
+                              "24px",
+                              {
+                                      "lineHeight": "32px",
+                                      "fontWeight": "700"
+                              }
+                      ]
+              }
+      },
+          },
+        }
+    </script>
+<style>
+        body {
+            background-color: theme('colors.background');
+            color: theme('colors.on-background');
+        }
+        /* Hide scrollbar for clean UI */
+        ::-webkit-scrollbar {
+            display: none;
+        }
+        .ghost-track {
+            background-color: theme('colors.surface-container-highest');
+        }
+        .primary-bar {
+            background-color: theme('colors.primary');
+        }
+        .tertiary-bar {
+            background-color: theme('colors.tertiary-fixed-dim');
+        }
+    </style>
+</head>
+<body class="flex flex-col h-screen md:flex-row antialiased">
+<!-- Mobile Top App Bar (Hidden on md+) -->
+<header class="bg-surface-container-highest dark:bg-surface-container border-b border-outline-variant dark:border-outline md:hidden flex justify-between items-center px-md py-xs w-full max-w-container-max mx-auto top-0 z-50 fixed">
+<div class="flex items-center gap-xs">
+<span class="material-symbols-outlined text-primary cursor-pointer">arrow_back</span>
+<span class="text-headline-md font-headline-md font-bold text-primary dark:text-primary-fixed-dim">DebtSync</span>
+</div>
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-primary dark:text-primary-fixed cursor-pointer hover:bg-primary-container/10 dark:hover:bg-primary-fixed/10 transition-colors p-1 rounded-full">notifications</span>
+<span class="material-symbols-outlined text-primary dark:text-primary-fixed cursor-pointer hover:bg-primary-container/10 dark:hover:bg-primary-fixed/10 transition-colors p-1 rounded-full">account_balance_wallet</span>
+</div>
+</header>
+<!-- SideNavBar (Hidden on mobile) -->
+<nav class="hidden md:flex flex-col h-screen py-md gap-sm border-r border-outline-variant dark:border-outline bg-surface-container-low dark:bg-surface-container-lowest docked left-0 w-[240px] flex-shrink-0 sticky top-0">
+<div class="px-md pb-md border-b border-outline-variant/30 flex items-center gap-sm">
+<div class="w-10 h-10 rounded-full bg-primary-container flex items-center justify-center text-on-primary-container">
+<span class="material-symbols-outlined">account_balance</span>
+</div>
+<div>
+<h1 class="text-headline-md font-headline-md font-bold text-primary dark:text-primary-fixed leading-tight">DebtSync</h1>
+<p class="text-label-mono font-label-mono text-on-surface-variant text-[10px]">Precision Tracking</p>
+</div>
+</div>
+<div class="flex flex-col gap-1 mt-sm flex-grow">
+<!-- Inactive -->
+<a class="flex items-center gap-sm text-on-surface-variant dark:text-on-surface-variant mx-sm px-sm py-2 hover:bg-surface-container-highest dark:hover:bg-surface-container rounded-xl transition-all group" href="#">
+<span class="material-symbols-outlined group-active:scale-[0.98] transition-transform duration-150">dashboard</span>
+<span class="text-body-md font-body-md group-active:scale-[0.98] transition-transform duration-150">Dashboard</span>
+</a>
+<!-- Active (Directory matches People/Individual focus best) -->
+<a class="flex items-center gap-sm bg-primary-container text-on-primary-container dark:bg-primary-fixed dark:text-on-primary-fixed rounded-xl mx-sm px-sm py-2 hover:bg-surface-container-highest dark:hover:bg-surface-container transition-all group" href="#">
+<span class="material-symbols-outlined active:scale-[0.98] transition-transform duration-150" style="font-variation-settings: 'FILL' 1;">group</span>
+<span class="text-body-md font-body-md font-semibold active:scale-[0.98] transition-transform duration-150">Directory</span>
+</a>
+<!-- Inactive -->
+<a class="flex items-center gap-sm text-on-surface-variant dark:text-on-surface-variant mx-sm px-sm py-2 hover:bg-surface-container-highest dark:hover:bg-surface-container rounded-xl transition-all group" href="#">
+<span class="material-symbols-outlined group-active:scale-[0.98] transition-transform duration-150">receipt_long</span>
+<span class="text-body-md font-body-md group-active:scale-[0.98] transition-transform duration-150">Transactions</span>
+</a>
+<!-- Inactive -->
+<a class="flex items-center gap-sm text-on-surface-variant dark:text-on-surface-variant mx-sm px-sm py-2 hover:bg-surface-container-highest dark:hover:bg-surface-container rounded-xl transition-all group" href="#">
+<span class="material-symbols-outlined group-active:scale-[0.98] transition-transform duration-150">insights</span>
+<span class="text-body-md font-body-md group-active:scale-[0.98] transition-transform duration-150">Analytics</span>
+</a>
+</div>
+<div class="px-sm mt-auto mb-md">
+<button class="w-full bg-primary text-on-primary hover:bg-surface-tint transition-colors rounded-lg py-2 flex items-center justify-center gap-xs shadow-sm active:scale-95 duration-100">
+<span class="material-symbols-outlined text-[18px]">add</span>
+<span class="text-body-md font-body-md font-semibold">Record New Debt</span>
+</button>
+</div>
+<div class="flex flex-col gap-1 border-t border-outline-variant/30 pt-sm">
+<a class="flex items-center gap-sm text-on-surface-variant dark:text-on-surface-variant mx-sm px-sm py-2 hover:bg-surface-container-highest dark:hover:bg-surface-container rounded-xl transition-all group" href="#">
+<span class="material-symbols-outlined text-[20px]">security</span>
+<span class="text-body-sm font-body-sm">Security</span>
+</a>
+<a class="flex items-center gap-sm text-on-surface-variant dark:text-on-surface-variant mx-sm px-sm py-2 hover:bg-surface-container-highest dark:hover:bg-surface-container rounded-xl transition-all group" href="#">
+<span class="material-symbols-outlined text-[20px]">settings</span>
+<span class="text-body-sm font-body-sm">Settings</span>
+</a>
+</div>
+</nav>
+<!-- Main Content Canvas -->
+<main class="flex-grow overflow-y-auto pt-[60px] md:pt-0 pb-[80px] md:pb-0 p-md md:p-xl flex justify-center">
+<div class="max-w-container-max w-full flex flex-col gap-lg">
+<!-- Header Section -->
+<div class="flex flex-col md:flex-row md:items-end justify-between gap-sm">
+<div>
+<div class="flex items-center gap-xs mb-xs hidden md:flex">
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer hover:text-primary transition-colors text-[20px]">arrow_back</span>
+<span class="text-label-mono font-label-mono text-on-surface-variant uppercase tracking-wider">Back to Directory</span>
+</div>
+<div class="flex items-center gap-sm mt-xs">
+<img class="w-12 h-12 rounded-full object-cover border border-outline-variant/50" data-alt="A professional headshot of a young professional in a light-filled corporate office setting, conveying trust and transparency. High-key lighting, soft modern corporate aesthetic. DebtSync brand style." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDJxAFpEtk5kfc_QnXd5UXKI7d8Riu5jlnaQZWDRYLAKktY086s1n0fPFTQb3JKItUyk6DieoIc2Z7RoO9E8TdjTv7HlNj7JfVqthIm3BTGGJ39jNjFc849y10MOEj1dCPMlPQzZR5OQunFjhR9uqP7Hlkvv9qyazWEo9vjE-b1iIkgNui5jYUuGgU3OqPm2xn_wItioVw6bANtqV7JpKJi8BIcMQwynpkBt0Eg53YcWnVpdRqvvtR2">
+<div>
+<h2 class="text-headline-xl font-headline-xl text-on-background m-0 p-0 leading-none">Sarah Jenkins</h2>
+<p class="text-body-lg font-body-lg text-on-surface-variant mt-1">Personal Loan - Refinance</p>
+</div>
+<span class="bg-error-container text-on-error-container px-2 py-0.5 rounded-full text-label-mono font-label-mono ml-sm">OVERDUE</span>
+</div>
+</div>
+<div class="flex gap-sm mt-sm md:mt-0">
+<button class="bg-surface-container text-primary border border-outline-variant/50 hover:bg-surface-container-highest transition-colors rounded-lg px-4 py-2 flex items-center justify-center gap-xs shadow-sm">
+<span class="material-symbols-outlined text-[18px]">edit</span>
+<span class="text-body-md font-body-md font-semibold">Edit Terms</span>
+</button>
+<button class="bg-primary text-on-primary hover:bg-surface-tint transition-colors rounded-lg px-4 py-2 flex items-center justify-center gap-xs shadow-sm">
+<span class="material-symbols-outlined text-[18px]">notifications_active</span>
+<span class="text-body-md font-body-md font-semibold">Send Reminder</span>
+</button>
+</div>
+</div>
+<!-- Bento Grid Layout -->
+<div class="grid grid-cols-1 md:grid-cols-12 gap-sm md:gap-md">
+<!-- Primary Balance Card (Col span 8 on md) -->
+<div class="md:col-span-8 bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-md flex flex-col justify-between">
+<div class="flex justify-between items-start">
+<div>
+<p class="text-label-mono font-label-mono text-on-surface-variant uppercase mb-xs">Total Outstanding Balance</p>
+<div class="flex items-baseline gap-xs">
+<span class="text-headline-xl font-headline-xl text-primary">₹</span>
+<span class="text-numeric-ticker font-numeric-ticker text-[40px] leading-[48px] text-primary">12,450<span class="opacity-60">.00</span></span>
+</div>
+</div>
+<div class="text-right">
+<p class="text-label-mono font-label-mono text-on-surface-variant uppercase mb-xs">Next Due Date</p>
+<p class="text-body-lg font-body-lg font-semibold text-error">Oct 15, 2023</p>
+</div>
+</div>
+<div class="mt-lg">
+<div class="flex justify-between mb-xs">
+<span class="text-label-mono font-label-mono text-on-surface-variant">Principal: ₹10,000</span>
+<span class="text-label-mono font-label-mono text-on-surface-variant">Interest: ₹2,450</span>
+</div>
+<!-- Split Progress Bar -->
+<div class="w-full h-3 rounded-full ghost-track overflow-hidden flex relative">
+<!-- Principal segment -->
+<div class="h-full primary-bar" style="width: 80%;"></div>
+<!-- Interest segment -->
+<div class="h-full tertiary-bar" style="width: 20%;"></div>
+<!-- Divider line for visual crispness -->
+<div class="absolute top-0 bottom-0 left-[80%] w-[1px] bg-surface-container-lowest z-10"></div>
+</div>
+<div class="flex items-center gap-sm mt-xs justify-end">
+<div class="flex items-center gap-1"><div class="w-2 h-2 rounded-full primary-bar"></div><span class="text-label-mono font-label-mono text-on-surface-variant text-[10px]">Principal</span></div>
+<div class="flex items-center gap-1"><div class="w-2 h-2 rounded-full tertiary-bar"></div><span class="text-label-mono font-label-mono text-on-surface-variant text-[10px]">Interest</span></div>
+</div>
+</div>
+</div>
+<!-- Terms Summary Card (Col span 4 on md) -->
+<div class="md:col-span-4 bg-surface-container-low border border-outline-variant/30 rounded-xl p-md flex flex-col gap-sm">
+<h3 class="text-body-lg font-body-lg font-semibold text-on-background border-b border-outline-variant/20 pb-xs mb-xs">Agreement Terms</h3>
+<div class="flex justify-between items-center">
+<span class="text-label-mono font-label-mono text-on-surface-variant">Interest Rate</span>
+<span class="text-body-md font-body-md font-semibold text-on-background">5.5% APR</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="text-label-mono font-label-mono text-on-surface-variant">Compounding</span>
+<span class="text-body-md font-body-md font-semibold text-on-background">Monthly</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="text-label-mono font-label-mono text-on-surface-variant">Origination</span>
+<span class="text-body-md font-body-md font-semibold text-on-background">Jan 12, 2022</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="text-label-mono font-label-mono text-on-surface-variant">Expected Payoff</span>
+<span class="text-body-md font-body-md font-semibold text-on-background">Jan 12, 2026</span>
+</div>
+<div class="mt-auto pt-sm">
+<button class="w-full bg-surface-container-lowest text-primary border border-outline-variant/50 hover:bg-surface-container-highest transition-colors rounded-lg py-1.5 flex items-center justify-center gap-xs text-body-sm font-body-sm shadow-[0_2px_4px_rgba(0,0,0,0.02)]">
+<span class="material-symbols-outlined text-[16px]">description</span>
+                            View Contract
+                        </button>
+</div>
+</div>
+<!-- Activity Log (Col span 12 on md) -->
+<div class="md:col-span-12 bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-md">
+<div class="flex justify-between items-center mb-md border-b border-outline-variant/20 pb-sm">
+<h3 class="text-headline-md font-headline-md text-on-background">Activity Log</h3>
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer hover:text-primary transition-colors">filter_list</span>
+</div>
+<!-- Stepper Layout -->
+<div class="flex flex-col gap-0 relative">
+<!-- Vertical connecting line -->
+<div class="absolute left-[7px] top-2 bottom-6 w-[2px] bg-surface-container-highest z-0"></div>
+<!-- Item 1 -->
+<div class="flex gap-sm relative z-10 pb-md">
+<div class="w-4 h-4 rounded-full bg-error mt-1 ring-4 ring-surface-container-lowest flex-shrink-0"></div>
+<div class="flex-grow flex flex-col md:flex-row justify-between md:items-start gap-xs">
+<div>
+<p class="text-body-md font-body-md font-semibold text-on-background">Payment Missed</p>
+<p class="text-body-sm font-body-sm text-on-surface-variant">Scheduled payment of $350 was not received.</p>
+</div>
+<span class="text-label-mono font-label-mono text-on-surface-variant whitespace-nowrap">Oct 15, 2023 - 12:00 PM</span>
+</div>
+</div>
+<!-- Item 2 -->
+<div class="flex gap-sm relative z-10 pb-md">
+<div class="w-4 h-4 rounded-full bg-tertiary-fixed-dim mt-1 ring-4 ring-surface-container-lowest flex-shrink-0"></div>
+<div class="flex-grow flex flex-col md:flex-row justify-between md:items-start gap-xs">
+<div>
+<p class="text-body-md font-body-md font-semibold text-on-background">Interest Accrued</p>
+<p class="text-body-sm font-body-sm text-on-surface-variant">Monthly interest applied to principal balance.</p>
+</div>
+<div class="flex flex-col items-end gap-1">
+<span class="text-label-mono font-label-mono text-on-surface-variant whitespace-nowrap">Oct 01, 2023 - 00:01 AM</span>
+<span class="text-numeric-ticker font-numeric-ticker text-tertiary text-sm">+₹56.80</span>
+</div>
+</div>
+</div>
+<!-- Item 3 -->
+<div class="flex gap-sm relative z-10 pb-md">
+<div class="w-4 h-4 rounded-full bg-secondary-container mt-1 ring-4 ring-surface-container-lowest flex-shrink-0"></div>
+<div class="flex-grow flex flex-col md:flex-row justify-between md:items-start gap-xs">
+<div>
+<p class="text-body-md font-body-md font-semibold text-on-background">Partial Payment Received</p>
+<p class="text-body-sm font-body-sm text-on-surface-variant">Payment via bank transfer (ACH ending in 4492).</p>
+</div>
+<div class="flex flex-col items-end gap-1">
+<span class="text-label-mono font-label-mono text-on-surface-variant whitespace-nowrap">Sep 12, 2023 - 09:45 AM</span>
+<span class="text-numeric-ticker font-numeric-ticker text-secondary text-sm">-₹200.00</span>
+</div>
+</div>
+</div>
+<!-- Item 4 (End) -->
+<div class="flex gap-sm relative z-10">
+<div class="w-4 h-4 rounded-full bg-outline-variant mt-1 ring-4 ring-surface-container-lowest flex-shrink-0"></div>
+<div class="flex-grow flex flex-col md:flex-row justify-between md:items-start gap-xs">
+<div>
+<p class="text-body-md font-body-md font-semibold text-on-background">Debt Record Created</p>
+<p class="text-body-sm font-body-sm text-on-surface-variant">Initial principal established.</p>
+</div>
+<div class="flex flex-col items-end gap-1">
+<span class="text-label-mono font-label-mono text-on-surface-variant whitespace-nowrap">Jan 12, 2022 - 10:00 AM</span>
+<span class="text-numeric-ticker font-numeric-ticker text-primary text-sm">+₹10,000.00</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- BottomNavBar (Hidden on md+) -->
+<nav class="fixed bottom-0 w-full z-50 flex justify-around items-center px-sm py-xs md:hidden bg-surface dark:bg-surface-dim border-t border-outline-variant dark:border-outline shadow-lg docked bottom-0 rounded-t-full pb-6 pt-2">
+<!-- Inactive -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant py-1 active:bg-surface-container-highest transition-colors active:scale-90 duration-200 rounded-lg px-2" href="#">
+<span class="material-symbols-outlined text-[24px]">home</span>
+<span class="text-body-sm font-body-sm text-[10px] mt-1 leading-none">Home</span>
+</a>
+<!-- Active (People matches Directory intent) -->
+<a class="flex flex-col items-center justify-center bg-secondary-container text-on-secondary-container dark:bg-secondary-fixed dark:text-on-secondary-fixed rounded-full px-4 py-1 active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined text-[24px]" style="font-variation-settings: 'FILL' 1;">person</span>
+<span class="text-body-sm font-body-sm text-[10px] mt-1 leading-none font-semibold">People</span>
+</a>
+<!-- Contextual FAB Suppressed as instructed for Details screens, rendering standard nav item instead -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant py-1 active:bg-surface-container-highest transition-colors active:scale-90 duration-200 rounded-lg px-2" href="#">
+<span class="material-symbols-outlined text-[24px]">add_circle</span>
+<span class="text-body-sm font-body-sm text-[10px] mt-1 leading-none">Add</span>
+</a>
+<!-- Inactive -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant py-1 active:bg-surface-container-highest transition-colors active:scale-90 duration-200 rounded-lg px-2" href="#">
+<span class="material-symbols-outlined text-[24px]">history</span>
+<span class="text-body-sm font-body-sm text-[10px] mt-1 leading-none">History</span>
+</a>
+</nav>
+
+
+</body></html>

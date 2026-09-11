@@ -1,0 +1,324 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>DebtSync - Record New Debt</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700&amp;family=JetBrains+Mono:wght@500;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-container-highest": "#dae3f4",
+                        "primary-container": "#0d5c63",
+                        "on-error-container": "#93000a",
+                        "surface-container": "#e5eeff",
+                        "tertiary-fixed-dim": "#7fd4de",
+                        "surface-dim": "#d1daeb",
+                        "error": "#ba1a1a",
+                        "surface-variant": "#dae3f4",
+                        "primary-fixed": "#abeef6",
+                        "on-primary": "#ffffff",
+                        "secondary-fixed-dim": "#7bd5d4",
+                        "primary-fixed-dim": "#8fd1d9",
+                        "background": "#f8f9ff",
+                        "on-primary-container": "#90d2da",
+                        "tertiary": "#004349",
+                        "surface-container-lowest": "#ffffff",
+                        "on-secondary": "#ffffff",
+                        "on-primary-fixed": "#002023",
+                        "on-tertiary-fixed-variant": "#004f56",
+                        "surface": "#f8f9ff",
+                        "on-primary-fixed-variant": "#004f55",
+                        "secondary-container": "#95efed",
+                        "on-secondary-fixed": "#002020",
+                        "tertiary-container": "#005c64",
+                        "surface-container-high": "#e0e9f9",
+                        "on-background": "#131c28",
+                        "error-container": "#ffdad6",
+                        "on-surface-variant": "#3f484a",
+                        "on-secondary-fixed-variant": "#00504f",
+                        "tertiary-fixed": "#9bf0fa",
+                        "surface-container-low": "#eff4ff",
+                        "on-tertiary": "#ffffff",
+                        "inverse-primary": "#8fd1d9",
+                        "surface-tint": "#20686f",
+                        "on-surface": "#131c28",
+                        "on-error": "#ffffff",
+                        "outline-variant": "#bfc8c9",
+                        "on-secondary-container": "#006e6e",
+                        "inverse-surface": "#28313d",
+                        "surface-bright": "#f8f9ff",
+                        "secondary": "#006a69",
+                        "outline": "#6f797a",
+                        "secondary-fixed": "#98f2f0",
+                        "on-tertiary-container": "#7fd4de",
+                        "primary": "#004349",
+                        "on-tertiary-fixed": "#001f23",
+                        "inverse-on-surface": "#eaf1ff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "md": "24px",
+                        "sm": "16px",
+                        "xl": "64px",
+                        "lg": "40px",
+                        "container-max": "1200px",
+                        "base": "4px",
+                        "gutter": "20px",
+                        "xs": "8px"
+                    },
+                    "fontFamily": {
+                        "body-sm": ["Hanken Grotesk"],
+                        "headline-md": ["Hanken Grotesk"],
+                        "body-md": ["Hanken Grotesk"],
+                        "body-lg": ["Hanken Grotesk"],
+                        "label-mono": ["JetBrains Mono"],
+                        "headline-xl": ["Hanken Grotesk"],
+                        "headline-lg-mobile": ["Hanken Grotesk"],
+                        "headline-lg": ["Hanken Grotesk"],
+                        "numeric-ticker": ["JetBrains Mono"]
+                    },
+                    "fontSize": {
+                        "body-sm": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
+                        "headline-md": ["20px", { "lineHeight": "28px", "fontWeight": "600" }],
+                        "body-md": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
+                        "body-lg": ["18px", { "lineHeight": "28px", "fontWeight": "400" }],
+                        "label-mono": ["13px", { "lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500" }],
+                        "headline-xl": ["40px", { "lineHeight": "48px", "fontWeight": "700" }],
+                        "headline-lg-mobile": ["24px", { "lineHeight": "32px", "fontWeight": "600" }],
+                        "headline-lg": ["32px", { "lineHeight": "40px", "fontWeight": "600" }],
+                        "numeric-ticker": ["24px", { "lineHeight": "32px", "fontWeight": "700" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(27, 36, 48, 0.08);
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background-color: #bfc8c9;
+            border-radius: 20px;
+        }
+        
+        /* Input styling overrides for forms plugin */
+        input[type="text"], input[type="number"], select {
+            border-color: #bfc8c9;
+            border-radius: 0.25rem;
+            background-color: transparent;
+            transition: all 0.2s ease-in-out;
+        }
+        input[type="text"]:focus, input[type="number"]:focus, select:focus {
+            border-color: #004349;
+            box-shadow: 0 0 0 2px rgba(0, 67, 73, 0.1);
+        }
+        
+        /* Range slider styling */
+        input[type=range] {
+            -webkit-appearance: none; 
+            width: 100%; 
+            background: transparent; 
+        }
+
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            background: #004349;
+            cursor: pointer;
+            margin-top: -6px; 
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #bfc8c9;
+            border-radius: 2px;
+        }
+        
+        input[type=range]:focus::-webkit-slider-runnable-track {
+            background: #8fd1d9;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md h-screen overflow-hidden flex flex-col antialiased">
+<!-- Note: TopNav and SideNav are suppressed as this is a transactional creation form (linear flow) -->
+<main class="flex-1 overflow-y-auto custom-scrollbar relative p-4 md:p-lg flex items-center justify-center">
+<!-- Abstract background elements for subtle depth -->
+<div class="fixed top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
+<div class="absolute top-[-10%] right-[-5%] w-[40%] h-[40%] rounded-full bg-primary-fixed/20 blur-[100px]"></div>
+<div class="absolute bottom-[-10%] left-[-5%] w-[50%] h-[50%] rounded-full bg-surface-container-high/60 blur-[120px]"></div>
+</div>
+<div class="w-full max-w-4xl mx-auto flex flex-col lg:flex-row gap-md lg:gap-lg">
+<!-- Left Column: Form Inputs -->
+<div class="glass-panel rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-md flex-1">
+<!-- Header -->
+<div class="flex items-center gap-sm mb-lg border-b border-outline-variant pb-sm">
+<button aria-label="Cancel and return" class="p-2 hover:bg-surface-container-high rounded-full transition-colors group">
+<span class="material-symbols-outlined text-on-surface-variant group-hover:text-on-surface transition-colors">close</span>
+</button>
+<div>
+<h1 class="font-headline-lg-mobile md:font-headline-lg text-headline-lg-mobile md:text-headline-lg text-on-surface">Record New Debt</h1>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">Create a transparent record for a new transaction.</p>
+</div>
+</div>
+<form class="space-y-xl">
+<!-- Section 1: Counterparty & Amount -->
+<div class="space-y-md">
+<div class="grid grid-cols-1 md:grid-cols-2 gap-sm">
+<!-- Select Person -->
+<div class="space-y-xs">
+<label class="block font-label-mono text-label-mono text-on-surface-variant" for="person">SELECT PERSON</label>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline">search</span>
+<input class="w-full pl-10 pr-3 py-2 font-body-md text-body-md text-on-surface placeholder-outline rounded-lg border-outline-variant focus:border-primary focus:ring-primary/10" id="person" placeholder="Search contacts..." type="text">
+</div>
+</div>
+<!-- Amount -->
+<div class="space-y-xs">
+<label class="block font-label-mono text-label-mono text-on-surface-variant" for="amount">PRINCIPAL AMOUNT</label>
+<div class="relative">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 font-headline-md text-headline-md text-on-surface-variant">₹</span>
+<input class="w-full pl-8 pr-3 py-2 font-numeric-ticker text-numeric-ticker text-on-surface rounded-lg border-outline-variant focus:border-primary focus:ring-primary/10 text-right" id="amount" placeholder="0.00" type="number" value="1500.00">
+</div>
+</div>
+</div>
+<!-- Debt Type Toggle -->
+<div class="bg-surface-container-low rounded-lg p-xs flex gap-xs border border-outline-variant/50">
+<button class="flex-1 py-2 px-4 rounded-md bg-white shadow-sm border border-outline-variant/30 font-label-mono text-label-mono text-primary flex items-center justify-center gap-xs transition-all" type="button">
+<span class="material-symbols-outlined text-[18px]">arrow_upward</span>
+                                I LENT MONEY
+                            </button>
+<button class="flex-1 py-2 px-4 rounded-md text-on-surface-variant hover:bg-surface-container-high font-label-mono text-label-mono flex items-center justify-center gap-xs transition-all" type="button">
+<span class="material-symbols-outlined text-[18px]">arrow_downward</span>
+                                I BORROWED
+                            </button>
+</div>
+</div>
+<hr class="border-outline-variant">
+<!-- Section 2: Terms -->
+<div class="space-y-md">
+<h2 class="font-headline-md text-headline-md text-on-surface">Terms &amp; Interest</h2>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-sm">
+<label class="cursor-pointer">
+<input class="peer sr-only" name="interest_type" type="radio" value="none">
+<div class="h-full border border-outline-variant rounded-lg p-sm peer-checked:border-primary peer-checked:bg-primary-container/5 transition-all hover:border-outline">
+<span class="material-symbols-outlined text-outline peer-checked:text-primary mb-2 block">block</span>
+<div class="font-label-mono text-label-mono text-on-surface font-bold">NONE</div>
+<div class="font-body-sm text-body-sm text-on-surface-variant mt-1">No interest accrual</div>
+</div>
+</label>
+<label class="cursor-pointer">
+<input checked="" class="peer sr-only" name="interest_type" type="radio" value="simple">
+<div class="h-full border border-primary rounded-lg p-sm bg-primary-container/5 transition-all">
+<span class="material-symbols-outlined text-primary mb-2 block">trending_up</span>
+<div class="font-label-mono text-label-mono text-primary font-bold">SIMPLE</div>
+<div class="font-body-sm text-body-sm text-on-surface-variant mt-1">Calculated on principal</div>
+</div>
+</label>
+<label class="cursor-pointer">
+<input class="peer sr-only" name="interest_type" type="radio" value="compound">
+<div class="h-full border border-outline-variant rounded-lg p-sm peer-checked:border-primary peer-checked:bg-primary-container/5 transition-all hover:border-outline">
+<span class="material-symbols-outlined text-outline peer-checked:text-primary mb-2 block">auto_graph</span>
+<div class="font-label-mono text-label-mono text-on-surface font-bold">COMPOUND</div>
+<div class="font-body-sm text-body-sm text-on-surface-variant mt-1">Calculated on total</div>
+</div>
+</label>
+</div>
+<!-- Dynamic settings based on Simple selected -->
+<div class="bg-surface-container rounded-lg p-sm space-y-sm border border-outline-variant/30">
+<div class="flex items-center justify-between">
+<label class="font-label-mono text-label-mono text-on-surface-variant" for="rate">ANNUAL PERCENTAGE RATE (APR)</label>
+<div class="font-numeric-ticker text-numeric-ticker text-primary"><span id="rateValue" class="">5.0</span>%</div>
+</div>
+<input class="w-full" id="rate" max="25" min="0" step="0.1" type="range" value="5.0">
+<div class="pt-2 flex justify-between items-center border-t border-outline-variant/30">
+<span class="font-body-sm text-body-sm text-on-surface-variant">Compounding Frequency</span>
+<select class="font-body-sm text-body-sm text-on-surface bg-transparent border-none py-1 pr-8 focus:ring-0 cursor-pointer">
+<option>Monthly</option>
+<option>Annually</option>
+<option>Daily</option>
+</select>
+</div>
+</div>
+</div>
+</form>
+</div>
+<!-- Right Column: Visualization & Action -->
+<div class="w-full lg:w-[380px] flex flex-col gap-md">
+<!-- Projection Card -->
+<div class="glass-panel rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-md flex-1 flex flex-col">
+<h3 class="font-label-mono text-label-mono text-on-surface-variant tracking-wider mb-sm">PROJECTED GROWTH (12 MO)</h3>
+<div class="flex-1 flex flex-col justify-center items-center py-xl relative">
+<!-- Simulated Chart background -->
+<div class="absolute inset-0 opacity-20 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxwYXRoIGQ9Ik0wLDEwMCBDMjAsMTAwIDMwLDgwIDUwLDgwIEM3MCw4MCA4MCw0MCAxMDAsNDAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzAwNDM0OSIgc3Ryb2tlLXdpZHRoPSIyIiB2ZWN0b3ItZWZmZWN0PSJub24tc2NhbGluZy1zdHJva2UiLz48L3N2Zz4=')] bg-no-repeat bg-center bg-cover border-b border-l border-outline-variant/50"></div>
+<div class="text-center relative z-10">
+<div class="font-body-sm text-body-sm text-on-surface-variant mb-1">Total Expected</div>
+<div class="font-numeric-ticker text-numeric-ticker text-on-surface text-4xl leading-tight">₹1,575.<span class="opacity-60 text-xl">00</span></div>
+<div class="font-label-mono text-label-mono text-secondary mt-2 bg-secondary-container/30 px-3 py-1 rounded-full inline-block">+₹75.00 Interest</div>
+</div>
+</div>
+<!-- Details breakdown -->
+<div class="space-y-xs border-t border-outline-variant pt-sm mt-auto">
+<div class="flex justify-between items-center font-body-sm text-body-sm">
+<span class="text-on-surface-variant">Principal</span>
+<span class="font-numeric-ticker text-on-surface">₹1,500.00</span>
+</div>
+<div class="flex justify-between items-center font-body-sm text-body-sm">
+<span class="text-on-surface-variant flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-primary block"></span> Interest (5% APR)</span>
+<span class="font-numeric-ticker text-on-surface">₹75.00</span>
+</div>
+<div class="flex justify-between items-center font-body-sm text-body-sm pt-2">
+<span class="text-on-surface-variant">Estimated Payoff</span>
+<span class="font-medium text-on-surface">Oct 24, 2024</span>
+</div>
+</div>
+</div>
+<!-- Action Area -->
+<div class="glass-panel rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-sm">
+<button class="w-full bg-primary text-on-primary font-label-mono text-label-mono py-3 px-4 rounded-lg flex items-center justify-center gap-2 hover:bg-primary/90 transition-colors shadow-sm active:scale-[0.98] duration-150">
+<span class="material-symbols-outlined text-[20px]">send</span>
+                        SEND REQUEST
+                    </button>
+<p class="font-body-sm text-body-sm text-on-surface-variant text-center mt-3 text-xs">The other party will receive a notification to verify these terms.</p>
+</div>
+</div>
+</div>
+</main>
+<script>
+        // Simple interactivity for the slider
+        const rateSlider = document.getElementById('rate');
+        const rateValue = document.getElementById('rateValue');
+        
+        if(rateSlider && rateValue) {
+            rateSlider.addEventListener('input', (e) => {
+                rateValue.textContent = parseFloat(e.target.value).toFixed(1);
+            });
+        }
+    </script>
+
+
+</body></html>
