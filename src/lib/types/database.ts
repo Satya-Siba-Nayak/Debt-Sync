@@ -43,6 +43,7 @@ export type Debt = {
   accepted_at: string | null;
   created_at: string;
   settled_at: string | null;
+  due_date?: string | null;
   lender?: Profile;
   borrower?: Profile;
 };

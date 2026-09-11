@@ -9,6 +9,8 @@ import { COUNTRY_CODES, CountryCode } from '@/lib/constants/country-codes';
 import { checkIdentifierConflict } from '@/lib/utils/profile-lookup';
 import { isSameEmail } from '@/lib/utils/email-normalize';
 import { Avatar, AVATAR_PRESETS } from '@/components/ui/Avatar';
+import { getRandomSecondaryEmailPlaceholder } from '@/lib/utils/random-placeholders';
+import { AvatarCropModal } from '@/components/profile/AvatarCropModal';
 
 export default function SettingsPage() {
   const supabase = createClient();
@@ -31,6 +33,8 @@ export default function SettingsPage() {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [isStandalone, setIsStandalone] = useState(false);
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
+  const [cropImageSrc, setCropImageSrc] = useState<string | null>(null);
+  const [isCropModalOpen, setIsCropModalOpen] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -107,44 +111,13 @@ export default function SettingsPage() {
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      setError('Image must be smaller than 5MB');
-      return;
-    }
-
     const reader = new FileReader();
     reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const maxDim = 200;
-        let width = img.width;
-        let height = img.height;
-
-        if (width > height) {
-          if (width > maxDim) {
-            height = Math.round((height * maxDim) / width);
-            width = maxDim;
-          }
-        } else {
-          if (height > maxDim) {
-            width = Math.round((width * maxDim) / height);
-            height = maxDim;
-          }
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
-          const compressed = canvas.toDataURL('image/jpeg', 0.85);
-          setAvatarUrl(compressed);
-        }
-      };
-      img.src = event.target?.result as string;
+      setCropImageSrc(event.target?.result as string);
+      setIsCropModalOpen(true);
     };
     reader.readAsDataURL(file);
+    if (e.target) e.target.value = '';
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -396,7 +369,7 @@ export default function SettingsPage() {
                 type="email"
                 value={newSecondaryEmail}
                 onChange={(e) => setNewSecondaryEmail(e.target.value)}
-                placeholder="e.g. satya@college.edu or satya@work.com"
+                placeholder={`e.g. ${getRandomSecondaryEmailPlaceholder()}`}
                 className="flex-1 px-4 py-2 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-sm outline-none focus:border-[var(--primary)]"
               />
               <button
@@ -587,6 +560,22 @@ export default function SettingsPage() {
           </button>
         </div>
       </form>
+
+      {userId && (
+        <AvatarCropModal
+          isOpen={isCropModalOpen}
+          onClose={() => {
+            setIsCropModalOpen(false);
+            setCropImageSrc(null);
+          }}
+          imageSrc={cropImageSrc}
+          userId={userId}
+          onAvatarSaved={(newUrl) => {
+            setAvatarUrl(newUrl);
+            setMessage('Profile picture cropped and optimized under 5MB. Click "Save Settings" to persist.');
+          }}
+        />
+      )}
     </div>
   );
 }

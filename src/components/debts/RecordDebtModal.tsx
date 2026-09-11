@@ -46,6 +46,7 @@ export function RecordDebtModal({
   const [interestType, setInterestType] = useState<'none' | 'simple' | 'compound'>('simple');
   const [interestRate, setInterestRate] = useState<number>(5.0);
   const [compoundFreq, setCompoundFreq] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('monthly');
+  const [dueDate, setDueDate] = useState('');
   const [notes, setNotes] = useState('');
 
   const [loading, setLoading] = useState(false);
@@ -233,6 +234,7 @@ export function RecordDebtModal({
           interest_rate: interestType === 'none' ? null : Number(interestRate),
           compound_freq: interestType === 'compound' ? compoundFreq : null,
           status: 'pending', // pending approval from other party
+          due_date: dueDate ? new Date(dueDate).toISOString() : null,
           notes: notes.trim() || null,
         })
         .select()
@@ -267,6 +269,7 @@ export function RecordDebtModal({
       setNewPersonName('');
       setNewPersonEmail('');
       setNewPersonPhone('');
+      setDueDate('');
       setIsAddingNewPerson(false);
       onDebtCreated?.();
       window.dispatchEvent(new CustomEvent('debtsync:refresh'));
@@ -515,6 +518,19 @@ export function RecordDebtModal({
                   )}
                 </div>
               )}
+            </div>
+
+            {/* Expected Due Date */}
+            <div>
+              <label className="font-mono text-xs tracking-wider uppercase text-[var(--on-surface-variant)] block mb-1.5">
+                Expected Repayment Date <span className="normal-case text-[var(--outline)]">(optional)</span>
+              </label>
+              <input
+                type="date"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-sm outline-none focus:border-[var(--primary)] font-mono"
+              />
             </div>
 
             {/* Notes */}

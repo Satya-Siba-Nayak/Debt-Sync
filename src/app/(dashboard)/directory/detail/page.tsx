@@ -10,6 +10,8 @@ import { Chip } from '@/components/ui/Chip';
 import { Avatar } from '@/components/ui/Avatar';
 import { PaymentModal } from '@/components/debts/PaymentModal';
 import { RecordDebtModal } from '@/components/debts/RecordDebtModal';
+import { BulkPaymentModal } from '@/components/debts/BulkPaymentModal';
+import { getDueDateInfo } from '@/lib/utils/due-date';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { PersonAnalyticsChart } from '@/components/directory/PersonAnalyticsChart';
 import Link from 'next/link';
@@ -28,9 +30,11 @@ function PersonDebtDetailContent() {
   const [activityLogs, setActivityLogs] = useState<ActivityLogEntry[]>([]);
   const [currency, setCurrency] = useState('inr');
 
-  // Modals
+  // Directional filter & Modals
+  const [filterDirection, setFilterDirection] = useState<'all' | 'they_owe' | 'you_owe'>('all');
   const [activeDebtForPayment, setActiveDebtForPayment] = useState<{ debt: Debt; balance: number } | null>(null);
   const [isRecordDebtOpen, setIsRecordDebtOpen] = useState(false);
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
 
   const fetchDetails = useCallback(async () => {
     if (!personId) {
@@ -188,6 +192,36 @@ function PersonDebtDetailContent() {
   const interestPct = Math.round((accruedInterest / grandTotal) * 100);
   const paidPct = Math.max(0, 100 - principalPct - interestPct);
 
+  // Directional Filtering & Counts
+  const theyOweDebts = debts.filter((d) => d.lender_id === currentUserId);
+  const youOweDebts = debts.filter((d) => d.borrower_id === currentUserId);
+
+  const displayDebts = debts.filter((d) => {
+    if (filterDirection === 'they_owe') return d.lender_id === currentUserId;
+    if (filterDirection === 'you_owe') return d.borrower_id === currentUserId;
+    return true;
+  });
+
+  let filteredBalance = 0;
+  for (const d of displayDebts) {
+    if (d.status === 'settled' || d.status === 'declined') continue;
+    const debtPayments = payments.filter((p) => p.debt_id === d.id);
+    const calc = calculateDebtBalance(d, debtPayments);
+    if (filterDirection === 'they_owe') {
+      filteredBalance += calc.currentBalance;
+    } else if (filterDirection === 'you_owe') {
+      filteredBalance += calc.currentBalance;
+    } else {
+      if (d.lender_id === currentUserId) {
+        filteredBalance += calc.currentBalance;
+      } else {
+        filteredBalance -= calc.currentBalance;
+      }
+    }
+  }
+
+  const hasActiveDebts = debts.some((d) => d.status === 'active');
+
   if (loading) {
     return (
       <div className="py-20 text-center font-mono text-xs text-on-surface-variant flex items-center justify-center gap-2">
@@ -250,10 +284,20 @@ function PersonDebtDetailContent() {
           </div>
         </div>
 
-        <div className="flex gap-3">
+        <div className="flex gap-2.5 flex-wrap items-center">
+          {hasActiveDebts && (
+            <button
+              onClick={() => setIsBulkModalOpen(true)}
+              className="py-2.5 px-4 rounded-xl bg-gradient-to-r from-primary to-teal-600 text-on-primary font-mono text-xs font-bold hover:opacity-95 shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+              title="Bulk repay multiple debts with Avalanche or FIFO"
+            >
+              <span className="material-symbols-outlined text-[18px]">bolt</span>
+              <span>Smart Bulk Repayment</span>
+            </button>
+          )}
           <button
             onClick={() => setIsRecordDebtOpen(true)}
-            className="py-2.5 px-4 rounded-xl bg-primary text-on-primary font-mono text-xs font-bold hover:opacity-95 shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+            className="py-2.5 px-4 rounded-xl border border-outline-variant/30 bg-surface-container-low text-on-surface font-mono text-xs font-bold hover:bg-surface-container shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
           >
             <span className="material-symbols-outlined text-[18px]">add</span>
             <span>Record Debt</span>
@@ -407,20 +451,98 @@ function PersonDebtDetailContent() {
 
       {/* Individual Debts Listing */}
       <section className="bg-surface-container-lowest rounded-2xl p-6 md:p-8 border border-outline-variant/30 shadow-sm">
-        <h3 className="font-heading text-lg font-bold text-on-surface mb-4">
-          Individual Debts with Counterparty
-        </h3>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div>
+            <h3 className="font-heading text-lg font-bold text-on-surface">
+              Individual Debts with Counterparty
+            </h3>
+            <p className="font-mono text-xs text-on-surface-variant mt-0.5">
+              Filter by direction or execute automated batch repayments
+            </p>
+          </div>
 
-        {debts.length === 0 ? (
-          <p className="text-xs font-mono text-on-surface-variant py-4">No records found.</p>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            {hasActiveDebts && (
+              <button
+                onClick={() => setIsBulkModalOpen(true)}
+                className="py-2 px-3.5 rounded-xl bg-gradient-to-r from-primary to-teal-600 text-on-primary font-mono text-xs font-bold hover:opacity-95 shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                title="Settle multiple debts at once using Avalanche, Due Date, or FIFO strategy"
+              >
+                <span className="material-symbols-outlined text-[16px]">bolt</span>
+                <span>Smart Bulk Repayment</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Directional Tabs and Dynamic Sum Pill */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 pb-4 border-b border-outline-variant/20">
+          <div className="flex bg-surface-container p-1 rounded-xl border border-outline-variant/20 self-start">
+            <button
+              onClick={() => setFilterDirection('all')}
+              className={`px-3 py-1.5 font-mono text-xs font-bold rounded-lg tracking-wider transition-all cursor-pointer ${
+                filterDirection === 'all'
+                  ? 'bg-surface-container-lowest text-primary shadow-xs'
+                  : 'text-on-surface-variant hover:text-on-surface'
+              }`}
+            >
+              All ({debts.length})
+            </button>
+            <button
+              onClick={() => setFilterDirection('they_owe')}
+              className={`px-3 py-1.5 font-mono text-xs font-bold rounded-lg tracking-wider transition-all cursor-pointer ${
+                filterDirection === 'they_owe'
+                  ? 'bg-surface-container-lowest text-secondary shadow-xs'
+                  : 'text-on-surface-variant hover:text-on-surface'
+              }`}
+            >
+              They owe you ({theyOweDebts.length})
+            </button>
+            <button
+              onClick={() => setFilterDirection('you_owe')}
+              className={`px-3 py-1.5 font-mono text-xs font-bold rounded-lg tracking-wider transition-all cursor-pointer ${
+                filterDirection === 'you_owe'
+                  ? 'bg-surface-container-lowest text-error shadow-xs'
+                  : 'text-on-surface-variant hover:text-on-surface'
+              }`}
+            >
+              You owe them ({youOweDebts.length})
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 font-mono text-xs px-3 py-1.5 rounded-xl bg-surface-container-low border border-outline-variant/20">
+            <span className="text-on-surface-variant">Filtered Balance:</span>
+            <span className={`font-bold ${
+              filterDirection === 'they_owe'
+                ? 'text-secondary'
+                : filterDirection === 'you_owe'
+                ? 'text-error'
+                : filteredBalance > 0
+                ? 'text-secondary'
+                : filteredBalance < 0
+                ? 'text-error'
+                : 'text-on-surface'
+            }`}>
+              {filterDirection === 'all' && filteredBalance > 0 ? '+' : ''}
+              {formatCurrency(filteredBalance, currency, { showDecimals: true })}
+            </span>
+            <span className="text-[11px] text-on-surface-variant">
+              ({displayDebts.length} {displayDebts.length === 1 ? 'record' : 'records'})
+            </span>
+          </div>
+        </div>
+
+        {displayDebts.length === 0 ? (
+          <p className="text-xs font-mono text-on-surface-variant py-4">No records found for this filter.</p>
         ) : (
           <div className="space-y-4">
-            {debts.map((d) => {
+            {displayDebts.map((d) => {
               const isLender = d.lender_id === currentUserId;
               const isIncomingPending = d.status === 'pending' && d.created_by !== currentUserId;
               const isOutgoingPending = d.status === 'pending' && d.created_by === currentUserId;
               const debtPayments = payments.filter((p) => p.debt_id === d.id);
               const calc = calculateDebtBalance(d, debtPayments);
+              const dueDateInfo = getDueDateInfo(d.due_date, d.status);
 
               return (
                 <div
@@ -437,6 +559,14 @@ function PersonDebtDetailContent() {
                         {isLender ? 'You Lent' : 'You Borrowed'}
                       </span>
                       <Chip label={d.status} variant={d.status === 'active' ? 'active' : d.status === 'settled' ? 'settled' : 'default'} />
+                      {dueDateInfo && (
+                        <span className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-semibold border ${dueDateInfo.className} flex items-center gap-1`}>
+                          <span className="material-symbols-outlined text-[12px]">
+                            {dueDateInfo.isOverdue ? 'warning' : 'event'}
+                          </span>
+                          {dueDateInfo.text}
+                        </span>
+                      )}
                       {isIncomingPending && (
                         <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-500 font-semibold uppercase">
                           Action Required
@@ -572,6 +702,22 @@ function PersonDebtDetailContent() {
         onClose={() => setIsRecordDebtOpen(false)}
         onDebtCreated={fetchDetails}
       />
+
+      {/* Bulk Payment Modal */}
+      {isBulkModalOpen && (
+        <BulkPaymentModal
+          isOpen={isBulkModalOpen}
+          onClose={() => setIsBulkModalOpen(false)}
+          debts={debts}
+          payments={payments}
+          currentUserId={currentUserId || ''}
+          currency={currency}
+          personName={person?.full_name || person?.email || 'Counterparty'}
+          onPaymentCompleted={() => {
+            fetchDetails();
+          }}
+        />
+      )}
     </div>
   );
 }

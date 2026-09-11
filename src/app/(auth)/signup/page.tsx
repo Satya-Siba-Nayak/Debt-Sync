@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { PhoneInput } from '@/components/ui/PhoneInput';
 import { checkIdentifierConflict } from '@/lib/utils/profile-lookup';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
+import { getRandomSampleName } from '@/lib/utils/random-placeholders';
 
 function SignupContent() {
   const [email, setEmail] = useState('');
@@ -106,7 +107,7 @@ function SignupContent() {
                 type="text"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
-                placeholder="e.g. Satya Nayak"
+                placeholder={`e.g. ${getRandomSampleName()}`}
                 required
                 className="w-full px-4 py-3 rounded-xl border border-outline-variant/50 bg-surface text-on-surface focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm font-medium"
               />

@@ -11,6 +11,7 @@ import { formatCurrency } from '@/lib/utils/currency';
 import { Chip } from '@/components/ui/Chip';
 import { Avatar } from '@/components/ui/Avatar';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
+import { getDueDateInfo } from '@/lib/utils/due-date';
 import Link from 'next/link';
 
 export default function GlobalDashboardPage() {
@@ -322,6 +323,7 @@ export default function GlobalDashboardPage() {
                 const name = otherPerson?.full_name || otherPerson?.email || 'Unknown';
                 const debtPayments = payments.filter((p) => p.debt_id === d.id);
                 const calc = calculateDebtBalance(d, debtPayments);
+                const dueDateInfo = getDueDateInfo(d.due_date, d.status);
 
                 return (
                   <Link
@@ -345,18 +347,28 @@ export default function GlobalDashboardPage() {
                           </p>
                         </div>
                       </div>
-                      <Chip
-                        label={d.status}
-                        variant={
-                          d.status === 'active'
-                            ? 'active'
-                            : d.status === 'settled'
-                            ? 'settled'
-                            : d.status === 'pending'
-                            ? 'pending'
-                            : 'default'
-                        }
-                      />
+                      <div className="flex flex-col items-end gap-1">
+                        <Chip
+                          label={d.status}
+                          variant={
+                            d.status === 'active'
+                              ? 'active'
+                              : d.status === 'settled'
+                              ? 'settled'
+                              : d.status === 'pending'
+                              ? 'pending'
+                              : 'default'
+                          }
+                        />
+                        {dueDateInfo && (
+                          <span className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-semibold border ${dueDateInfo.className} flex items-center gap-1`}>
+                            <span className="material-symbols-outlined text-[11px]">
+                              {dueDateInfo.isOverdue ? 'warning' : 'event'}
+                            </span>
+                            {dueDateInfo.text}
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     <div className="mt-3 pt-3 border-t border-[var(--outline-variant)]/15 flex items-center justify-between">
@@ -433,6 +445,7 @@ export default function GlobalDashboardPage() {
                     const name = otherPerson?.full_name || otherPerson?.email || 'Unknown';
                     const debtPayments = payments.filter((p) => p.debt_id === d.id);
                     const calc = calculateDebtBalance(d, debtPayments);
+                    const dueDateInfo = getDueDateInfo(d.due_date, d.status);
 
                     return (
                       <tr key={d.id} className="hover:bg-[var(--surface-container-low)]/50 transition-colors">
@@ -480,18 +493,28 @@ export default function GlobalDashboardPage() {
                         </td>
 
                         <td className="py-4">
-                          <Chip
-                            label={d.status}
-                            variant={
-                              d.status === 'active'
-                                ? 'active'
-                                : d.status === 'settled'
-                                ? 'settled'
-                                : d.status === 'pending'
-                                ? 'pending'
-                                : 'default'
-                            }
-                          />
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <Chip
+                              label={d.status}
+                              variant={
+                                d.status === 'active'
+                                  ? 'active'
+                                  : d.status === 'settled'
+                                  ? 'settled'
+                                  : d.status === 'pending'
+                                  ? 'pending'
+                                  : 'default'
+                              }
+                            />
+                            {dueDateInfo && (
+                              <span className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-semibold border ${dueDateInfo.className} flex items-center gap-1`}>
+                                <span className="material-symbols-outlined text-[11px]">
+                                  {dueDateInfo.isOverdue ? 'warning' : 'event'}
+                                </span>
+                                {dueDateInfo.text}
+                              </span>
+                            )}
+                          </div>
                         </td>
 
                         <td className="py-4 text-right">
