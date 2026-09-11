@@ -113,6 +113,12 @@ export default function PeopleDirectoryPage() {
         }
 
         const person = peopleMap.get(otherParty.id)!;
+
+        // Declined debts are void agreements - do not add to active lent or owed balances
+        if (d.status === 'declined') {
+          continue;
+        }
+
         const debtPayments = allPayments.filter((p) => p.debt_id === d.id);
         const calc = calculateDebtBalance(d, debtPayments);
 

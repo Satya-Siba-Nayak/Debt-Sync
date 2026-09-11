@@ -19,7 +19,7 @@ export default function TransactionsPage() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currency, setCurrency] = useState('inr');
-  const [filter, setFilter] = useState<'all' | 'lent' | 'borrowed' | 'settled'>('all');
+  const [filter, setFilter] = useState<'all' | 'lent' | 'borrowed' | 'settled' | 'declined'>('all');
 
   const fetchTransactions = useCallback(async () => {
     setLoading(true);
@@ -112,9 +112,10 @@ export default function TransactionsPage() {
 
   const filteredDebts = debts.filter((d) => {
     const isLender = d.lender_id === currentUserId;
-    if (filter === 'lent') return isLender;
-    if (filter === 'borrowed') return !isLender;
+    if (filter === 'lent') return isLender && d.status !== 'declined';
+    if (filter === 'borrowed') return !isLender && d.status !== 'declined';
     if (filter === 'settled') return d.status === 'settled';
+    if (filter === 'declined') return d.status === 'declined';
     return true;
   });
 
@@ -130,12 +131,12 @@ export default function TransactionsPage() {
           </p>
         </div>
 
-        <div className="flex bg-[var(--surface-container)] p-1 rounded-xl border border-[var(--outline-variant)]/20 self-start">
-          {(['all', 'lent', 'borrowed', 'settled'] as const).map((tab) => (
+        <div className="flex bg-[var(--surface-container)] p-1 rounded-xl border border-[var(--outline-variant)]/20 self-start flex-wrap gap-0.5">
+          {(['all', 'lent', 'borrowed', 'settled', 'declined'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setFilter(tab)}
-              className={`px-3.5 py-1.5 font-mono text-xs font-bold rounded-lg uppercase tracking-wider transition-all ${
+              className={`px-3 py-1.5 font-mono text-xs font-bold rounded-lg uppercase tracking-wider transition-all ${
                 filter === tab
                   ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-sm'
                   : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
@@ -172,7 +173,11 @@ export default function TransactionsPage() {
                   <Link
                     key={d.id}
                     href={`/directory/detail?id=${otherPerson?.id || d.id}`}
-                    className="block p-4 rounded-xl bg-[var(--surface-container-low)]/70 hover:bg-[var(--surface-container-high)]/70 border border-[var(--outline-variant)]/20 transition-all shadow-xs"
+                    className={`block p-4 rounded-xl border transition-all shadow-xs ${
+                      d.status === 'declined'
+                        ? 'bg-[var(--surface-container-low)]/40 border-red-500/20 opacity-85'
+                        : 'bg-[var(--surface-container-low)]/70 hover:bg-[var(--surface-container-high)]/70 border-[var(--outline-variant)]/20'
+                    }`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-3 min-w-0">
@@ -200,10 +205,12 @@ export default function TransactionsPage() {
                               ? 'settled'
                               : d.status === 'pending'
                               ? 'pending'
+                              : d.status === 'declined'
+                              ? 'declined'
                               : 'default'
                           }
                         />
-                        {dueDateInfo && (
+                        {dueDateInfo && d.status !== 'declined' && (
                           <span className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-semibold border ${dueDateInfo.className} flex items-center gap-1`}>
                             <span className="material-symbols-outlined text-[11px]">
                               {dueDateInfo.isOverdue ? 'warning' : 'event'}
@@ -216,18 +223,29 @@ export default function TransactionsPage() {
 
                     <div className="mt-3 pt-3 border-t border-[var(--outline-variant)]/15 flex items-center justify-between">
                       <div>
-                        <span
-                          className={`font-mono text-xs font-bold inline-flex items-center gap-1 ${
-                            isLender ? 'text-[var(--secondary)]' : 'text-[var(--error)]'
-                          }`}
-                        >
-                          <span className="material-symbols-outlined text-[14px]">
-                            {isLender ? 'arrow_upward' : 'arrow_downward'}
+                        {d.status === 'declined' ? (
+                          <span className="font-mono text-xs font-bold inline-flex items-center gap-1 text-red-500 dark:text-red-400">
+                            <span className="material-symbols-outlined text-[14px]">block</span>
+                            Declined
                           </span>
-                          {isLender ? 'You Lent' : 'You Borrowed'}
-                        </span>
+                        ) : (
+                          <span
+                            className={`font-mono text-xs font-bold inline-flex items-center gap-1 ${
+                              isLender ? 'text-[var(--secondary)]' : 'text-[var(--error)]'
+                            }`}
+                          >
+                            <span className="material-symbols-outlined text-[14px]">
+                              {isLender ? 'arrow_upward' : 'arrow_downward'}
+                            </span>
+                            {isLender ? 'You Lent' : 'You Borrowed'}
+                          </span>
+                        )}
                         <div className="font-mono text-[11px] text-[var(--on-surface-variant)] mt-0.5">
-                          Principal: {formatCurrency(d.principal, d.currency || currency)} • {d.interest_type === 'none' ? '0%' : `${d.interest_rate}% ${d.interest_type}`}
+                          Principal: {d.status === 'declined' ? (
+                            <span className="line-through">{formatCurrency(d.principal, d.currency || currency)}</span>
+                          ) : (
+                            formatCurrency(d.principal, d.currency || currency)
+                          )} • {d.interest_type === 'none' ? '0%' : `${d.interest_rate}% ${d.interest_type}`}
                         </div>
                       </div>
 
@@ -236,7 +254,13 @@ export default function TransactionsPage() {
                           Remaining
                         </span>
                         <span className="font-mono font-bold text-base text-[var(--on-surface)]">
-                          {formatCurrency(calc.currentBalance, d.currency || currency, { showDecimals: true })}
+                          {d.status === 'declined' ? (
+                            <span className="text-red-500/80 dark:text-red-400/80 line-through text-xs font-mono">
+                              Void
+                            </span>
+                          ) : (
+                            formatCurrency(calc.currentBalance, d.currency || currency, { showDecimals: true })
+                          )}
                         </span>
                       </div>
                     </div>
@@ -300,7 +324,14 @@ export default function TransactionsPage() {
                     const dueDateInfo = getDueDateInfo(d.due_date, d.status);
 
                     return (
-                      <tr key={d.id} className="hover:bg-[var(--surface-container-low)]/50 transition-colors">
+                      <tr
+                        key={d.id}
+                        className={`transition-colors ${
+                          d.status === 'declined'
+                            ? 'bg-red-500/5 hover:bg-red-500/10 opacity-80'
+                            : 'hover:bg-[var(--surface-container-low)]/50'
+                        }`}
+                      >
                         <td className="py-4 font-mono text-xs text-[var(--on-surface-variant)]">
                           {new Date(d.created_at).toLocaleDateString()}
                         </td>
@@ -322,20 +353,33 @@ export default function TransactionsPage() {
                         </td>
 
                         <td className="py-4">
-                          <span
-                            className={`font-mono text-xs font-bold inline-flex items-center gap-1 ${
-                              isLender ? 'text-[var(--secondary)]' : 'text-[var(--error)]'
-                            }`}
-                          >
-                            <span className="material-symbols-outlined text-[14px]">
-                              {isLender ? 'arrow_upward' : 'arrow_downward'}
+                          {d.status === 'declined' ? (
+                            <span className="font-mono text-xs font-bold inline-flex items-center gap-1 text-red-500 dark:text-red-400">
+                              <span className="material-symbols-outlined text-[14px]">block</span>
+                              Declined
                             </span>
-                            {isLender ? 'Lent' : 'Borrowed'}
-                          </span>
+                          ) : (
+                            <span
+                              className={`font-mono text-xs font-bold inline-flex items-center gap-1 ${
+                                isLender ? 'text-[var(--secondary)]' : 'text-[var(--error)]'
+                              }`}
+                            >
+                              <span className="material-symbols-outlined text-[14px]">
+                                {isLender ? 'arrow_upward' : 'arrow_downward'}
+                              </span>
+                              {isLender ? 'Lent' : 'Borrowed'}
+                            </span>
+                          )}
                         </td>
 
                         <td className="py-4 font-mono font-medium text-xs text-[var(--on-surface)]">
-                          {formatCurrency(d.principal, d.currency || currency)}
+                          {d.status === 'declined' ? (
+                            <span className="line-through text-on-surface-variant">
+                              {formatCurrency(d.principal, d.currency || currency)}
+                            </span>
+                          ) : (
+                            formatCurrency(d.principal, d.currency || currency)
+                          )}
                         </td>
 
                         <td className="py-4 font-mono text-xs text-[var(--on-surface-variant)]">
@@ -343,7 +387,13 @@ export default function TransactionsPage() {
                         </td>
 
                         <td className="py-4 font-mono font-bold text-sm text-[var(--on-surface)]">
-                          {formatCurrency(calc.currentBalance, d.currency || currency, { showDecimals: true })}
+                          {d.status === 'declined' ? (
+                            <span className="text-red-500/80 dark:text-red-400/80 line-through text-xs font-mono">
+                              Void
+                            </span>
+                          ) : (
+                            formatCurrency(calc.currentBalance, d.currency || currency, { showDecimals: true })
+                          )}
                         </td>
 
                         <td className="py-4">
@@ -357,10 +407,12 @@ export default function TransactionsPage() {
                                   ? 'settled'
                                   : d.status === 'pending'
                                   ? 'pending'
+                                  : d.status === 'declined'
+                                  ? 'declined'
                                   : 'default'
                               }
                             />
-                            {dueDateInfo && (
+                            {dueDateInfo && d.status !== 'declined' && (
                               <span className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-semibold border ${dueDateInfo.className} flex items-center gap-1`}>
                                 <span className="material-symbols-outlined text-[11px]">
                                   {dueDateInfo.isOverdue ? 'warning' : 'event'}

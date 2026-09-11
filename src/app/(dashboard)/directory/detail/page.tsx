@@ -192,13 +192,13 @@ function PersonDebtDetailContent() {
   const interestPct = Math.round((accruedInterest / grandTotal) * 100);
   const paidPct = Math.max(0, 100 - principalPct - interestPct);
 
-  // Directional Filtering & Counts
-  const theyOweDebts = debts.filter((d) => d.lender_id === currentUserId);
-  const youOweDebts = debts.filter((d) => d.borrower_id === currentUserId);
+  // Directional Filtering & Counts (Declined agreements are void and excluded from active debtor counts)
+  const theyOweDebts = debts.filter((d) => d.lender_id === currentUserId && d.status !== 'declined');
+  const youOweDebts = debts.filter((d) => d.borrower_id === currentUserId && d.status !== 'declined');
 
   const displayDebts = debts.filter((d) => {
-    if (filterDirection === 'they_owe') return d.lender_id === currentUserId;
-    if (filterDirection === 'you_owe') return d.borrower_id === currentUserId;
+    if (filterDirection === 'they_owe') return d.lender_id === currentUserId && d.status !== 'declined';
+    if (filterDirection === 'you_owe') return d.borrower_id === currentUserId && d.status !== 'declined';
     return true;
   });
 
@@ -386,42 +386,58 @@ function PersonDebtDetailContent() {
               Agreement Terms
             </h3>
 
-            {debts.length > 0 ? (
-              <div className="space-y-3 font-mono text-xs">
-                <div className="flex justify-between pb-2 border-b border-outline-variant/10">
-                  <span className="text-on-surface-variant">Interest Engine</span>
-                  <span className="font-bold uppercase text-on-surface">
-                    {debts[0].interest_type}
-                  </span>
+            {debts.length > 0 ? (() => {
+              const primaryAgreement = debts.find((d) => d.status !== 'declined') || debts[0];
+              return (
+                <div className="space-y-3 font-mono text-xs">
+                  <div className="flex justify-between pb-2 border-b border-outline-variant/10">
+                    <span className="text-on-surface-variant">Interest Engine</span>
+                    <span className="font-bold uppercase text-on-surface">
+                      {primaryAgreement.interest_type}
+                    </span>
+                  </div>
+                  {primaryAgreement.interest_type !== 'none' && (
+                    <>
+                      <div className="flex justify-between pb-2 border-b border-outline-variant/10">
+                        <span className="text-on-surface-variant">Rate (APR)</span>
+                        <span className="font-bold text-primary">
+                          {primaryAgreement.interest_rate}%
+                        </span>
+                      </div>
+                      <div className="flex justify-between pb-2 border-b border-outline-variant/10">
+                        <span className="text-on-surface-variant">Compounding</span>
+                        <span className="font-bold uppercase text-on-surface">
+                          {primaryAgreement.compound_freq || 'Monthly'}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                  <div className="flex justify-between pb-2 border-b border-outline-variant/10">
+                    <span className="text-on-surface-variant">Origination</span>
+                    <span className="font-semibold text-on-surface">
+                      {new Date(primaryAgreement.created_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-on-surface-variant">Agreement Status</span>
+                    <Chip
+                      label={primaryAgreement.status}
+                      variant={
+                        primaryAgreement.status === 'active'
+                          ? 'active'
+                          : primaryAgreement.status === 'settled'
+                          ? 'settled'
+                          : primaryAgreement.status === 'pending'
+                          ? 'pending'
+                          : primaryAgreement.status === 'declined'
+                          ? 'declined'
+                          : 'default'
+                      }
+                    />
+                  </div>
                 </div>
-                {debts[0].interest_type !== 'none' && (
-                  <>
-                    <div className="flex justify-between pb-2 border-b border-outline-variant/10">
-                      <span className="text-on-surface-variant">Rate (APR)</span>
-                      <span className="font-bold text-primary">
-                        {debts[0].interest_rate}%
-                      </span>
-                    </div>
-                    <div className="flex justify-between pb-2 border-b border-outline-variant/10">
-                      <span className="text-on-surface-variant">Compounding</span>
-                      <span className="font-bold uppercase text-on-surface">
-                        {debts[0].compound_freq || 'Monthly'}
-                      </span>
-                    </div>
-                  </>
-                )}
-                <div className="flex justify-between pb-2 border-b border-outline-variant/10">
-                  <span className="text-on-surface-variant">Origination</span>
-                  <span className="font-semibold text-on-surface">
-                    {new Date(debts[0].created_at).toLocaleDateString()}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-on-surface-variant">Agreement Status</span>
-                  <Chip label={debts[0].status} variant={debts[0].status === 'active' ? 'active' : 'default'} />
-                </div>
-              </div>
-            ) : (
+              );
+            })() : (
               <p className="font-mono text-xs text-on-surface-variant">
                 No active agreements found
               </p>
@@ -547,16 +563,38 @@ function PersonDebtDetailContent() {
                   className={`p-4 rounded-xl border ${
                     isIncomingPending
                       ? 'border-amber-500/40 bg-amber-500/5'
+                      : d.status === 'declined'
+                      ? 'border-red-500/20 bg-surface-container-low/40 opacity-85'
                       : 'border-outline-variant/20 bg-surface-container-low'
                   } flex flex-col sm:flex-row sm:items-center justify-between gap-4`}
                 >
                   <div>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className={`font-mono text-xs font-bold ${isLender ? 'text-secondary' : 'text-error'}`}>
-                        {isLender ? 'You Lent' : 'You Borrowed'}
-                      </span>
-                      <Chip label={d.status} variant={d.status === 'active' ? 'active' : d.status === 'settled' ? 'settled' : 'default'} />
-                      {dueDateInfo && (
+                      {d.status === 'declined' ? (
+                        <span className="font-mono text-xs font-bold inline-flex items-center gap-1 text-red-500 dark:text-red-400">
+                          <span className="material-symbols-outlined text-[14px]">block</span>
+                          Declined
+                        </span>
+                      ) : (
+                        <span className={`font-mono text-xs font-bold ${isLender ? 'text-secondary' : 'text-error'}`}>
+                          {isLender ? 'You Lent' : 'You Borrowed'}
+                        </span>
+                      )}
+                      <Chip
+                        label={d.status}
+                        variant={
+                          d.status === 'active'
+                            ? 'active'
+                            : d.status === 'settled'
+                            ? 'settled'
+                            : d.status === 'pending'
+                            ? 'pending'
+                            : d.status === 'declined'
+                            ? 'declined'
+                            : 'default'
+                        }
+                      />
+                      {dueDateInfo && d.status !== 'declined' && (
                         <span className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-semibold border ${dueDateInfo.className} flex items-center gap-1`}>
                           <span className="material-symbols-outlined text-[12px]">
                             {dueDateInfo.isOverdue ? 'warning' : 'event'}
@@ -572,9 +610,19 @@ function PersonDebtDetailContent() {
                     </div>
 
                     <div className="font-mono text-sm font-bold text-on-surface mt-1">
-                      {formatCurrency(calc.currentBalance, d.currency || currency, { showDecimals: true })}
+                      {d.status === 'declined' ? (
+                        <span className="text-red-500/80 dark:text-red-400/80 line-through text-xs font-mono">
+                          Void
+                        </span>
+                      ) : (
+                        formatCurrency(calc.currentBalance, d.currency || currency, { showDecimals: true })
+                      )}
                       <span className="text-xs font-normal text-on-surface-variant ml-2">
-                        (Orig: {formatCurrency(d.principal, d.currency || currency)})
+                        (Orig: {d.status === 'declined' ? (
+                          <span className="line-through">{formatCurrency(d.principal, d.currency || currency)}</span>
+                        ) : (
+                          formatCurrency(d.principal, d.currency || currency)
+                        )})
                       </span>
                     </div>
 

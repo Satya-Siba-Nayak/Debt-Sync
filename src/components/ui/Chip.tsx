@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type ChipVariant = 'active' | 'pending' | 'overdue' | 'settled' | 'default';
+export type ChipVariant = 'active' | 'pending' | 'overdue' | 'settled' | 'declined' | 'default';
 
 interface ChipProps {
   label: string;
@@ -20,6 +20,8 @@ export function Chip({ label, variant = 'default', size = 'sm', icon }: ChipProp
     colorClasses = 'bg-[var(--error-container)] text-[var(--on-error-container)] border border-[var(--error)]/30';
   } else if (variant === 'settled') {
     colorClasses = 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20';
+  } else if (variant === 'declined') {
+    colorClasses = 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/30';
   }
 
   const sizeClasses = size === 'sm' ? 'px-2.5 py-0.5 text-xs' : 'px-3 py-1 text-sm';

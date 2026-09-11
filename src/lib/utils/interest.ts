@@ -22,6 +22,16 @@ export function calculateDebtBalance(
   const principal = Number(debt.principal) || 0;
   const totalPaid = payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
+  // Declined agreements are void: balance is 0 and no interest accrues
+  if (debt.status === 'declined') {
+    return {
+      principal,
+      totalAccruedInterest: 0,
+      totalPaid,
+      currentBalance: 0,
+    };
+  }
+
   if (debt.interest_type === 'none' || !debt.interest_rate || debt.interest_rate <= 0) {
     const currentBalance = Math.max(0, principal - totalPaid);
     return {
