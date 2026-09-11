@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
+import { checkAuthRateLimit, checkAccountStatusForLogin } from '@/lib/utils/rate-limit';
 
 function LoginContent() {
   const [authMode, setAuthMode] = useState<'password' | 'magic_link'>('password');
@@ -16,6 +17,10 @@ function LoginContent() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [emailError, setEmailError] = useState('');
+  const [emailRecommendation, setEmailRecommendation] = useState<{
+    type: 'not_found' | 'secondary' | 'shadow';
+    primaryEmail?: string;
+  } | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextUrl = searchParams.get('next') || '/';
@@ -27,6 +32,7 @@ function LoginContent() {
     setError('');
     setMessage('');
     setEmailError('');
+    setEmailRecommendation(null);
 
     const rawId = identifier.trim();
     if (!rawId) {
@@ -72,6 +78,7 @@ function LoginContent() {
     setError('');
     setMessage('');
     setEmailError('');
+    setEmailRecommendation(null);
 
     const cleanEmail = primaryEmail.trim().toLowerCase();
     if (!cleanEmail || !cleanEmail.includes('@')) {
@@ -80,18 +87,42 @@ function LoginContent() {
       return;
     }
 
-    // Check if user entered an alternate/secondary email instead of primary
-    try {
-      const { data: resolvedEmail } = await supabase.rpc('resolve_login_identifier', {
-        p_identifier: cleanEmail,
-      });
-      if (resolvedEmail && resolvedEmail.toLowerCase() !== cleanEmail) {
-        setEmailError('Please use your primary email address for magic links');
-        setLoading(false);
-        return;
-      }
-    } catch (_) {}
+    // 1. Check account existence & status first (do NOT send magic link if no account exists)
+    const accountStatus = await checkAccountStatusForLogin(cleanEmail);
 
+    if (accountStatus.status === 'not_found') {
+      setEmailError('No DebtSync account found with this email');
+      setEmailRecommendation({ type: 'not_found' });
+      setLoading(false);
+      return;
+    }
+
+    if (accountStatus.status === 'secondary') {
+      setEmailError('Please use your primary email address for magic links');
+      setEmailRecommendation({
+        type: 'secondary',
+        primaryEmail: accountStatus.primary_email,
+      });
+      setLoading(false);
+      return;
+    }
+
+    if (accountStatus.status === 'shadow') {
+      setEmailError('Account setup pending');
+      setEmailRecommendation({ type: 'shadow' });
+      setLoading(false);
+      return;
+    }
+
+    // 2. Background rate limit check: max 5 emails per 6 hours
+    const rateCheck = await checkAuthRateLimit('magic_link', cleanEmail);
+    if (!rateCheck.allowed) {
+      setError(rateCheck.message || 'Too many magic link requests. Please wait a while.');
+      setLoading(false);
+      return;
+    }
+
+    // 3. Account exists and rate limit passed: send magic link
     const { error: authError } = await supabase.auth.signInWithOtp({
       email: cleanEmail,
       options: {
@@ -102,7 +133,8 @@ function LoginContent() {
     if (authError) {
       const errMsg = authError.message.toLowerCase();
       if (errMsg.includes('not found') || errMsg.includes('invalid') || errMsg.includes('user')) {
-        setEmailError('Please use your primary email address');
+        setEmailError('No account found with this email address');
+        setEmailRecommendation({ type: 'not_found' });
       } else {
         setError(authError.message);
       }
@@ -121,6 +153,7 @@ function LoginContent() {
     setLoading(true);
     setError('');
     setMessage('');
+    setEmailRecommendation(null);
 
     let targetEmail = rawId.toLowerCase();
     try {
@@ -129,6 +162,22 @@ function LoginContent() {
       });
       if (resolved) targetEmail = resolved;
     } catch (_) {}
+
+    // Verify account existence before sending password reset
+    const accountStatus = await checkAccountStatusForLogin(targetEmail);
+    if (accountStatus.status === 'not_found') {
+      setError('No account found with this email or phone. Please sign up to create an account.');
+      setLoading(false);
+      return;
+    }
+
+    // Rate limit check: max 5 emails per 6 hours
+    const rateCheck = await checkAuthRateLimit('password_reset', targetEmail);
+    if (!rateCheck.allowed) {
+      setError(rateCheck.message || 'Too many password reset requests. Please wait a while.');
+      setLoading(false);
+      return;
+    }
 
     const { error: resetError } = await supabase.auth.resetPasswordForEmail(
       targetEmail,
@@ -253,6 +302,69 @@ function LoginContent() {
                     <span className="material-symbols-outlined text-[13px]">error</span>
                     <span>{emailError}</span>
                   </p>
+                )}
+
+                {emailRecommendation?.type === 'not_found' && (
+                  <div className="mt-2.5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs font-mono text-on-surface space-y-1 animate-fadeIn">
+                    <div className="flex items-center gap-1.5 font-bold text-amber-600 dark:text-amber-400">
+                      <span className="material-symbols-outlined text-[15px]">person_off</span>
+                      <span>No Account Found</span>
+                    </div>
+                    <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                      No DebtSync account is registered to this email.{' '}
+                      <Link
+                        href={`/signup${nextUrl && nextUrl !== '/' ? `?next=${encodeURIComponent(nextUrl)}` : ''}`}
+                        className="text-primary font-bold hover:underline"
+                      >
+                        Create an account here
+                      </Link>
+                      , or if you already have an account under another email, sign in with that address and add this as a secondary email in Account Settings.
+                    </p>
+                  </div>
+                )}
+
+                {emailRecommendation?.type === 'secondary' && (
+                  <div className="mt-2.5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs font-mono text-on-surface space-y-1 animate-fadeIn">
+                    <div className="flex items-center gap-1.5 font-bold text-amber-600 dark:text-amber-400">
+                      <span className="material-symbols-outlined text-[15px]">alternate_email</span>
+                      <span>Secondary Email Address</span>
+                    </div>
+                    <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                      This address is registered as a secondary/work email{emailRecommendation.primaryEmail ? ` for ${emailRecommendation.primaryEmail}` : ''}.
+                      Magic links are only sent to primary accounts. Switch to the{' '}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAuthMode('password');
+                          setIdentifier(primaryEmail);
+                          setEmailRecommendation(null);
+                        }}
+                        className="text-primary font-bold hover:underline cursor-pointer"
+                      >
+                        Password tab
+                      </button>{' '}
+                      to sign in with this email, or enter your primary email.
+                    </p>
+                  </div>
+                )}
+
+                {emailRecommendation?.type === 'shadow' && (
+                  <div className="mt-2.5 p-3 rounded-xl bg-primary/10 border border-primary/30 text-xs font-mono text-on-surface space-y-1 animate-fadeIn">
+                    <div className="flex items-center gap-1.5 font-bold text-primary">
+                      <span className="material-symbols-outlined text-[15px]">mail</span>
+                      <span>Invitation Pending</span>
+                    </div>
+                    <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                      A peer has recorded debts with you, but you have not created your DebtSync account yet.{' '}
+                      <Link
+                        href={`/signup${nextUrl && nextUrl !== '/' ? `?next=${encodeURIComponent(nextUrl)}` : ''}`}
+                        className="text-primary font-bold hover:underline"
+                      >
+                        Sign up to activate your account
+                      </Link>{' '}
+                      and access your shared ledger.
+                    </p>
+                  </div>
                 )}
               </div>
             )}

@@ -8,6 +8,7 @@ import { PhoneInput } from '@/components/ui/PhoneInput';
 import { checkIdentifierConflict } from '@/lib/utils/profile-lookup';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { getRandomSampleName } from '@/lib/utils/random-placeholders';
+import { checkAuthRateLimit } from '@/lib/utils/rate-limit';
 
 function SignupContent() {
   const [email, setEmail] = useState('');
@@ -41,6 +42,14 @@ function SignupContent() {
     const conflict = await checkIdentifierConflict(cleanEmail, phone.trim() || undefined);
     if (conflict.hasConflict) {
       setError(conflict.message || 'An account already exists with this email (or alias) or phone number.');
+      setLoading(false);
+      return;
+    }
+
+    // Background rate limit protection: max 3/hr per session, max 10/day per IP
+    const rateCheck = await checkAuthRateLimit('signup', cleanEmail);
+    if (!rateCheck.allowed) {
+      setError(rateCheck.message || 'Too many account creation attempts. Please try again later.');
       setLoading(false);
       return;
     }
