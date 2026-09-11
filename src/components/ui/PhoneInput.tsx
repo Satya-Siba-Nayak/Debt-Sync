@@ -37,9 +37,12 @@ export function PhoneInput({
   }, [value, defaultCountryCode]);
 
   const currentCountry =
-    COUNTRY_CODES.find((c) => c.dialCode === selectedDialCode) ||
-    COUNTRY_CODES.find((c) => c.dialCode === '+91') ||
-    COUNTRY_CODES[0];
+    COUNTRY_CODES.find((c) => c.dialCode === selectedDialCode) || {
+      name: 'International',
+      code: 'INT',
+      dialCode: selectedDialCode,
+      flag: '🌐',
+    };
 
   const handleCountryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newCode = e.target.value;
@@ -103,6 +106,11 @@ export function PhoneInput({
           aria-label="Select Country Code"
           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-sm"
         >
+          {!COUNTRY_CODES.some((c) => c.dialCode === selectedDialCode) && (
+            <option value={selectedDialCode}>
+              🌐 International ({selectedDialCode})
+            </option>
+          )}
           {COUNTRY_CODES.map((country: CountryCode) => (
             <option key={`${country.code}-${country.dialCode}`} value={country.dialCode}>
               {country.flag} {country.name} ({country.dialCode})
