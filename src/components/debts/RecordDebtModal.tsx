@@ -16,6 +16,13 @@ interface RecordDebtModalProps {
   preselectedContactId?: string;
 }
 
+interface PersonOption {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string | null;
+}
+
 export function RecordDebtModal({
   isOpen,
   onClose,
@@ -25,7 +32,7 @@ export function RecordDebtModal({
   const supabase = createClient();
 
   // Form states
-  const [contacts, setContacts] = useState<(Contact & { profile?: Profile })[]>([]);
+  const [people, setPeople] = useState<PersonOption[]>([]);
   const [selectedPersonId, setSelectedPersonId] = useState(preselectedContactId || '');
   const [newPersonName, setNewPersonName] = useState('');
   const [newPersonEmail, setNewPersonEmail] = useState('');
@@ -44,25 +51,94 @@ export function RecordDebtModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Load contacts
+  // Keep selectedPersonId synchronized when preselectedContactId or isOpen changes
+  useEffect(() => {
+    if (preselectedContactId) {
+      setSelectedPersonId(preselectedContactId);
+      setIsAddingNewPerson(false);
+    }
+  }, [preselectedContactId, isOpen]);
+
+  // Load contacts and counterparties
   useEffect(() => {
     async function loadContacts() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data } = await supabase
+      const peopleMap = new Map<string, PersonOption>();
+
+      // 1. Fetch from contacts table
+      const { data: contactData } = await supabase
         .from('contacts')
         .select(`
-          id, owner_id, contact_id, nickname, created_at,
-          profile:profiles!contacts_contact_id_fkey(id, email, full_name, phone, is_shadow, secondary_emails)
+          contact_id, nickname,
+          profile:profiles!contacts_contact_id_fkey(id, email, full_name, phone)
         `)
         .eq('owner_id', user.id);
 
-      if (data) {
-        setContacts(data as any);
-        if (!selectedPersonId && data.length > 0 && !preselectedContactId) {
-          setSelectedPersonId(data[0].contact_id);
+      if (contactData) {
+        for (const c of contactData as any[]) {
+          if (c.profile) {
+            peopleMap.set(c.contact_id, {
+              id: c.contact_id,
+              name: c.nickname || c.profile.full_name || c.profile.email,
+              email: c.profile.email,
+              phone: c.profile.phone,
+            });
+          }
         }
+      }
+
+      // 2. Fetch counterparties from existing debts
+      const { data: debtData } = await supabase
+        .from('debts')
+        .select(`
+          lender_id, borrower_id,
+          lender:profiles!debts_lender_id_fkey(id, email, full_name, phone),
+          borrower:profiles!debts_borrower_id_fkey(id, email, full_name, phone)
+        `)
+        .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`);
+
+      if (debtData) {
+        for (const d of debtData as any[]) {
+          const isLender = d.lender_id === user.id;
+          const otherParty = isLender ? d.borrower : d.lender;
+          if (otherParty && !peopleMap.has(otherParty.id)) {
+            peopleMap.set(otherParty.id, {
+              id: otherParty.id,
+              name: otherParty.full_name || otherParty.email,
+              email: otherParty.email,
+              phone: otherParty.phone,
+            });
+          }
+        }
+      }
+
+      // 3. If preselectedContactId was passed, ensure their profile is fetched if not yet present
+      if (preselectedContactId && !peopleMap.has(preselectedContactId)) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('id, email, full_name, phone')
+          .eq('id', preselectedContactId)
+          .single();
+
+        if (profile) {
+          peopleMap.set(profile.id, {
+            id: profile.id,
+            name: profile.full_name || profile.email,
+            email: profile.email,
+            phone: profile.phone,
+          });
+        }
+      }
+
+      const peopleList = Array.from(peopleMap.values());
+      setPeople(peopleList);
+
+      if (preselectedContactId) {
+        setSelectedPersonId(preselectedContactId);
+      } else if (!selectedPersonId && peopleList.length > 0) {
+        setSelectedPersonId(peopleList[0].id);
       }
     }
 
@@ -73,7 +149,7 @@ export function RecordDebtModal({
       }
       loadContacts();
     }
-  }, [isOpen, preselectedContactId, supabase]);
+  }, [isOpen, preselectedContactId, selectedPersonId, supabase]);
 
   // Projected growth preview (12 months)
   const projection = projectDebtGrowth(
@@ -94,7 +170,7 @@ export function RecordDebtModal({
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('User not logged in');
 
-      let targetUserId = selectedPersonId;
+      let targetUserId = selectedPersonId || preselectedContactId || '';
 
       // If user wants to add a new person inline
       if (isAddingNewPerson) {
@@ -133,6 +209,8 @@ export function RecordDebtModal({
           contact_id: targetUserId,
           nickname: newPersonName.trim() || null,
         });
+      } else if (!targetUserId && people.length > 0) {
+        targetUserId = people[0].id;
       }
 
       if (!targetUserId) {
@@ -161,6 +239,16 @@ export function RecordDebtModal({
         .single();
 
       if (debtError) throw debtError;
+
+      // Ensure the other party is in user's contacts
+      try {
+        await supabase.from('contacts').insert({
+          owner_id: user.id,
+          contact_id: targetUserId,
+        });
+      } catch (_) {
+        // Ignore duplicate error if already a contact
+      }
 
       // Create activity log
       await supabase.from('activity_log').insert({
@@ -224,16 +312,16 @@ export function RecordDebtModal({
 
               {!isAddingNewPerson ? (
                 <select
-                  value={selectedPersonId}
+                  value={selectedPersonId || preselectedContactId || (people[0]?.id ?? '')}
                   onChange={(e) => setSelectedPersonId(e.target.value)}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--primary)]/10 outline-none text-sm font-medium"
                 >
-                  {contacts.length === 0 && (
+                  {people.length === 0 && (
                     <option value="">No contacts yet — click + New Person</option>
                   )}
-                  {contacts.map((c) => (
-                    <option key={c.contact_id} value={c.contact_id}>
-                      {c.nickname || c.profile?.full_name || c.profile?.email} ({c.profile?.email})
+                  {people.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} {p.email ? `(${p.email})` : p.phone ? `(${p.phone})` : ''}
                     </option>
                   ))}
                 </select>

@@ -29,6 +29,24 @@ export default function SettingsPage() {
   const [secondaryEmails, setSecondaryEmails] = useState<string[]>([]);
   const [newSecondaryEmail, setNewSecondaryEmail] = useState('');
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setIsStandalone(
+        window.matchMedia('(display-mode: standalone)').matches ||
+        (window.navigator as any).standalone === true
+      );
+
+      const handler = (e: any) => {
+        e.preventDefault();
+        setDeferredInstallPrompt(e);
+      };
+      window.addEventListener('beforeinstallprompt', handler);
+      return () => window.removeEventListener('beforeinstallprompt', handler);
+    }
+  }, []);
 
   useEffect(() => {
     async function loadSettings() {
@@ -514,6 +532,48 @@ export default function SettingsPage() {
               placeholder="Leave blank to keep unchanged"
               className="w-full px-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-sm outline-none focus:border-[var(--primary)]"
             />
+          </div>
+        </div>
+
+        {/* PWA & Mobile App */}
+        <div className="pt-6 border-t border-[var(--outline-variant)]/20 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="font-mono text-xs uppercase tracking-wider font-semibold text-[var(--on-surface-variant)]">
+                Installable App (PWA)
+              </h3>
+              <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">
+                {isStandalone
+                  ? 'DebtSync is currently running in standalone installed app mode.'
+                  : 'Install DebtSync on your phone or computer for instant home-screen launch and offline support.'}
+              </p>
+            </div>
+            <div>
+              {isStandalone ? (
+                <span className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20 inline-flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[16px]">check_circle</span>
+                  Installed
+                </span>
+              ) : deferredInstallPrompt ? (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    deferredInstallPrompt.prompt();
+                    const choice = await deferredInstallPrompt.userChoice;
+                    if (choice.outcome === 'accepted') setIsStandalone(true);
+                    setDeferredInstallPrompt(null);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 transition-opacity shadow-xs inline-flex items-center gap-1.5"
+                >
+                  <span className="material-symbols-outlined text-[18px]">install_mobile</span>
+                  Install App
+                </button>
+              ) : (
+                <span className="text-xs font-mono text-[var(--outline)]">
+                  Use browser menu &rarr; &quot;Add to Home Screen&quot;
+                </span>
+              )}
+            </div>
           </div>
         </div>
 

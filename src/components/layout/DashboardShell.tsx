@@ -5,6 +5,7 @@ import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { BottomNav } from './BottomNav';
 import { RecordDebtModal } from '../debts/RecordDebtModal';
+import { PWAInstallPrompt } from '../ui/PWAInstallPrompt';
 import { createClient } from '@/lib/supabase/client';
 
 import { useRouter } from 'next/navigation';
@@ -81,6 +82,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           window.dispatchEvent(new CustomEvent('debtsync:refresh'));
         }}
       />
+      {/* PWA Install Prompt */}
+      <PWAInstallPrompt />
     </div>
   );
 }
