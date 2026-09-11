@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment } from '@/lib/types/database';
 import { calculateDebtBalance, calculatePortfolioAccrualRates } from '@/lib/utils/interest';
@@ -33,8 +33,11 @@ export default function GlobalDashboardPage() {
   const [totalInterestAccrued, setTotalInterestAccrued] = useState(0);
   const [borrowingInterestAccrued, setBorrowingInterestAccrued] = useState(0);
   const [dailyAccrualRate, setDailyAccrualRate] = useState(0);
+  const isFetchingDashboardRef = useRef(false);
 
   const fetchDashboardData = useCallback(async () => {
+    if (isFetchingDashboardRef.current) return;
+    isFetchingDashboardRef.current = true;
     setLoading(true);
     try {
       const user = await getCurrentUserFast(supabase);
@@ -119,8 +122,9 @@ export default function GlobalDashboardPage() {
       console.error('Error fetching dashboard data:', err);
     } finally {
       setLoading(false);
+      isFetchingDashboardRef.current = false;
     }
-  }, [supabase]);
+  }, []);
 
   const handleAcceptDebt = async (debtId: string, decision: 'active' | 'declined') => {
     try {
@@ -175,7 +179,7 @@ export default function GlobalDashboardPage() {
       window.removeEventListener('debtsync:refresh', handleRefresh);
       supabase.removeChannel(channel);
     };
-  }, [fetchDashboardData, supabase]);
+  }, [fetchDashboardData]);
 
   const incomingPendingDebts = debts.filter(
     (d) => d.status === 'pending' && d.created_by !== currentUserId

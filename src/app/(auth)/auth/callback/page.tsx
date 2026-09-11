@@ -15,7 +15,7 @@ function CallbackHandler() {
 
       if (error || !session) {
         // Wait briefly in case Supabase is parsing hash fragments
-        const { data: authListener } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
+        const { data: authListener } = supabase.auth.onAuthStateChange(async (event: any, currentSession: any) => {
           if (event === 'SIGNED_IN' && currentSession) {
             await handleProfile(currentSession.user);
             router.replace('/');
@@ -60,7 +60,7 @@ function CallbackHandler() {
             .eq('is_shadow', true);
 
           if (allShadows) {
-            shadowProfile = allShadows.find((s) => 
+            shadowProfile = allShadows.find((s: any) => 
               isSameEmail(s.email, user.email) ||
               (user.user_metadata?.phone && s.phone && isSamePhone(s.phone, user.user_metadata.phone))
             );

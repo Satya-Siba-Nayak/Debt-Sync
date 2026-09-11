@@ -61,9 +61,13 @@ export function NotificationCenter() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const isFetchingRef = useRef(false);
+  const channelNameRef = useRef(`notification-center-${Math.random().toString(36).substring(2, 8)}`);
   const supabase = createClient();
 
   const fetchNotifications = useCallback(async () => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -144,7 +148,7 @@ export function NotificationCenter() {
           .select('id')
           .eq('lender_id', user.id);
 
-        const debtIds = (myLentDebts || []).map((d) => d.id);
+        const debtIds = ((myLentDebts as any[]) || []).map((d: any) => d.id);
 
         if (debtIds.length > 0) {
           const { data: unverifiedPayments } = await supabase
@@ -178,8 +182,10 @@ export function NotificationCenter() {
       } catch (_) {}
     } catch (err) {
       console.error('Error loading notifications:', err);
+    } finally {
+      isFetchingRef.current = false;
     }
-  }, [supabase]);
+  }, []);
 
   useEffect(() => {
     fetchNotifications();
@@ -188,17 +194,17 @@ export function NotificationCenter() {
     window.addEventListener('debtsync:refresh', handleRefresh);
 
     const channel = supabase
-      .channel('notification-center-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'debts' }, fetchNotifications)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, fetchNotifications)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'contact_requests' }, fetchNotifications)
+      .channel(channelNameRef.current)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'debts' }, () => fetchNotifications())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, () => fetchNotifications())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contact_requests' }, () => fetchNotifications())
       .subscribe();
 
     return () => {
       window.removeEventListener('debtsync:refresh', handleRefresh);
       supabase.removeChannel(channel);
     };
-  }, [fetchNotifications, supabase]);
+  }, [fetchNotifications]);
 
   // Click outside listener
   useEffect(() => {

@@ -1,4 +1,4 @@
-﻿const CACHE_NAME = 'debtsync-cache-v1';
+const CACHE_NAME = 'debtsync-cache-v2';
 const PRECACHE_ASSETS = [
   '/',
   '/manifest.json',
@@ -49,9 +49,15 @@ self.addEventListener('fetch', (event) => {
           }
           return networkResponse;
         })
-        .catch(() => {
-          return caches.match(event.request).then((cachedResponse) => {
-            return cachedResponse || caches.match('/');
+        .catch(async () => {
+          const matched = await caches.match(event.request);
+          if (matched) return matched;
+          const root = await caches.match('/');
+          if (root) return root;
+          return new Response('Network offline. Please reload when reconnected.', {
+            status: 503,
+            statusText: 'Service Unavailable',
+            headers: { 'Content-Type': 'text/plain' },
           });
         })
     );
@@ -71,7 +77,7 @@ self.addEventListener('fetch', (event) => {
           }
           return networkResponse;
         })
-        .catch(() => cachedResponse);
+        .catch(() => cachedResponse || new Response(null, { status: 404, statusText: 'Not Found' }));
 
       return cachedResponse || fetchPromise;
     })

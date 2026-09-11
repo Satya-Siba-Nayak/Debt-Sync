@@ -1,4 +1,4 @@
-﻿import { createClient } from '../supabase/client';
+import { createClient } from '../supabase/client';
 import { isSameEmail, isSamePhone } from './email-normalize';
 
 export async function claimUserProfile(user: any) {
@@ -32,7 +32,7 @@ export async function claimUserProfile(user: any) {
           .eq('is_shadow', true);
 
         if (allShadows) {
-          shadowProfile = allShadows.find((s) =>
+          shadowProfile = allShadows.find((s: any) =>
             isSameEmail(s.email, user.email) ||
             (user.user_metadata?.phone && s.phone && isSamePhone(s.phone, user.user_metadata.phone))
           );
@@ -68,7 +68,7 @@ export async function claimUserProfile(user: any) {
         .eq('is_shadow', true);
 
       if (shadowProfiles) {
-        const matchingShadows = shadowProfiles.filter((s) =>
+        const matchingShadows = shadowProfiles.filter((s: any) =>
           isSameEmail(s.email, user.email) ||
           profile.secondary_emails?.some((sec: string) => isSameEmail(s.email, sec))
         );

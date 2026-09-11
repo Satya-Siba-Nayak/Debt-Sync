@@ -87,7 +87,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     };
     window.addEventListener('debtsync:user_updated', handleUserUpdated);
     return () => window.removeEventListener('debtsync:user_updated', handleUserUpdated);
-  }, [router, supabase]);
+  }, [router]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--background)] text-[var(--on-background)] font-body-md">
