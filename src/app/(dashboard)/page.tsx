@@ -9,6 +9,7 @@ import { LiveTicker } from '@/components/dashboard/LiveTicker';
 import { CashflowChart } from '@/components/dashboard/CashflowChart';
 import { formatCurrency } from '@/lib/utils/currency';
 import { Chip } from '@/components/ui/Chip';
+import { Avatar } from '@/components/ui/Avatar';
 import Link from 'next/link';
 
 export default function GlobalDashboardPage() {
@@ -51,8 +52,8 @@ export default function GlobalDashboardPage() {
         .from('debts')
         .select(`
           *,
-          lender:profiles!debts_lender_id_fkey(id, email, full_name),
-          borrower:profiles!debts_borrower_id_fkey(id, email, full_name)
+          lender:profiles!debts_lender_id_fkey(id, email, full_name, avatar_url),
+          borrower:profiles!debts_borrower_id_fkey(id, email, full_name, avatar_url)
         `)
         .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`)
         .order('created_at', { ascending: false });
@@ -186,36 +187,54 @@ export default function GlobalDashboardPage() {
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse font-body-md text-sm">
-              <thead>
-                <tr className="border-b border-[var(--outline-variant)]/20 text-xs font-mono text-[var(--on-surface-variant)] uppercase tracking-wider">
-                  <th className="pb-3 font-semibold">Counterparty</th>
-                  <th className="pb-3 font-semibold">Role</th>
-                  <th className="pb-3 font-semibold">Interest Terms</th>
-                  <th className="pb-3 font-semibold">Balance</th>
-                  <th className="pb-3 font-semibold">Status</th>
-                  <th className="pb-3 font-semibold text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--outline-variant)]/10">
-                {debts.slice(0, 6).map((d) => {
-                  const isLender = d.lender_id === currentUserId;
-                  const otherPerson = isLender ? d.borrower : d.lender;
-                  const name = otherPerson?.full_name || otherPerson?.email || 'Unknown';
-                  const debtPayments = payments.filter((p) => p.debt_id === d.id);
-                  const calc = calculateDebtBalance(d, debtPayments);
+          <div>
+            {/* Mobile Card List (< md screens) */}
+            <div className="md:hidden space-y-3">
+              {debts.slice(0, 6).map((d) => {
+                const isLender = d.lender_id === currentUserId;
+                const otherPerson = isLender ? d.borrower : d.lender;
+                const name = otherPerson?.full_name || otherPerson?.email || 'Unknown';
+                const debtPayments = payments.filter((p) => p.debt_id === d.id);
+                const calc = calculateDebtBalance(d, debtPayments);
 
-                  return (
-                    <tr key={d.id} className="hover:bg-[var(--surface-container-low)]/50 transition-colors">
-                      <td className="py-4">
-                        <div className="font-semibold text-[var(--on-surface)]">{name}</div>
-                        <div className="font-mono text-xs text-[var(--on-surface-variant)]">
-                          {otherPerson?.email}
+                return (
+                  <Link
+                    key={d.id}
+                    href={`/directory/detail?id=${otherPerson?.id || d.id}`}
+                    className="block p-4 rounded-xl bg-[var(--surface-container-low)]/70 hover:bg-[var(--surface-container-high)]/70 border border-[var(--outline-variant)]/20 transition-all shadow-xs"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <Avatar
+                          src={otherPerson?.avatar_url}
+                          name={name}
+                          size="md"
+                        />
+                        <div className="min-w-0">
+                          <p className="font-semibold text-sm text-[var(--on-surface)] truncate">
+                            {name}
+                          </p>
+                          <p className="font-mono text-xs text-[var(--on-surface-variant)] truncate">
+                            {otherPerson?.email}
+                          </p>
                         </div>
-                      </td>
+                      </div>
+                      <Chip
+                        label={d.status}
+                        variant={
+                          d.status === 'active'
+                            ? 'active'
+                            : d.status === 'settled'
+                            ? 'settled'
+                            : d.status === 'pending'
+                            ? 'pending'
+                            : 'default'
+                        }
+                      />
+                    </div>
 
-                      <td className="py-4">
+                    <div className="mt-3 pt-3 border-t border-[var(--outline-variant)]/15 flex items-center justify-between">
+                      <div>
                         <span
                           className={`font-mono text-xs font-bold inline-flex items-center gap-1 ${
                             isLender ? 'text-[var(--secondary)]' : 'text-[var(--error)]'
@@ -224,52 +243,122 @@ export default function GlobalDashboardPage() {
                           <span className="material-symbols-outlined text-[14px]">
                             {isLender ? 'arrow_upward' : 'arrow_downward'}
                           </span>
-                          {isLender ? 'Lent' : 'Borrowed'}
+                          {isLender ? 'You Lent' : 'You Borrowed'}
                         </span>
-                      </td>
+                        <div className="font-mono text-[11px] text-[var(--on-surface-variant)] mt-0.5">
+                          {d.interest_type === 'none' ? '0% Free' : `${d.interest_rate}% ${d.interest_type}`}
+                        </div>
+                      </div>
 
-                      <td className="py-4 font-mono text-xs text-[var(--on-surface-variant)]">
-                        {d.interest_type === 'none' ? (
-                          <span>0% (Interest-Free)</span>
-                        ) : (
-                          <span>
-                            {d.interest_rate}% {d.interest_type} ({d.compound_freq || 'yr'})
+                      <div className="text-right">
+                        <span className="font-mono text-xs text-[var(--on-surface-variant)] block">
+                          Remaining
+                        </span>
+                        <span className="font-mono font-bold text-base text-[var(--on-surface)]">
+                          {formatCurrency(calc.currentBalance, d.currency || currency, { showDecimals: true })}
+                        </span>
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+
+            {/* Desktop Table (>= md screens) */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left border-collapse font-body-md text-sm">
+                <thead>
+                  <tr className="border-b border-[var(--outline-variant)]/20 text-xs font-mono text-[var(--on-surface-variant)] uppercase tracking-wider">
+                    <th className="pb-3 font-semibold">Counterparty</th>
+                    <th className="pb-3 font-semibold">Role</th>
+                    <th className="pb-3 font-semibold">Interest Terms</th>
+                    <th className="pb-3 font-semibold">Balance</th>
+                    <th className="pb-3 font-semibold">Status</th>
+                    <th className="pb-3 font-semibold text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--outline-variant)]/10">
+                  {debts.slice(0, 6).map((d) => {
+                    const isLender = d.lender_id === currentUserId;
+                    const otherPerson = isLender ? d.borrower : d.lender;
+                    const name = otherPerson?.full_name || otherPerson?.email || 'Unknown';
+                    const debtPayments = payments.filter((p) => p.debt_id === d.id);
+                    const calc = calculateDebtBalance(d, debtPayments);
+
+                    return (
+                      <tr key={d.id} className="hover:bg-[var(--surface-container-low)]/50 transition-colors">
+                        <td className="py-4">
+                          <div className="flex items-center gap-3">
+                            <Avatar
+                              src={otherPerson?.avatar_url}
+                              name={name}
+                              size="sm"
+                            />
+                            <div>
+                              <div className="font-semibold text-[var(--on-surface)]">{name}</div>
+                              <div className="font-mono text-xs text-[var(--on-surface-variant)]">
+                                {otherPerson?.email}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td className="py-4">
+                          <span
+                            className={`font-mono text-xs font-bold inline-flex items-center gap-1 ${
+                              isLender ? 'text-[var(--secondary)]' : 'text-[var(--error)]'
+                            }`}
+                          >
+                            <span className="material-symbols-outlined text-[14px]">
+                              {isLender ? 'arrow_upward' : 'arrow_downward'}
+                            </span>
+                            {isLender ? 'Lent' : 'Borrowed'}
                           </span>
-                        )}
-                      </td>
+                        </td>
 
-                      <td className="py-4 font-mono font-bold text-sm text-[var(--on-surface)]">
-                        {formatCurrency(calc.currentBalance, d.currency || currency, { showDecimals: true })}
-                      </td>
+                        <td className="py-4 font-mono text-xs text-[var(--on-surface-variant)]">
+                          {d.interest_type === 'none' ? (
+                            <span>0% (Interest-Free)</span>
+                          ) : (
+                            <span>
+                              {d.interest_rate}% {d.interest_type} ({d.compound_freq || 'yr'})
+                            </span>
+                          )}
+                        </td>
 
-                      <td className="py-4">
-                        <Chip
-                          label={d.status}
-                          variant={
-                            d.status === 'active'
-                              ? 'active'
-                              : d.status === 'settled'
-                              ? 'settled'
-                              : d.status === 'pending'
-                              ? 'pending'
-                              : 'default'
-                          }
-                        />
-                      </td>
+                        <td className="py-4 font-mono font-bold text-sm text-[var(--on-surface)]">
+                          {formatCurrency(calc.currentBalance, d.currency || currency, { showDecimals: true })}
+                        </td>
 
-                      <td className="py-4 text-right">
-                        <Link
-                          href={`/directory/detail?id=${otherPerson?.id || d.id}`}
-                          className="font-mono text-xs text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] font-bold hover:underline"
-                        >
-                          Details
-                        </Link>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        <td className="py-4">
+                          <Chip
+                            label={d.status}
+                            variant={
+                              d.status === 'active'
+                                ? 'active'
+                                : d.status === 'settled'
+                                ? 'settled'
+                                : d.status === 'pending'
+                                ? 'pending'
+                                : 'default'
+                            }
+                          />
+                        </td>
+
+                        <td className="py-4 text-right">
+                          <Link
+                            href={`/directory/detail?id=${otherPerson?.id || d.id}`}
+                            className="font-mono text-xs text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] font-bold hover:underline"
+                          >
+                            Details
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </section>

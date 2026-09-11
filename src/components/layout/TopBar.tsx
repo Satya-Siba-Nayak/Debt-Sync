@@ -3,15 +3,17 @@
 import React from 'react';
 import Link from 'next/link';
 import { ThemeToggle } from '../ui/ThemeToggle';
+import { Avatar } from '../ui/Avatar';
 
 interface TopBarProps {
   title?: string;
   userName?: string;
   userEmail?: string;
+  avatarUrl?: string | null;
   onNewTransaction?: () => void;
 }
 
-export function TopBar({ title = 'Global Dashboard', userName, userEmail, onNewTransaction }: TopBarProps) {
+export function TopBar({ title = 'Global Dashboard', userName, userEmail, avatarUrl, onNewTransaction }: TopBarProps) {
   const initial = (userName || userEmail || 'U').charAt(0).toUpperCase();
 
   return (
@@ -39,9 +41,7 @@ export function TopBar({ title = 'Global Dashboard', userName, userEmail, onNewT
             </button>
           )}
           <Link href="/settings">
-            <div className="w-8 h-8 rounded-full bg-[var(--secondary-container)] text-[var(--on-secondary-container)] font-bold text-xs flex items-center justify-center border border-[var(--secondary)]/20">
-              {initial}
-            </div>
+            <Avatar src={avatarUrl} name={userName || userEmail} size="sm" className="rounded-full" />
           </Link>
         </div>
       </header>
@@ -64,9 +64,12 @@ export function TopBar({ title = 'Global Dashboard', userName, userEmail, onNewT
           </Link>
 
           <Link href="/settings" className="flex items-center gap-2.5 group">
-            <div className="w-9 h-9 rounded-full bg-[var(--secondary-container)] text-[var(--on-secondary-container)] font-bold text-sm flex items-center justify-center border border-[var(--secondary)]/20 shadow-sm group-hover:ring-2 ring-[var(--primary)]/20 transition-all">
-              {initial}
-            </div>
+            <Avatar
+              src={avatarUrl}
+              name={userName || userEmail}
+              size="sm"
+              className="rounded-full group-hover:ring-2 ring-[var(--primary)]/30 transition-all shadow-sm"
+            />
             {userName && (
               <span className="font-mono text-xs font-semibold text-[var(--on-surface)]">
                 {userName}

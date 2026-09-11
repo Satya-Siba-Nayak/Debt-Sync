@@ -7,6 +7,7 @@ import { Debt, Payment, ActivityLogEntry, Profile } from '@/lib/types/database';
 import { calculateDebtBalance } from '@/lib/utils/interest';
 import { formatCurrency } from '@/lib/utils/currency';
 import { Chip } from '@/components/ui/Chip';
+import { Avatar } from '@/components/ui/Avatar';
 import { PaymentModal } from '@/components/debts/PaymentModal';
 import { RecordDebtModal } from '@/components/debts/RecordDebtModal';
 import Link from 'next/link';
@@ -157,9 +158,12 @@ function PersonDebtDetailContent() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/30 shadow-sm">
         <div className="flex items-center gap-4">
-          <div className="w-14 h-14 rounded-2xl bg-surface-container-high text-primary font-bold text-xl flex items-center justify-center border border-outline-variant/20 shadow-inner">
-            {(person?.full_name || person?.email || 'U').charAt(0).toUpperCase()}
-          </div>
+          <Avatar
+            src={person?.avatar_url}
+            name={person?.full_name || person?.email || 'User'}
+            size="lg"
+            className="rounded-2xl shadow-inner border border-outline-variant/20"
+          />
           <div>
             <div className="flex items-center gap-2.5">
               <h1 className="font-heading text-xl md:text-2xl font-bold text-on-surface">

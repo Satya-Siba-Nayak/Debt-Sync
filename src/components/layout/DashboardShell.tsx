@@ -11,7 +11,7 @@ import { useRouter } from 'next/navigation';
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
-  const [userProfile, setUserProfile] = useState<{ full_name?: string; email?: string } | null>(null);
+  const [userProfile, setUserProfile] = useState<{ full_name?: string; email?: string; avatar_url?: string | null } | null>(null);
   const supabase = createClient();
   const router = useRouter();
 
@@ -25,16 +25,29 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('full_name, email')
+        .select('full_name, email, avatar_url')
         .eq('id', user.id)
         .single();
 
       setUserProfile({
         full_name: profile?.full_name || user.user_metadata?.full_name,
         email: user.email,
+        avatar_url: profile?.avatar_url || null,
       });
     }
     loadUser();
+
+    // Listen for avatar / name updates from settings
+    const handleUserUpdated = (e: any) => {
+      const detail = e.detail;
+      setUserProfile((prev) => ({
+        ...prev,
+        full_name: detail.fullName || prev?.full_name,
+        avatar_url: detail.avatarUrl !== undefined ? detail.avatarUrl : prev?.avatar_url,
+      }));
+    };
+    window.addEventListener('debtsync:user_updated', handleUserUpdated);
+    return () => window.removeEventListener('debtsync:user_updated', handleUserUpdated);
   }, [router, supabase]);
 
   return (
@@ -43,10 +56,11 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       <Sidebar onNewTransaction={() => setIsRecordModalOpen(true)} />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col md:ml-60 h-screen overflow-y-auto pb-20 md:pb-8">
+      <div className="flex-1 flex flex-col md:ml-60 h-screen overflow-y-auto pb-24 md:pb-8">
         <TopBar
           userName={userProfile?.full_name}
           userEmail={userProfile?.email}
+          avatarUrl={userProfile?.avatar_url}
           onNewTransaction={() => setIsRecordModalOpen(true)}
         />
 

@@ -36,18 +36,21 @@ export function Modal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm animate-fade-in overflow-y-auto">
       <div
         className="fixed inset-0"
         onClick={onClose}
         aria-hidden="true"
       />
       <div
-        className={`relative w-full ${maxWidth} bg-[var(--surface-container-lowest)] rounded-2xl border border-[var(--outline-variant)]/40 shadow-2xl p-6 md:p-8 z-10 my-8`}
+        className={`relative w-full ${maxWidth} bg-[var(--surface-container-lowest)] rounded-t-3xl sm:rounded-2xl border-t sm:border border-[var(--outline-variant)]/40 shadow-2xl p-5 sm:p-8 z-10 max-h-[88vh] overflow-y-auto sm:my-8`}
         role="dialog"
         aria-modal="true"
       >
-        <div className="flex items-start justify-between pb-4 border-b border-[var(--outline-variant)]/20 mb-6">
+        {/* Mobile Pull Handle Pill */}
+        <div className="w-10 h-1 rounded-full bg-[var(--outline-variant)]/60 mx-auto mb-4 sm:hidden" />
+
+        <div className="flex items-start justify-between pb-3.5 border-b border-[var(--outline-variant)]/20 mb-5">
           <div>
             <h2 className="text-xl font-heading font-bold text-[var(--on-surface)]">
               {title}

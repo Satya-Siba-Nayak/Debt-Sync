@@ -8,6 +8,7 @@ import { PhoneInput } from '@/components/ui/PhoneInput';
 import { COUNTRY_CODES, CountryCode } from '@/lib/constants/country-codes';
 import { checkIdentifierConflict } from '@/lib/utils/profile-lookup';
 import { isSameEmail } from '@/lib/utils/email-normalize';
+import { Avatar, AVATAR_PRESETS } from '@/components/ui/Avatar';
 
 export default function SettingsPage() {
   const supabase = createClient();
@@ -21,11 +22,13 @@ export default function SettingsPage() {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [currency, setCurrency] = useState('inr');
   const [defaultCountryCode, setDefaultCountryCode] = useState('+91');
   const [newPassword, setNewPassword] = useState('');
   const [secondaryEmails, setSecondaryEmails] = useState<string[]>([]);
   const [newSecondaryEmail, setNewSecondaryEmail] = useState('');
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     async function loadSettings() {
@@ -39,7 +42,7 @@ export default function SettingsPage() {
         // Load profile
         const { data: profile } = await supabase
           .from('profiles')
-          .select('full_name, phone, secondary_emails')
+          .select('full_name, phone, secondary_emails, avatar_url')
           .eq('id', user.id)
           .single();
 
@@ -47,6 +50,7 @@ export default function SettingsPage() {
           setFullName(profile.full_name || '');
           setPhone(profile.phone || '');
           setSecondaryEmails(profile.secondary_emails || []);
+          setAvatarUrl(profile.avatar_url || null);
         }
 
         const localCode = typeof window !== 'undefined' ? localStorage.getItem('debtsync_default_country_code') : null;
@@ -76,6 +80,55 @@ export default function SettingsPage() {
     loadSettings();
   }, [supabase]);
 
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setError('Please select an image file (PNG, JPG, WebP)');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Image must be smaller than 5MB');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxDim = 200;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxDim) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          }
+        } else {
+          if (height > maxDim) {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL('image/jpeg', 0.85);
+          setAvatarUrl(compressed);
+        }
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -101,10 +154,19 @@ export default function SettingsPage() {
           full_name: fullName.trim(),
           phone: phone.trim() || null,
           secondary_emails: secondaryEmails,
+          avatar_url: avatarUrl,
         })
         .eq('id', user.id);
 
       if (profileError) throw profileError;
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('debtsync:user_updated', {
+            detail: { avatarUrl, fullName: fullName.trim() },
+          })
+        );
+      }
 
       // Merge any shadow profiles that match these secondary emails
       for (const secEmail of secondaryEmails) {
@@ -195,10 +257,79 @@ export default function SettingsPage() {
         )}
 
         {/* Profile Details */}
-        <div className="space-y-4">
+        <div className="space-y-5">
           <h3 className="font-mono text-xs uppercase tracking-wider font-semibold text-[var(--on-surface-variant)]">
             Profile Information
           </h3>
+
+          {/* Avatar / Profile Picture */}
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 rounded-2xl bg-[var(--surface-container-low)] border border-[var(--outline-variant)]/20">
+            <div className="relative group self-start sm:self-center">
+              <Avatar src={avatarUrl} name={fullName || email} size="xl" />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="absolute inset-0 bg-black/40 rounded-3xl opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity cursor-pointer"
+                title="Change Photo"
+              >
+                <span className="material-symbols-outlined text-2xl">photo_camera</span>
+              </button>
+            </div>
+
+            <div className="flex-1 space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleImageUpload}
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-3.5 py-1.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 transition-opacity flex items-center gap-1.5 cursor-pointer shadow-sm"
+                >
+                  <span className="material-symbols-outlined text-[16px]">upload</span>
+                  <span>Upload Photo</span>
+                </button>
+
+                {avatarUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setAvatarUrl(null)}
+                    className="px-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-red-500/10 hover:text-[var(--error)] text-[var(--on-surface-variant)] font-mono text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    Remove Photo
+                  </button>
+                )}
+              </div>
+
+              {/* Presets Gallery */}
+              <div>
+                <span className="font-mono text-[11px] text-[var(--outline)] block mb-1.5">
+                  Or choose a preset avatar:
+                </span>
+                <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                  {AVATAR_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => setAvatarUrl(preset.url)}
+                      className={`relative w-8 h-8 rounded-xl overflow-hidden border-2 transition-transform hover:scale-105 shrink-0 ${
+                        avatarUrl === preset.url
+                          ? 'border-[var(--primary)] ring-2 ring-[var(--primary)]/30 scale-105'
+                          : 'border-transparent opacity-80 hover:opacity-100'
+                      }`}
+                      title={preset.label}
+                    >
+                      <img src={preset.url} alt={preset.label} className="w-full h-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
 
           <div>
             <label className="font-mono text-xs text-[var(--on-surface-variant)] block mb-1">

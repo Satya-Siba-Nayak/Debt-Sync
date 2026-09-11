@@ -4,12 +4,14 @@ import React from 'react';
 import Link from 'next/link';
 import { formatCurrency } from '@/lib/utils/currency';
 import { Chip } from '../ui/Chip';
+import { Avatar } from '../ui/Avatar';
 
 export interface PersonSummary {
   id: string;
   name: string;
   email: string;
   phone?: string | null;
+  avatarUrl?: string | null;
   netBalance: number; // positive = they owe you, negative = you owe them
   lentAmount: number;
   owedAmount: number;
@@ -25,13 +27,6 @@ interface PersonCardProps {
 }
 
 export function PersonCard({ person, currency = 'inr', onRecordDebt }: PersonCardProps) {
-  const initials = person.name
-    .split(' ')
-    .map((n) => n[0])
-    .join('')
-    .substring(0, 2)
-    .toUpperCase();
-
   const isNetPositive = person.netBalance > 0;
   const isNetNegative = person.netBalance < 0;
   const isSettled = person.netBalance === 0;
@@ -42,9 +37,7 @@ export function PersonCard({ person, currency = 'inr', onRecordDebt }: PersonCar
         {/* Header: Avatar, Name & Status */}
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-[var(--surface-container-high)] text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] font-bold text-sm flex items-center justify-center border border-[var(--outline-variant)]/20 shadow-inner">
-              {initials || 'U'}
-            </div>
+            <Avatar src={person.avatarUrl} name={person.name} size="md" />
             <div>
               <Link
                 href={`/directory/detail?id=${person.id}`}
