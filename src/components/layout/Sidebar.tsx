@@ -6,6 +6,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { ThemeToggle } from '../ui/ThemeToggle';
 
+import { clearAuthSessionData } from '@/lib/utils/auth-session';
+
 interface SidebarProps {
   onNewTransaction?: () => void;
 }
@@ -16,6 +18,7 @@ export function Sidebar({ onNewTransaction }: SidebarProps) {
   const supabase = createClient();
 
   const handleSignOut = async () => {
+    clearAuthSessionData();
     await supabase.auth.signOut();
     router.push('/login');
   };

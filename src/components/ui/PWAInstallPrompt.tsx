@@ -1,10 +1,23 @@
-﻿'use client';
+'use client';
 
 import React, { useState, useEffect } from 'react';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+
+const PWA_DISMISS_COUNT_KEY = 'debtsync_pwa_dismiss_count';
+const PWA_DISMISS_UNTIL_KEY = 'debtsync_pwa_dismiss_until';
+const PWA_SESSION_DISMISSED_KEY = 'debtsync_pwa_prompt_dismissed';
+
+export function triggerPWAInstallPrompt() {
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(PWA_DISMISS_UNTIL_KEY);
+    sessionStorage.removeItem(PWA_SESSION_DISMISSED_KEY);
+    localStorage.setItem(PWA_DISMISS_COUNT_KEY, '0');
+    window.dispatchEvent(new CustomEvent('debtsync:show_pwa_prompt'));
+  }
 }
 
 export function PWAInstallPrompt() {
@@ -22,8 +35,21 @@ export function PWAInstallPrompt() {
         (window.navigator as any).standalone === true;
       setIsStandalone(isStandaloneMode);
 
-      const dismissed = sessionStorage.getItem('debtsync_pwa_prompt_dismissed');
-      if (dismissed) setIsDismissed(true);
+      // 1. Check if snoozed due to 3 dismissals (snoozed for 1 month / 30 days)
+      const dismissUntil = Number(localStorage.getItem(PWA_DISMISS_UNTIL_KEY) || 0);
+      if (dismissUntil > Date.now()) {
+        setIsDismissed(true);
+        return;
+      } else if (dismissUntil > 0 && Date.now() >= dismissUntil) {
+        localStorage.removeItem(PWA_DISMISS_UNTIL_KEY);
+        localStorage.setItem(PWA_DISMISS_COUNT_KEY, '0');
+      }
+
+      // 2. Check session dismissal
+      const dismissed = sessionStorage.getItem(PWA_SESSION_DISMISSED_KEY);
+      if (dismissed) {
+        setIsDismissed(true);
+      }
 
       // Check if iOS Safari
       const userAgent = window.navigator.userAgent.toLowerCase();
@@ -35,10 +61,19 @@ export function PWAInstallPrompt() {
         setDeferredPrompt(e as BeforeInstallPromptEvent);
       };
 
+      const handleForceShow = () => {
+        setIsDismissed(false);
+        sessionStorage.removeItem(PWA_SESSION_DISMISSED_KEY);
+        localStorage.removeItem(PWA_DISMISS_UNTIL_KEY);
+        localStorage.setItem(PWA_DISMISS_COUNT_KEY, '0');
+      };
+
       window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.addEventListener('debtsync:show_pwa_prompt', handleForceShow);
 
       return () => {
         window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+        window.removeEventListener('debtsync:show_pwa_prompt', handleForceShow);
       };
     }
   }, []);
@@ -52,6 +87,11 @@ export function PWAInstallPrompt() {
       const choiceResult = await deferredPrompt.userChoice;
       if (choiceResult.outcome === 'accepted') {
         setIsStandalone(true);
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem(PWA_DISMISS_COUNT_KEY);
+          localStorage.removeItem(PWA_DISMISS_UNTIL_KEY);
+          sessionStorage.removeItem(PWA_SESSION_DISMISSED_KEY);
+        }
       }
       setDeferredPrompt(null);
     } else if (isIOS) {
@@ -61,7 +101,18 @@ export function PWAInstallPrompt() {
 
   const handleDismiss = () => {
     setIsDismissed(true);
-    sessionStorage.setItem('debtsync_pwa_prompt_dismissed', 'true');
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem(PWA_SESSION_DISMISSED_KEY, 'true');
+
+      // Count dismissals. If dismissed 3 times, do not show until next month (30 days)
+      const currentCount = Number(localStorage.getItem(PWA_DISMISS_COUNT_KEY) || 0) + 1;
+      localStorage.setItem(PWA_DISMISS_COUNT_KEY, String(currentCount));
+
+      if (currentCount >= 3) {
+        const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+        localStorage.setItem(PWA_DISMISS_UNTIL_KEY, String(Date.now() + thirtyDaysMs));
+      }
+    }
   };
 
   return (

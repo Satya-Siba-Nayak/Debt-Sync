@@ -18,6 +18,8 @@ import {
   getLocalRecentAvatars,
   setLocalRecentAvatars,
 } from '@/lib/utils/avatar-storage';
+import { getCurrentUserFast } from '@/lib/utils/auth-session';
+import { triggerPWAInstallPrompt } from '@/components/ui/PWAInstallPrompt';
 
 export default function SettingsPage() {
   const supabase = createClient();
@@ -44,6 +46,7 @@ export default function SettingsPage() {
   const [cropImageSrc, setCropImageSrc] = useState<string | null>(null);
   const [isCropModalOpen, setIsCropModalOpen] = useState(false);
   const [showAllPresets, setShowAllPresets] = useState(false);
+  const [showAdvancedApp, setShowAdvancedApp] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -65,7 +68,7 @@ export default function SettingsPage() {
     async function loadSettings() {
       setLoading(true);
       try {
-        const { data: { user } } = await supabase.auth.getUser();
+        const user = await getCurrentUserFast(supabase);
         if (!user) return;
         setUserId(user.id);
         setEmail(user.email || '');
@@ -177,7 +180,7 @@ export default function SettingsPage() {
     setError('');
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await getCurrentUserFast(supabase);
       if (!user) throw new Error('Not authenticated');
 
       // Check phone uniqueness before saving
@@ -716,46 +719,110 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* PWA & Mobile App */}
-        <div className="pt-6 border-t border-[var(--outline-variant)]/20 space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <h3 className="font-mono text-xs uppercase tracking-wider font-semibold text-[var(--on-surface-variant)]">
-                Installable App (PWA)
-              </h3>
-              <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">
-                {isStandalone
-                  ? 'DebtSync is currently running in standalone installed app mode.'
-                  : 'Install DebtSync on your phone or computer for instant home-screen launch and offline support.'}
-              </p>
+        {/* Advanced App & System Options (Discreet & Collapsible) */}
+        <div className="pt-6 border-t border-[var(--outline-variant)]/20">
+          <button
+            type="button"
+            onClick={() => setShowAdvancedApp(!showAdvancedApp)}
+            className="w-full flex items-center justify-between py-2 text-left cursor-pointer group"
+          >
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-[18px] text-[var(--outline)] group-hover:text-[var(--primary)] transition-colors">
+                install_mobile
+              </span>
+              <span className="font-mono text-xs uppercase tracking-wider font-semibold text-[var(--on-surface-variant)] group-hover:text-[var(--on-surface)] transition-colors">
+                App Installation &amp; System Settings
+              </span>
             </div>
-            <div>
-              {isStandalone ? (
-                <span className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20 inline-flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-[16px]">check_circle</span>
-                  Installed
-                </span>
-              ) : deferredInstallPrompt ? (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    deferredInstallPrompt.prompt();
-                    const choice = await deferredInstallPrompt.userChoice;
-                    if (choice.outcome === 'accepted') setIsStandalone(true);
-                    setDeferredInstallPrompt(null);
-                  }}
-                  className="px-4 py-2 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 transition-opacity shadow-xs inline-flex items-center gap-1.5"
-                >
-                  <span className="material-symbols-outlined text-[18px]">install_mobile</span>
-                  Install App
-                </button>
-              ) : (
-                <span className="text-xs font-mono text-[var(--outline)]">
-                  Use browser menu &rarr; &quot;Add to Home Screen&quot;
-                </span>
+            <div className="flex items-center gap-1.5 font-mono text-[11px] text-[var(--outline)]">
+              <span>{showAdvancedApp ? 'Hide' : 'Show options'}</span>
+              <span className="material-symbols-outlined text-[16px] transition-transform duration-150">
+                {showAdvancedApp ? 'keyboard_arrow_up' : 'keyboard_arrow_down'}
+              </span>
+            </div>
+          </button>
+
+          {showAdvancedApp && (
+            <div className="mt-3 p-4 rounded-2xl bg-[var(--surface-container-low)] border border-[var(--outline-variant)]/30 space-y-4 animate-in fade-in duration-200">
+              {/* PWA App Status & Action */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h4 className="font-mono text-xs font-bold text-[var(--on-surface)] flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">devices</span>
+                    Installable Progressive Web App (PWA)
+                  </h4>
+                  <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">
+                    {isStandalone
+                      ? 'DebtSync is currently running in standalone installed app mode.'
+                      : 'Install DebtSync on your phone or desktop for instant home-screen launch and offline support.'}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {isStandalone ? (
+                    <span className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20 inline-flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-[16px]">check_circle</span>
+                      Installed
+                    </span>
+                  ) : deferredInstallPrompt ? (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        deferredInstallPrompt.prompt();
+                        const choice = await deferredInstallPrompt.userChoice;
+                        if (choice.outcome === 'accepted') setIsStandalone(true);
+                        setDeferredInstallPrompt(null);
+                      }}
+                      className="px-3.5 py-1.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 transition-opacity shadow-xs inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">download</span>
+                      Install App
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        triggerPWAInstallPrompt();
+                        setMessage('PWA install prompt banner re-activated!');
+                      }}
+                      className="px-3 py-1.5 rounded-xl border border-[var(--primary)]/40 bg-[var(--primary)]/10 text-[var(--primary)] font-mono text-xs font-bold hover:bg-[var(--primary)]/20 transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+                      title="Reset 3-dismissal snooze and show install banner"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">restart_alt</span>
+                      Re-enable Install Banner
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Install instructions for Safari & browsers without auto-prompt */}
+              {!isStandalone && !deferredInstallPrompt && (
+                <div className="p-3 rounded-xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/20 text-xs text-[var(--on-surface-variant)] space-y-1.5 font-mono">
+                  <p className="font-bold text-[var(--on-surface)] flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[14px]">info</span>
+                    Browser Install Instructions:
+                  </p>
+                  <p>&bull; iOS Safari: Tap the Share button (<strong className="text-[var(--on-surface)]">[&uarr;]</strong>) &rarr; select <strong className="text-[var(--on-surface)]">&quot;Add to Home Screen&quot;</strong>.</p>
+                  <p>&bull; Chrome / Edge / Android: Tap the browser menu (&vellip;) &rarr; select <strong className="text-[var(--on-surface)]">&quot;Install DebtSync&quot;</strong> or <strong className="text-[var(--on-surface)]">&quot;Add to Home Screen&quot;</strong>.</p>
+                </div>
               )}
+
+              {/* Persistent Session & Cookies Info */}
+              <div className="pt-3 border-t border-[var(--outline-variant)]/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h4 className="font-mono text-xs font-bold text-[var(--on-surface)] flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[16px] text-emerald-500">cookie</span>
+                    Fast Persistent Sign-In Cookies
+                  </h4>
+                  <p className="text-[11px] text-[var(--on-surface-variant)] mt-0.5">
+                    Authentication cookies are configured with 1-year persistence and local cache so page reloads are instantaneous without waiting for server roundtrips until you sign out.
+                  </p>
+                </div>
+                <span className="px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0 self-start sm:self-center">
+                  Active &bull; 1-Year Expiry
+                </span>
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         <div className="pt-4 border-t border-[var(--outline-variant)]/20 flex justify-end">

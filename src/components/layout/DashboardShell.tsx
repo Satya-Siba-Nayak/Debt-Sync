@@ -10,23 +10,27 @@ import { createClient } from '@/lib/supabase/client';
 
 import { useRouter } from 'next/navigation';
 import { getLocalRecentAvatars } from '@/lib/utils/avatar-storage';
+import {
+  getCurrentUserFast,
+  getCachedUserProfile,
+  setCachedUserProfile,
+  clearAuthSessionData,
+  CachedProfile,
+} from '@/lib/utils/auth-session';
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
-  const [userProfile, setUserProfile] = useState<{
-    id?: string;
-    full_name?: string;
-    email?: string;
-    avatar_url?: string | null;
-    recent_custom_avatars?: string[];
-  } | null>(null);
+  // Instant frame-0 hydration from local cache
+  const [userProfile, setUserProfile] = useState<CachedProfile | null>(() => getCachedUserProfile());
   const supabase = createClient();
   const router = useRouter();
 
   useEffect(() => {
     async function loadUser() {
-      const { data: { user } } = await supabase.auth.getUser();
+      // 0ms lookup from persistent session cookie / storage
+      const user = await getCurrentUserFast(supabase);
       if (!user) {
+        clearAuthSessionData();
         router.replace('/login');
         return;
       }
@@ -53,25 +57,33 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         ? profile.recent_custom_avatars
         : getLocalRecentAvatars(user.id);
 
-      setUserProfile({
+      const resolved: CachedProfile = {
         id: user.id,
         full_name: profile?.full_name || user.user_metadata?.full_name,
         email: user.email,
         avatar_url: profile?.avatar_url || null,
         recent_custom_avatars: recentFromDb,
-      });
+      };
+
+      setUserProfile(resolved);
+      setCachedUserProfile(resolved);
     }
     loadUser();
 
     // Listen for avatar / name updates from settings
     const handleUserUpdated = (e: any) => {
       const detail = e.detail;
-      setUserProfile((prev) => ({
-        ...prev,
-        full_name: detail.fullName !== undefined ? detail.fullName : prev?.full_name,
-        avatar_url: detail.avatarUrl !== undefined ? detail.avatarUrl : prev?.avatar_url,
-        recent_custom_avatars: detail.recentCustomAvatars !== undefined ? detail.recentCustomAvatars : prev?.recent_custom_avatars,
-      }));
+      setUserProfile((prev) => {
+        const updated: CachedProfile = {
+          id: prev?.id || '',
+          full_name: detail.fullName !== undefined ? detail.fullName : prev?.full_name,
+          email: prev?.email,
+          avatar_url: detail.avatarUrl !== undefined ? detail.avatarUrl : prev?.avatar_url,
+          recent_custom_avatars: detail.recentCustomAvatars !== undefined ? detail.recentCustomAvatars : prev?.recent_custom_avatars,
+        };
+        setCachedUserProfile(updated);
+        return updated;
+      });
     };
     window.addEventListener('debtsync:user_updated', handleUserUpdated);
     return () => window.removeEventListener('debtsync:user_updated', handleUserUpdated);

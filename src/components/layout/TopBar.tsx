@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { ThemeToggle } from '../ui/ThemeToggle';
 import { Avatar, AVATAR_PRESETS } from '../ui/Avatar';
 import { createClient } from '@/lib/supabase/client';
+import { clearAuthSessionData } from '@/lib/utils/auth-session';
 
 interface TopBarProps {
   title?: string;
@@ -83,6 +84,7 @@ export function TopBar({
 
   const handleSignOut = async () => {
     setIsDropdownOpen(false);
+    clearAuthSessionData();
     await supabase.auth.signOut();
     router.push('/login');
   };

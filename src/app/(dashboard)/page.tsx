@@ -12,6 +12,7 @@ import { Chip } from '@/components/ui/Chip';
 import { Avatar } from '@/components/ui/Avatar';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { getDueDateInfo } from '@/lib/utils/due-date';
+import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import Link from 'next/link';
 
 export default function GlobalDashboardPage() {
@@ -36,7 +37,7 @@ export default function GlobalDashboardPage() {
   const fetchDashboardData = useCallback(async () => {
     setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await getCurrentUserFast(supabase);
       if (!user) return;
       setCurrentUserId(user.id);
 
