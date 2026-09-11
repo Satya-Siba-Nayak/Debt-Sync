@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { PhoneInput } from '@/components/ui/PhoneInput';
+import { checkIdentifierConflict } from '@/lib/utils/profile-lookup';
 
 export default function SignupPage() {
   const [email, setEmail] = useState('');
@@ -31,6 +32,14 @@ export default function SignupPage() {
     }
 
     const cleanEmail = email.trim().toLowerCase();
+
+    // Check for duplicate accounts (taking Gmail aliases and phone into account)
+    const conflict = await checkIdentifierConflict(cleanEmail, phone.trim() || undefined);
+    if (conflict.hasConflict) {
+      setError(conflict.message || 'An account already exists with this email (or alias) or phone number.');
+      setLoading(false);
+      return;
+    }
 
     const { data, error: authError } = await supabase.auth.signUp({
       email: cleanEmail,

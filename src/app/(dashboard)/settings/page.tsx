@@ -6,6 +6,8 @@ import { SUPPORTED_CURRENCIES } from '@/lib/utils/currency';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { PhoneInput } from '@/components/ui/PhoneInput';
 import { COUNTRY_CODES, CountryCode } from '@/lib/constants/country-codes';
+import { checkIdentifierConflict } from '@/lib/utils/profile-lookup';
+import { isSameEmail } from '@/lib/utils/email-normalize';
 
 export default function SettingsPage() {
   const supabase = createClient();
@@ -14,6 +16,7 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [userId, setUserId] = useState<string | null>(null);
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -30,6 +33,7 @@ export default function SettingsPage() {
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
+        setUserId(user.id);
         setEmail(user.email || '');
 
         // Load profile
@@ -81,6 +85,14 @@ export default function SettingsPage() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
+
+      // Check phone uniqueness before saving
+      if (phone.trim()) {
+        const phoneConflict = await checkIdentifierConflict(undefined, phone.trim(), user.id);
+        if (phoneConflict.hasConflict) {
+          throw new Error(phoneConflict.message || 'This phone number is already registered to another account.');
+        }
+      }
 
       // Update profile
       const { error: profileError } = await supabase
@@ -240,12 +252,25 @@ export default function SettingsPage() {
               />
               <button
                 type="button"
-                onClick={() => {
+                onClick={async () => {
                   const clean = newSecondaryEmail.trim().toLowerCase();
-                  if (clean && !secondaryEmails.includes(clean) && clean !== email.toLowerCase()) {
-                    setSecondaryEmails([...secondaryEmails, clean]);
-                    setNewSecondaryEmail('');
+                  if (!clean) return;
+                  if (isSameEmail(clean, email)) {
+                    setError('This email (or its alias) is already your primary account email.');
+                    return;
                   }
+                  if (secondaryEmails.some((sec) => isSameEmail(sec, clean))) {
+                    setError('This email (or its alias) is already in your secondary emails list.');
+                    return;
+                  }
+                  const emailConflict = await checkIdentifierConflict(clean, undefined, userId || undefined);
+                  if (emailConflict.hasConflict) {
+                    setError(emailConflict.message || 'This email address is already linked to another account.');
+                    return;
+                  }
+                  setError('');
+                  setSecondaryEmails([...secondaryEmails, clean]);
+                  setNewSecondaryEmail('');
                 }}
                 className="px-4 py-2 bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--primary)] font-mono text-xs font-bold rounded-xl border border-[var(--outline-variant)]/30"
               >

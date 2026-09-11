@@ -8,6 +8,7 @@ import { formatCurrency } from '@/lib/utils/currency';
 import { PersonCard, PersonSummary } from '@/components/directory/PersonCard';
 import { AddPersonModal } from '@/components/directory/AddPersonModal';
 import { RecordDebtModal } from '@/components/debts/RecordDebtModal';
+import { isSameEmail } from '@/lib/utils/email-normalize';
 
 export default function PeopleDirectoryPage() {
   const supabase = createClient();
@@ -165,11 +166,21 @@ export default function PeopleDirectoryPage() {
         ))
       );
 
+      const emailMatches = Boolean(
+        p.email.toLowerCase().includes(q) ||
+        (q.includes('@') && isSameEmail(p.email, q))
+      );
+      const secondaryMatches = Boolean(
+        p.secondaryEmails && p.secondaryEmails.some((sec) =>
+          sec.toLowerCase().includes(q) || (q.includes('@') && isSameEmail(sec, q))
+        )
+      );
+
       return (
         p.name.toLowerCase().includes(q) ||
-        p.email.toLowerCase().includes(q) ||
-        phoneMatches ||
-        (p.secondaryEmails && p.secondaryEmails.some((sec) => sec.toLowerCase().includes(q)))
+        emailMatches ||
+        secondaryMatches ||
+        phoneMatches
       );
     })
     .sort((a, b) => Math.abs(b.netBalance) - Math.abs(a.netBalance));

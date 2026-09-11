@@ -1,11 +1,18 @@
 import { createClient } from '../supabase/client';
 import { Profile } from '../types/database';
+import { canonicalizeEmail, isSameEmail, isSamePhone, normalizePhone } from './email-normalize';
+
+export interface ConflictResult {
+  hasConflict: boolean;
+  conflictType?: 'email' | 'phone';
+  message?: string;
+}
 
 /**
- * Finds a profile by ANY identifier: primary email, secondary emails, or phone number.
+ * Finds a profile by ANY identifier: primary email (with alias support), secondary emails, or phone number.
  */
 export async function findProfileByIdentifier(identifier: string): Promise<Profile | null> {
-  const clean = identifier.trim().toLowerCase();
+  const clean = identifier.trim();
   if (!clean) return null;
 
   const supabase = createClient();
@@ -22,22 +29,51 @@ export async function findProfileByIdentifier(identifier: string): Promise<Profi
     // Fall back to client query
   }
 
-  // 1. Check primary email
-  const { data: byEmail } = await supabase
-    .from('profiles')
-    .select('*')
-    .ilike('email', clean)
-    .single();
+  // 1. Check if identifier is an email
+  if (clean.includes('@')) {
+    const cleanLower = clean.toLowerCase();
+    const canon = canonicalizeEmail(clean);
 
-  if (byEmail) return byEmail as Profile;
+    // Exact primary email match
+    const { data: byEmail } = await supabase
+      .from('profiles')
+      .select('*')
+      .ilike('email', cleanLower)
+      .single();
 
-  // 2. Check phone if identifier resembles a phone number
-  const digits = identifier.replace(/[^\d]/g, '');
+    if (byEmail) return byEmail as Profile;
+
+    // Direct secondary email match
+    const { data: bySecondary } = await supabase
+      .from('profiles')
+      .select('*')
+      .contains('secondary_emails', [cleanLower])
+      .single();
+
+    if (bySecondary) return bySecondary as Profile;
+
+    // Check all profiles for alias equivalence (e.g. user+tag@gmail.com == user@gmail.com)
+    const { data: allProfiles } = await supabase
+      .from('profiles')
+      .select('*');
+
+    if (allProfiles) {
+      for (const p of allProfiles) {
+        if (isSameEmail(p.email, clean)) return p as Profile;
+        if (p.secondary_emails?.some((sec: string) => isSameEmail(sec, clean))) {
+          return p as Profile;
+        }
+      }
+    }
+  }
+
+  // 2. Check phone if identifier has digits
+  const digits = clean.replace(/[^\d]/g, '');
   if (digits.length >= 6) {
     const { data: byPhoneExact } = await supabase
       .from('profiles')
       .select('*')
-      .eq('phone', identifier.trim())
+      .eq('phone', clean)
       .single();
 
     if (byPhoneExact) return byPhoneExact as Profile;
@@ -64,14 +100,86 @@ export async function findProfileByIdentifier(identifier: string): Promise<Profi
     }
   }
 
-  // 3. Check secondary_emails array (contains clean email)
-  const { data: bySecondary } = await supabase
-    .from('profiles')
-    .select('*')
-    .contains('secondary_emails', [clean])
-    .single();
-
-  if (bySecondary) return bySecondary as Profile;
-
   return null;
+}
+
+/**
+ * Checks whether an email (or its alias) or a phone number is already registered
+ * by another active user.
+ */
+export async function checkIdentifierConflict(
+  email?: string,
+  phone?: string,
+  currentUserId?: string
+): Promise<ConflictResult> {
+  const supabase = createClient();
+
+  const cleanEmail = email?.trim().toLowerCase();
+  const cleanPhone = phone?.trim();
+
+  // Try RPC function first
+  try {
+    const { data: rpcResult, error: rpcError } = await supabase.rpc('check_identifier_conflict', {
+      check_email: cleanEmail || null,
+      check_phone: cleanPhone || null,
+      current_user_id: currentUserId || null,
+    });
+
+    if (!rpcError && rpcResult && typeof rpcResult === 'object') {
+      return {
+        hasConflict: Boolean(rpcResult.has_conflict),
+        conflictType: rpcResult.conflict_type,
+        message: rpcResult.message,
+      };
+    }
+  } catch {
+    // Fall back to client query
+  }
+
+  // Client-side fallback check against profiles table
+  try {
+    let query = supabase.from('profiles').select('id, email, phone, secondary_emails, is_shadow').eq('is_shadow', false);
+    if (currentUserId) {
+      query = query.neq('id', currentUserId);
+    }
+    const { data: profiles, error } = await query;
+    if (error || !profiles) return { hasConflict: false };
+
+    // 1. Verify email uniqueness (including aliases like Gmail '+' and '.')
+    if (cleanEmail) {
+      for (const p of profiles) {
+        if (isSameEmail(p.email, cleanEmail)) {
+          return {
+            hasConflict: true,
+            conflictType: 'email',
+            message: `An account already exists with this email address (${p.email}) or its alias.`,
+          };
+        }
+        if (p.secondary_emails?.some((sec: string) => isSameEmail(sec, cleanEmail))) {
+          return {
+            hasConflict: true,
+            conflictType: 'email',
+            message: 'This email address is already linked as a secondary email to another account.',
+          };
+        }
+      }
+    }
+
+    // 2. Verify phone uniqueness
+    if (cleanPhone && cleanPhone.replace(/[^\d]/g, '').length >= 6) {
+      for (const p of profiles) {
+        if (p.phone && isSamePhone(p.phone, cleanPhone)) {
+          return {
+            hasConflict: true,
+            conflictType: 'phone',
+            message: 'This phone number is already registered to another account.',
+          };
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error checking identifier conflict:', err);
+  }
+
+  return { hasConflict: false };
 }
