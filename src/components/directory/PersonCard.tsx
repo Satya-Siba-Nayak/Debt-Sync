@@ -18,6 +18,8 @@ export interface PersonSummary {
   status: 'active' | 'settled' | 'pending';
   isShadow?: boolean;
   secondaryEmails?: string[];
+  notes?: string[];
+  matchingNote?: string;
 }
 
 interface PersonCardProps {
@@ -90,6 +92,15 @@ export function PersonCard({ person, currency = 'inr', onRecordDebt }: PersonCar
             </div>
           )}
         </div>
+
+        {person.matchingNote && (
+          <div className="mb-4 px-3 py-2 rounded-xl bg-[var(--surface-container)] text-xs text-[var(--on-surface-variant)] flex items-center gap-2 border border-[var(--outline-variant)]/30">
+            <span className="material-symbols-outlined text-[15px] text-[var(--primary)] shrink-0">
+              sticky_note_2
+            </span>
+            <span className="truncate italic">"{person.matchingNote}"</span>
+          </div>
+        )}
       </div>
 
       {/* Bottom Net Balance Box matching Stitch */}

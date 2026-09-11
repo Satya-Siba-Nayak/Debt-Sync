@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Modal } from '../ui/Modal';
 import { createClient } from '@/lib/supabase/client';
 import { Debt } from '@/lib/types/database';
@@ -28,6 +28,18 @@ export function PaymentModal({
 
   const supabase = createClient();
 
+  const [isLender, setIsLender] = useState(false);
+
+  useEffect(() => {
+    async function checkRole() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        setIsLender(user.id === debt.lender_id);
+      }
+    }
+    checkRole();
+  }, [debt.lender_id, supabase]);
+
   const handlePayment = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -40,6 +52,9 @@ export function PaymentModal({
       const paymentAmount = Number(amount);
       if (paymentAmount <= 0) throw new Error('Payment amount must be greater than 0');
 
+      const userIsLender = user.id === debt.lender_id;
+      const isVerified = userIsLender;
+
       // Record payment
       const { error: paymentError } = await supabase.from('payments').insert({
         debt_id: debt.id,
@@ -47,12 +62,15 @@ export function PaymentModal({
         amount: paymentAmount,
         currency: debt.currency || 'inr',
         note: note.trim() || 'Settlement payment',
+        is_verified: isVerified,
+        verified_at: isVerified ? new Date().toISOString() : null,
+        verified_by: isVerified ? user.id : null,
       });
 
       if (paymentError) throw paymentError;
 
-      // If payment fully clears the balance, mark as settled
-      if (paymentAmount >= currentBalance) {
+      // If lender recorded payment and it clears the balance, settle immediately
+      if (isVerified && paymentAmount >= currentBalance) {
         await supabase
           .from('debts')
           .update({
@@ -66,15 +84,17 @@ export function PaymentModal({
       await supabase.from('activity_log').insert({
         user_id: user.id,
         debt_id: debt.id,
-        action: 'payment_made',
+        action: isVerified ? 'payment_made' : 'repayment_reported',
         details: {
           amount: paymentAmount,
           currency: debt.currency || 'inr',
           note: note.trim(),
-          remaining: Math.max(0, currentBalance - paymentAmount),
+          is_verified: isVerified,
+          remaining: isVerified ? Math.max(0, currentBalance - paymentAmount) : currentBalance,
         },
       });
 
+      window.dispatchEvent(new CustomEvent('debtsync:refresh'));
       onPaymentRecorded?.();
       onClose();
     } catch (err: any) {
@@ -88,7 +108,7 @@ export function PaymentModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Record Payment"
+      title={isLender ? 'Record Received Payment' : 'Report Repayment'}
       subtitle={`Remaining outstanding balance: ${formatCurrency(currentBalance, debt.currency || 'inr', { showDecimals: true })}`}
       maxWidth="max-w-md"
     >
@@ -96,6 +116,17 @@ export function PaymentModal({
         {error && (
           <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-[var(--error)] text-sm border border-[var(--error)]/20">
             {error}
+          </div>
+        )}
+
+        {!isLender && (
+          <div className="p-3 rounded-xl bg-[var(--primary)]/10 border border-[var(--primary)]/20 text-xs text-[var(--on-surface)] flex items-start gap-2">
+            <span className="material-symbols-outlined text-[18px] text-[var(--primary)] shrink-0 mt-0.5">
+              verified_user
+            </span>
+            <span>
+              Repayments reported by borrowers require lender confirmation in their notification center before the ledger balance is settled.
+            </span>
           </div>
         )}
 
@@ -131,7 +162,7 @@ export function PaymentModal({
             type="text"
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="e.g. UPI transfer, Cash, GPay, Bank transfer"
+            placeholder="e.g. UPI transfer, Cash, GPay ref #84912"
             className="w-full px-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-sm outline-none focus:border-[var(--primary)]"
           />
         </div>
@@ -149,7 +180,7 @@ export function PaymentModal({
             disabled={loading}
             className="flex-1 py-2.5 px-4 rounded-xl bg-[var(--secondary)] text-[var(--on-secondary)] font-mono text-xs font-bold hover:opacity-95 disabled:opacity-50"
           >
-            {loading ? 'Recording...' : 'Record Payment'}
+            {loading ? 'Submitting...' : isLender ? 'Record Payment' : 'Submit for Verification'}
           </button>
         </div>
       </form>

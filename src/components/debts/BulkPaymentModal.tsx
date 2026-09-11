@@ -138,6 +138,8 @@ export function BulkPaymentModal({
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
+      const isVerified = direction === 'they_paid';
+
       for (const item of allocations) {
         if (item.allocated <= 0) continue;
 
@@ -150,12 +152,15 @@ export function BulkPaymentModal({
           note: note.trim()
             ? `Smart Bulk Payment: ${note.trim()}`
             : `Smart Bulk Repayment (${strategy.toUpperCase()})`,
+          is_verified: isVerified,
+          verified_at: isVerified ? new Date().toISOString() : null,
+          verified_by: isVerified ? user.id : null,
         });
 
         if (pErr) throw pErr;
 
-        // 2. Settle debt if cleared
-        if (item.newBalance <= 0.01) {
+        // 2. Settle debt if cleared and verified
+        if (isVerified && item.newBalance <= 0.01) {
           await supabase
             .from('debts')
             .update({
@@ -169,12 +174,13 @@ export function BulkPaymentModal({
         await supabase.from('activity_log').insert({
           user_id: user.id,
           debt_id: item.debt.id,
-          action: 'payment_made',
+          action: isVerified ? 'payment_made' : 'repayment_reported',
           details: {
             amount: item.allocated,
             strategy,
-            remaining: item.newBalance,
-            cleared: item.newBalance <= 0.01,
+            is_verified: isVerified,
+            remaining: isVerified ? item.newBalance : item.currentBalance,
+            cleared: isVerified && item.newBalance <= 0.01,
           },
         });
       }

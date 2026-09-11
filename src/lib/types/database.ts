@@ -41,6 +41,8 @@ export type Debt = {
   compound_freq: 'daily' | 'weekly' | 'monthly' | 'yearly' | null;
   status: 'pending' | 'active' | 'settled' | 'disputed' | 'declined';
   notes: string | null;
+  counterparty_notes?: string | null;
+  hidden_by?: string[];
   accepted_at: string | null;
   created_at: string;
   settled_at: string | null;
@@ -56,7 +58,23 @@ export type Payment = {
   amount: number;
   currency: string;
   note: string | null;
+  is_verified?: boolean;
+  verified_at?: string | null;
+  verified_by?: string | null;
   created_at: string;
+  payer?: Profile;
+  debt?: Debt;
+};
+
+export type ContactRequest = {
+  id: string;
+  sender_id: string;
+  receiver_id: string;
+  status: 'pending' | 'accepted' | 'declined';
+  created_at: string;
+  responded_at?: string | null;
+  sender?: Profile;
+  receiver?: Profile;
 };
 
 export type ActivityLogEntry = {

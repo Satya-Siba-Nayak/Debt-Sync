@@ -86,12 +86,18 @@ export default function PeopleDirectoryPage() {
             owedAmount: 0,
             status: c.profile.is_shadow ? 'pending' : 'settled',
             isShadow: c.profile.is_shadow,
+            notes: [],
           });
         }
       }
 
       // Add counterparties from debts and calculate balances
       for (const d of allDebts) {
+        // Privacy: Declined requests must NEVER add counterparties to directory
+        if (d.status === 'declined') {
+          continue;
+        }
+
         const isLender = d.lender_id === user.id;
         const otherParty = isLender ? d.borrower : d.lender;
         if (!otherParty) continue;
@@ -109,14 +115,18 @@ export default function PeopleDirectoryPage() {
             owedAmount: 0,
             status: otherParty.is_shadow ? 'pending' : 'settled',
             isShadow: otherParty.is_shadow,
+            notes: [],
           });
         }
 
         const person = peopleMap.get(otherParty.id)!;
 
-        // Declined debts are void agreements - do not add to active lent or owed balances
-        if (d.status === 'declined') {
-          continue;
+        // Collect two-sided notes for instant directory searchability
+        if (d.notes && !person.notes?.includes(d.notes)) {
+          person.notes = person.notes ? [...person.notes, d.notes] : [d.notes];
+        }
+        if (d.counterparty_notes && !person.notes?.includes(d.counterparty_notes)) {
+          person.notes = person.notes ? [...person.notes, d.counterparty_notes] : [d.counterparty_notes];
         }
 
         const debtPayments = allPayments.filter((p) => p.debt_id === d.id);
@@ -180,6 +190,16 @@ export default function PeopleDirectoryPage() {
 
   // Filter & Search
   const filteredPeople = people
+    .map((p) => {
+      const q = searchQuery.toLowerCase().trim();
+      if (!q) return { ...p, matchingNote: undefined };
+
+      const foundNote = p.notes?.find((n) => n.toLowerCase().includes(q));
+      return {
+        ...p,
+        matchingNote: foundNote,
+      };
+    })
     .filter((p) => {
       if (filterTab === 'active') return p.status === 'active';
       if (filterTab === 'settled') return p.status === 'settled';
@@ -187,6 +207,8 @@ export default function PeopleDirectoryPage() {
     })
     .filter((p) => {
       const q = searchQuery.toLowerCase().trim();
+      if (!q) return true;
+
       const qDigits = q.replace(/[^\d]/g, '');
       const phoneDigits = p.phone ? p.phone.replace(/[^\d]/g, '') : '';
       const phoneMatches = Boolean(
@@ -208,11 +230,14 @@ export default function PeopleDirectoryPage() {
         )
       );
 
+      const noteMatches = Boolean(p.matchingNote);
+
       return (
         p.name.toLowerCase().includes(q) ||
         emailMatches ||
         secondaryMatches ||
-        phoneMatches
+        phoneMatches ||
+        noteMatches
       );
     })
     .sort((a, b) => Math.abs(b.netBalance) - Math.abs(a.netBalance));

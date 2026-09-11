@@ -23,6 +23,7 @@ export function AddPersonModal({
   const [nickname, setNickname] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   const [defaultCountryCode, setDefaultCountryCode] = useState('+91');
 
   useEffect(() => {
@@ -38,6 +39,7 @@ export function AddPersonModal({
     e.preventDefault();
     setLoading(true);
     setError('');
+    setSuccessMessage('');
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -46,8 +48,54 @@ export function AddPersonModal({
       const targetEmail = email.trim().toLowerCase();
       if (!targetEmail) throw new Error('Email is required');
 
+      if (targetEmail === user.email?.toLowerCase()) {
+        throw new Error('You cannot add your own account as a contact');
+      }
+
       // Check if user already exists across primary email, secondary emails, or phone
       const existingProfile = await findProfileByIdentifier(targetEmail) || (phone.trim() ? await findProfileByIdentifier(phone.trim()) : null);
+
+      // If user is already on the platform, send a contact connection request nudge
+      if (existingProfile && !existingProfile.is_shadow && existingProfile.id !== user.id) {
+        // Check if already in contacts
+        const { data: alreadyContact } = await supabase
+          .from('contacts')
+          .select('id')
+          .eq('owner_id', user.id)
+          .eq('contact_id', existingProfile.id)
+          .maybeSingle();
+
+        if (alreadyContact) {
+          throw new Error(`${existingProfile.full_name || 'This user'} is already in your contacts directory`);
+        }
+
+        // Send contact request
+        const { error: reqErr } = await supabase
+          .from('contact_requests')
+          .upsert({
+            sender_id: user.id,
+            receiver_id: existingProfile.id,
+            status: 'pending',
+          }, { onConflict: 'sender_id,receiver_id' });
+
+        if (reqErr) {
+          throw new Error('Connection request could not be sent: ' + reqErr.message);
+        }
+
+        setSuccessMessage(
+          `Connection request sent to ${existingProfile.full_name || existingProfile.email}! They will receive a notification nudge to connect.`
+        );
+        setTimeout(() => {
+          setFullName('');
+          setEmail('');
+          setPhone('');
+          setNickname('');
+          setSuccessMessage('');
+          onPersonAdded?.();
+          onClose();
+        }, 2200);
+        return;
+      }
 
       let contactId = existingProfile?.id;
 
@@ -103,6 +151,11 @@ export function AddPersonModal({
         {error && (
           <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-[var(--error)] text-sm border border-[var(--error)]/20">
             {error}
+          </div>
+        )}
+        {successMessage && (
+          <div className="p-3 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-mono border border-emerald-500/30">
+            {successMessage}
           </div>
         )}
 

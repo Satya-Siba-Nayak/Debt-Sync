@@ -11,6 +11,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { PaymentModal } from '@/components/debts/PaymentModal';
 import { RecordDebtModal } from '@/components/debts/RecordDebtModal';
 import { BulkPaymentModal } from '@/components/debts/BulkPaymentModal';
+import { CounterpartyNoteModal } from '@/components/debts/CounterpartyNoteModal';
 import { getDueDateInfo } from '@/lib/utils/due-date';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { PersonAnalyticsChart } from '@/components/directory/PersonAnalyticsChart';
@@ -30,11 +31,14 @@ function PersonDebtDetailContent() {
   const [activityLogs, setActivityLogs] = useState<ActivityLogEntry[]>([]);
   const [currency, setCurrency] = useState('inr');
 
-  // Directional filter & Modals
+  // Search, Directional filter & Modals
+  const [searchQuery, setSearchQuery] = useState('');
   const [filterDirection, setFilterDirection] = useState<'all' | 'they_owe' | 'you_owe'>('all');
   const [activeDebtForPayment, setActiveDebtForPayment] = useState<{ debt: Debt; balance: number } | null>(null);
+  const [selectedDebtForNote, setSelectedDebtForNote] = useState<Debt | null>(null);
   const [isRecordDebtOpen, setIsRecordDebtOpen] = useState(false);
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [verifyingPaymentId, setVerifyingPaymentId] = useState<string | null>(null);
 
   const fetchDetails = useCallback(async () => {
     if (!personId) {
@@ -135,6 +139,61 @@ function PersonDebtDetailContent() {
     }
   };
 
+  const handleVerifyRepayment = async (paymentId: string, decision: 'verified' | 'disputed') => {
+    setVerifyingPaymentId(paymentId);
+    try {
+      let handled = false;
+      try {
+        const { data, error } = await supabase.rpc('verify_repayment', {
+          p_payment_id: paymentId,
+          p_decision: decision,
+        });
+        if (!error && data?.success) handled = true;
+      } catch (_) {}
+
+      if (!handled) {
+        if (decision === 'verified') {
+          await supabase
+            .from('payments')
+            .update({
+              is_verified: true,
+              verified_at: new Date().toISOString(),
+              verified_by: currentUserId,
+            })
+            .eq('id', paymentId);
+        } else {
+          await supabase.from('payments').delete().eq('id', paymentId);
+        }
+      }
+
+      window.dispatchEvent(new CustomEvent('debtsync:refresh'));
+      fetchDetails();
+    } catch (err: any) {
+      console.error('Error verifying repayment:', err);
+      alert(err.message || 'Failed to process repayment verification');
+    } finally {
+      setVerifyingPaymentId(null);
+    }
+  };
+
+  const handleDismissDeclinedDebt = async (debtId: string, currentHidden: string[] = []) => {
+    if (!currentUserId) return;
+    try {
+      const updatedHidden = Array.from(new Set([...currentHidden, currentUserId]));
+      const { error } = await supabase
+        .from('debts')
+        .update({ hidden_by: updatedHidden })
+        .eq('id', debtId);
+      if (error) throw error;
+
+      window.dispatchEvent(new CustomEvent('debtsync:refresh'));
+      fetchDetails();
+    } catch (err: any) {
+      console.error('Failed to dismiss declined request:', err);
+      alert('Could not dismiss request from view');
+    }
+  };
+
   useEffect(() => {
     fetchDetails();
 
@@ -193,14 +252,29 @@ function PersonDebtDetailContent() {
   const paidPct = Math.max(0, 100 - principalPct - interestPct);
 
   // Directional Filtering & Counts (Declined agreements are void and excluded from active debtor counts)
-  const theyOweDebts = debts.filter((d) => d.lender_id === currentUserId && d.status !== 'declined');
-  const youOweDebts = debts.filter((d) => d.borrower_id === currentUserId && d.status !== 'declined');
+  // Exclude debts hidden by current user from UI (still persisted in activity_log for transparency)
+  const visibleDebts = debts.filter((d) => !d.hidden_by?.includes(currentUserId || ''));
 
-  const displayDebts = debts.filter((d) => {
-    if (filterDirection === 'they_owe') return d.lender_id === currentUserId && d.status !== 'declined';
-    if (filterDirection === 'you_owe') return d.borrower_id === currentUserId && d.status !== 'declined';
-    return true;
-  });
+  const theyOweDebts = visibleDebts.filter((d) => d.lender_id === currentUserId && d.status !== 'declined');
+  const youOweDebts = visibleDebts.filter((d) => d.borrower_id === currentUserId && d.status !== 'declined');
+
+  const displayDebts = visibleDebts
+    .filter((d) => {
+      if (filterDirection === 'they_owe') return d.lender_id === currentUserId && d.status !== 'declined';
+      if (filterDirection === 'you_owe') return d.borrower_id === currentUserId && d.status !== 'declined';
+      return true;
+    })
+    .filter((d) => {
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase().trim();
+      return (
+        (d.notes && d.notes.toLowerCase().includes(q)) ||
+        (d.counterparty_notes && d.counterparty_notes.toLowerCase().includes(q)) ||
+        String(d.principal).includes(q) ||
+        d.interest_type.toLowerCase().includes(q) ||
+        d.status.toLowerCase().includes(q)
+      );
+    });
 
   let filteredBalance = 0;
   for (const d of displayDebts) {
@@ -478,6 +552,18 @@ function PersonDebtDetailContent() {
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
+            <div className="relative">
+              <span className="material-symbols-outlined absolute left-3 top-2.5 text-[16px] text-on-surface-variant">
+                search
+              </span>
+              <input
+                type="text"
+                placeholder="Search notes, terms, amounts..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 pr-3 py-1.5 rounded-xl border border-outline-variant/30 bg-surface-container-low text-xs text-on-surface outline-none focus:border-primary w-52 sm:w-64 font-mono"
+              />
+            </div>
             {hasActiveDebts && (
               <button
                 onClick={() => setIsBulkModalOpen(true)}
@@ -502,7 +588,7 @@ function PersonDebtDetailContent() {
                   : 'text-on-surface-variant hover:text-on-surface'
               }`}
             >
-              All ({debts.length})
+              All ({visibleDebts.length})
             </button>
             <button
               onClick={() => setFilterDirection('they_owe')}
@@ -568,7 +654,7 @@ function PersonDebtDetailContent() {
                       : 'border-outline-variant/20 bg-surface-container-low'
                   } flex flex-col sm:flex-row sm:items-center justify-between gap-4`}
                 >
-                  <div>
+                  <div className="flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       {d.status === 'declined' ? (
                         <span className="font-mono text-xs font-bold inline-flex items-center gap-1 text-red-500 dark:text-red-400">
@@ -626,8 +712,30 @@ function PersonDebtDetailContent() {
                       </span>
                     </div>
 
-                    {d.notes && (
-                      <p className="text-xs text-on-surface-variant mt-1">{d.notes}</p>
+                    {/* Two-Sided Notes Display */}
+                    {(d.notes || d.counterparty_notes) && (
+                      <div className="space-y-1 mt-2 pt-2 border-t border-outline-variant/10 text-xs">
+                        {d.notes && (
+                          <div className="flex items-start gap-1.5 text-on-surface-variant">
+                            <span className="material-symbols-outlined text-[15px] text-primary shrink-0 mt-0.5">
+                              edit_note
+                            </span>
+                            <span>
+                              <strong className="text-on-surface">Creator:</strong> {d.notes}
+                            </span>
+                          </div>
+                        )}
+                        {d.counterparty_notes && (
+                          <div className="flex items-start gap-1.5 text-on-surface-variant">
+                            <span className="material-symbols-outlined text-[15px] text-secondary shrink-0 mt-0.5">
+                              quick_reference_all
+                            </span>
+                            <span>
+                              <strong className="text-on-surface">Counterparty:</strong> {d.counterparty_notes}
+                            </span>
+                          </div>
+                        )}
+                      </div>
                     )}
 
                     {isOutgoingPending && (
@@ -638,7 +746,31 @@ function PersonDebtDetailContent() {
                     )}
                   </div>
 
-                  <div className="flex items-center gap-3 self-end sm:self-auto">
+                  <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
+                    {/* Two-sided Note Button */}
+                    <button
+                      onClick={() => setSelectedDebtForNote(d)}
+                      className="py-1.5 px-2.5 rounded-lg border border-outline-variant/30 text-on-surface-variant hover:text-on-surface hover:bg-surface-container font-mono text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                      title="View or edit 2-sided notes"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">
+                        {d.notes || d.counterparty_notes ? 'note' : 'add_comment'}
+                      </span>
+                      <span>{d.notes || d.counterparty_notes ? 'Notes' : '+ Note'}</span>
+                    </button>
+
+                    {/* Dismiss Declined Debt from active UI */}
+                    {d.status === 'declined' && (
+                      <button
+                        onClick={() => handleDismissDeclinedDebt(d.id, d.hidden_by || [])}
+                        className="py-1.5 px-2.5 rounded-lg border border-outline-variant/30 text-on-surface-variant hover:text-error hover:border-error/30 font-mono text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+                        title="Dismiss from your view (persists in activity log audit trail)"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">visibility_off</span>
+                        <span>Dismiss</span>
+                      </button>
+                    )}
+
                     {isIncomingPending && (
                       <div className="flex items-center gap-2">
                         <button
@@ -677,6 +809,92 @@ function PersonDebtDetailContent() {
         )}
       </section>
 
+      {/* Repayments & Verification Section */}
+      {payments.length > 0 && (
+        <section className="bg-surface-container-lowest rounded-2xl p-6 md:p-8 border border-outline-variant/30 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="font-heading text-lg font-bold text-on-surface">
+                Repayment Receipts &amp; Verifications
+              </h3>
+              <p className="font-mono text-xs text-on-surface-variant mt-0.5">
+                Two-way receipt verification log for all payments made on these debts
+              </p>
+            </div>
+            <span className="font-mono text-xs px-2.5 py-1 rounded-full bg-surface-container text-on-surface-variant">
+              {payments.length} payment{payments.length > 1 ? 's' : ''}
+            </span>
+          </div>
+
+          <div className="space-y-3">
+            {payments.map((p) => {
+              const matchedDebt = debts.find((d) => d.id === p.debt_id);
+              const isLenderOfDebt = matchedDebt?.lender_id === currentUserId;
+              const isPending = (p as any).is_verified === false;
+
+              return (
+                <div
+                  key={p.id}
+                  className={`p-3.5 rounded-xl border ${
+                    isPending
+                      ? 'border-amber-500/30 bg-amber-500/5'
+                      : 'border-outline-variant/20 bg-surface-container-low'
+                  } flex flex-col sm:flex-row sm:items-center justify-between gap-3`}
+                >
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-sm font-bold text-on-surface">
+                        {formatCurrency(Number(p.amount), p.currency || currency, { showDecimals: true })}
+                      </span>
+                      {isPending ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[12px]">schedule</span>
+                          Pending Lender Verification
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[12px]">verified</span>
+                          Verified Receipt
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="text-xs text-on-surface-variant mt-1 flex items-center gap-3">
+                      <span>{new Date(p.created_at).toLocaleString()}</span>
+                      {p.note && <span className="font-mono text-[11px] italic">"{p.note}"</span>}
+                    </div>
+                  </div>
+
+                  {isPending && isLenderOfDebt && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleVerifyRepayment(p.id, 'verified')}
+                        disabled={verifyingPaymentId === p.id}
+                        className="py-1.5 px-3 rounded-lg bg-emerald-600 text-white font-mono text-xs font-bold hover:bg-emerald-700 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">check</span>
+                        <span>Verify Receipt</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (confirm('Dispute this unverified repayment?')) {
+                            handleVerifyRepayment(p.id, 'disputed');
+                          }
+                        }}
+                        disabled={verifyingPaymentId === p.id}
+                        className="py-1.5 px-3 rounded-lg border border-red-500/30 text-red-600 dark:text-red-400 font-mono text-xs font-semibold hover:bg-red-500/10 transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        Dispute
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* Activity Log Stepper */}
       <section className="bg-surface-container-lowest rounded-2xl p-6 md:p-8 border border-outline-variant/30 shadow-sm">
         <h3 className="font-heading text-lg font-bold text-on-surface mb-6">
@@ -696,6 +914,18 @@ function PersonDebtDetailContent() {
               if (log.action === 'payment_made') {
                 dotColor = 'bg-secondary';
                 title = `Payment Received (${formatCurrency(Number((log.details as any)?.amount || 0), currency)})`;
+              } else if (log.action === 'repayment_reported') {
+                dotColor = 'bg-amber-500';
+                title = `Repayment Reported (${formatCurrency(Number((log.details as any)?.amount || 0), currency)})`;
+              } else if (log.action === 'payment_verified') {
+                dotColor = 'bg-emerald-500';
+                title = 'Repayment Verified by Lender';
+              } else if (log.action === 'creator_note_updated') {
+                dotColor = 'bg-primary';
+                title = 'Creator Note Updated';
+              } else if (log.action === 'counterparty_note_updated') {
+                dotColor = 'bg-secondary';
+                title = 'Counterparty Note Updated';
               } else if (log.action === 'debt_created') {
                 dotColor = 'bg-primary';
                 title = `Debt Record Created (Principal: ${formatCurrency(Number((log.details as any)?.principal || 0), currency)})`;
@@ -737,6 +967,17 @@ function PersonDebtDetailContent() {
           currentBalance={activeDebtForPayment.balance}
           onClose={() => setActiveDebtForPayment(null)}
           onPaymentRecorded={fetchDetails}
+        />
+      )}
+
+      {/* Counterparty Note Modal */}
+      {selectedDebtForNote && (
+        <CounterpartyNoteModal
+          isOpen={Boolean(selectedDebtForNote)}
+          debt={selectedDebtForNote}
+          currentUserId={currentUserId || ''}
+          onClose={() => setSelectedDebtForNote(null)}
+          onNoteUpdated={fetchDetails}
         />
       )}
 

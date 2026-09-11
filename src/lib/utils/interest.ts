@@ -4,6 +4,7 @@ export interface DebtBalanceCalculation {
   principal: number;
   totalAccruedInterest: number;
   totalPaid: number;
+  pendingVerificationPaid?: number;
   currentBalance: number;
   isOverdue?: boolean;
 }
@@ -20,7 +21,13 @@ export function calculateDebtBalance(
   asOfDate: Date = new Date()
 ): DebtBalanceCalculation {
   const principal = Number(debt.principal) || 0;
-  const totalPaid = payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  
+  // Only verified payments clear the active balance; unverified payments are pending verification
+  const verifiedPayments = payments.filter((p) => (p as any).is_verified !== false);
+  const pendingPayments = payments.filter((p) => (p as any).is_verified === false);
+  
+  const totalPaid = verifiedPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const pendingVerificationPaid = pendingPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
   // Declined agreements are void: balance is 0 and no interest accrues
   if (debt.status === 'declined') {
@@ -28,6 +35,7 @@ export function calculateDebtBalance(
       principal,
       totalAccruedInterest: 0,
       totalPaid,
+      pendingVerificationPaid,
       currentBalance: 0,
     };
   }
@@ -38,6 +46,7 @@ export function calculateDebtBalance(
       principal,
       totalAccruedInterest: 0,
       totalPaid,
+      pendingVerificationPaid,
       currentBalance,
     };
   }
@@ -74,6 +83,7 @@ export function calculateDebtBalance(
     principal,
     totalAccruedInterest,
     totalPaid,
+    pendingVerificationPaid,
     currentBalance,
   };
 }

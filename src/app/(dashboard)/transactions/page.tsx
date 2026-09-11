@@ -7,6 +7,7 @@ import { calculateDebtBalance } from '@/lib/utils/interest';
 import { formatCurrency } from '@/lib/utils/currency';
 import { Chip } from '@/components/ui/Chip';
 import { Avatar } from '@/components/ui/Avatar';
+import { CounterpartyNoteModal } from '@/components/debts/CounterpartyNoteModal';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { getDueDateInfo } from '@/lib/utils/due-date';
 import Link from 'next/link';
@@ -20,6 +21,8 @@ export default function TransactionsPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currency, setCurrency] = useState('inr');
   const [filter, setFilter] = useState<'all' | 'lent' | 'borrowed' | 'settled' | 'declined'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedDebtForNote, setSelectedDebtForNote] = useState<Debt | null>(null);
 
   const fetchTransactions = useCallback(async () => {
     setLoading(true);
@@ -110,14 +113,56 @@ export default function TransactionsPage() {
     };
   }, [fetchTransactions, supabase]);
 
-  const filteredDebts = debts.filter((d) => {
-    const isLender = d.lender_id === currentUserId;
-    if (filter === 'lent') return isLender && d.status !== 'declined';
-    if (filter === 'borrowed') return !isLender && d.status !== 'declined';
-    if (filter === 'settled') return d.status === 'settled';
-    if (filter === 'declined') return d.status === 'declined';
-    return true;
-  });
+  const handleDismissDeclinedDebt = async (debtId: string, currentHidden: string[] = []) => {
+    if (!currentUserId) return;
+    try {
+      const updatedHidden = Array.from(new Set([...currentHidden, currentUserId]));
+      const { error } = await supabase
+        .from('debts')
+        .update({ hidden_by: updatedHidden })
+        .eq('id', debtId);
+      if (error) throw error;
+
+      window.dispatchEvent(new CustomEvent('debtsync:refresh'));
+      fetchTransactions();
+    } catch (err: any) {
+      console.error('Failed to dismiss declined request:', err);
+      alert('Could not dismiss request from view');
+    }
+  };
+
+  const visibleDebts = debts.filter((d) => !d.hidden_by?.includes(currentUserId || ''));
+
+  const filteredDebts = visibleDebts
+    .filter((d) => {
+      const isLender = d.lender_id === currentUserId;
+      if (filter === 'lent') return isLender && d.status !== 'declined';
+      if (filter === 'borrowed') return !isLender && d.status !== 'declined';
+      if (filter === 'settled') return d.status === 'settled';
+      if (filter === 'declined') return d.status === 'declined';
+      return true;
+    })
+    .filter((d) => {
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase().trim();
+      const isLender = d.lender_id === currentUserId;
+      const otherPerson = isLender ? d.borrower : d.lender;
+      const name = otherPerson?.full_name?.toLowerCase() || '';
+      const email = otherPerson?.email?.toLowerCase() || '';
+      const creatorNote = d.notes?.toLowerCase() || '';
+      const counterpartyNote = d.counterparty_notes?.toLowerCase() || '';
+      const principalStr = String(d.principal);
+
+      return (
+        name.includes(q) ||
+        email.includes(q) ||
+        creatorNote.includes(q) ||
+        counterpartyNote.includes(q) ||
+        principalStr.includes(q) ||
+        d.status.toLowerCase().includes(q) ||
+        d.interest_type.toLowerCase().includes(q)
+      );
+    });
 
   return (
     <div className="space-y-6 md:space-y-8">
@@ -131,20 +176,36 @@ export default function TransactionsPage() {
           </p>
         </div>
 
-        <div className="flex bg-[var(--surface-container)] p-1 rounded-xl border border-[var(--outline-variant)]/20 self-start flex-wrap gap-0.5">
-          {(['all', 'lent', 'borrowed', 'settled', 'declined'] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setFilter(tab)}
-              className={`px-3 py-1.5 font-mono text-xs font-bold rounded-lg uppercase tracking-wider transition-all ${
-                filter === tab
-                  ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-sm'
-                  : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
-              }`}
-            >
-              {tab}
-            </button>
-          ))}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          {/* Instant Search Bar */}
+          <div className="relative">
+            <span className="material-symbols-outlined absolute left-3 top-2.5 text-[16px] text-[var(--on-surface-variant)]">
+              search
+            </span>
+            <input
+              type="text"
+              placeholder="Search notes, names, amounts..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full sm:w-64 pl-9 pr-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-xs text-[var(--on-surface)] font-mono outline-none focus:border-[var(--primary)]"
+            />
+          </div>
+
+          <div className="flex bg-[var(--surface-container)] p-1 rounded-xl border border-[var(--outline-variant)]/20 self-start flex-wrap gap-0.5">
+            {(['all', 'lent', 'borrowed', 'settled', 'declined'] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setFilter(tab)}
+                className={`px-3 py-1.5 font-mono text-xs font-bold rounded-lg uppercase tracking-wider transition-all ${
+                  filter === tab
+                    ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-sm'
+                    : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                }`}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -265,6 +326,57 @@ export default function TransactionsPage() {
                       </div>
                     </div>
 
+                    {/* Notes preview */}
+                    {(d.notes || d.counterparty_notes) && (
+                      <div className="mt-2.5 pt-2 border-t border-[var(--outline-variant)]/10 text-xs space-y-1">
+                        {d.notes && (
+                          <div className="flex items-center gap-1.5 text-[var(--on-surface-variant)]">
+                            <span className="material-symbols-outlined text-[14px] text-[var(--primary)]">edit_note</span>
+                            <span className="truncate"><strong>Creator:</strong> {d.notes}</span>
+                          </div>
+                        )}
+                        {d.counterparty_notes && (
+                          <div className="flex items-center gap-1.5 text-[var(--on-surface-variant)]">
+                            <span className="material-symbols-outlined text-[14px] text-[var(--secondary)]">quick_reference_all</span>
+                            <span className="truncate"><strong>Counterparty:</strong> {d.counterparty_notes}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="mt-3 pt-2.5 border-t border-[var(--outline-variant)]/15 flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setSelectedDebtForNote(d);
+                        }}
+                        className="py-1 px-2.5 rounded-lg border border-[var(--outline-variant)]/30 text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] font-mono text-xs flex items-center gap-1"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">
+                          {d.notes || d.counterparty_notes ? 'note' : 'add_comment'}
+                        </span>
+                        <span>{d.notes || d.counterparty_notes ? 'Notes' : '+ Note'}</span>
+                      </button>
+
+                      {d.status === 'declined' && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleDismissDeclinedDebt(d.id, d.hidden_by || []);
+                          }}
+                          className="py-1 px-2.5 rounded-lg border border-[var(--outline-variant)]/30 text-[var(--on-surface-variant)] hover:text-red-500 font-mono text-xs flex items-center gap-1"
+                          title="Dismiss from your view"
+                        >
+                          <span className="material-symbols-outlined text-[14px]">visibility_off</span>
+                          <span>Dismiss</span>
+                        </button>
+                      )}
+                    </div>
+
                     {d.status === 'pending' && d.created_by !== currentUserId && (
                       <div className="mt-3 pt-3 border-t border-amber-500/20 flex items-center justify-between gap-2">
                         <span className="text-[11px] font-mono text-amber-500 font-medium">Awaiting your approval</span>
@@ -348,6 +460,22 @@ export default function TransactionsPage() {
                               <div className="font-mono text-xs text-[var(--on-surface-variant)]">
                                 {otherPerson?.email}
                               </div>
+                              {(d.notes || d.counterparty_notes) && (
+                                <div className="mt-1 space-y-0.5 max-w-xs">
+                                  {d.notes && (
+                                    <div className="text-[11px] text-[var(--on-surface-variant)] truncate flex items-center gap-1">
+                                      <span className="material-symbols-outlined text-[12px] text-[var(--primary)] shrink-0">edit_note</span>
+                                      <span className="truncate italic">"{d.notes}"</span>
+                                    </div>
+                                  )}
+                                  {d.counterparty_notes && (
+                                    <div className="text-[11px] text-[var(--on-surface-variant)] truncate flex items-center gap-1">
+                                      <span className="material-symbols-outlined text-[12px] text-[var(--secondary)] shrink-0">quick_reference_all</span>
+                                      <span className="truncate italic">"{d.counterparty_notes}"</span>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           </div>
                         </td>
@@ -424,31 +552,57 @@ export default function TransactionsPage() {
                         </td>
 
                         <td className="py-4 text-right">
-                          {d.status === 'pending' && d.created_by !== currentUserId ? (
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                onClick={() => handleAcceptDebt(d.id, 'active')}
-                                className="px-2.5 py-1 bg-[var(--primary)] text-[var(--on-primary)] rounded-md font-mono text-xs font-bold hover:opacity-90 transition-opacity shadow-xs"
-                              >
-                                Accept
-                              </button>
-                              <button
-                                onClick={() => {
-                                  if (confirm('Decline this agreement?')) handleAcceptDebt(d.id, 'declined');
-                                }}
-                                className="px-2 py-1 border border-[var(--error)]/30 text-[var(--error)] rounded-md font-mono text-xs font-bold hover:bg-[var(--error)]/10"
-                              >
-                                Decline
-                              </button>
-                            </div>
-                          ) : (
-                            <Link
-                              href={`/directory/detail?id=${otherPerson?.id || d.id}`}
-                              className="font-mono text-xs text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] font-bold hover:underline"
+                          <div className="flex items-center justify-end gap-1.5">
+                            {/* Two-sided Note Button */}
+                            <button
+                              type="button"
+                              onClick={() => setSelectedDebtForNote(d)}
+                              className="p-1.5 rounded-lg border border-[var(--outline-variant)]/30 text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors"
+                              title="View or edit 2-sided notes"
                             >
-                              Ledger
-                            </Link>
-                          )}
+                              <span className="material-symbols-outlined text-[15px]">
+                                {d.notes || d.counterparty_notes ? 'note' : 'add_comment'}
+                              </span>
+                            </button>
+
+                            {/* Dismiss button for declined requests */}
+                            {d.status === 'declined' && (
+                              <button
+                                type="button"
+                                onClick={() => handleDismissDeclinedDebt(d.id, d.hidden_by || [])}
+                                className="p-1.5 rounded-lg border border-[var(--outline-variant)]/30 text-[var(--on-surface-variant)] hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                                title="Dismiss from your view (persists in activity log audit trail)"
+                              >
+                                <span className="material-symbols-outlined text-[15px]">visibility_off</span>
+                              </button>
+                            )}
+
+                            {d.status === 'pending' && d.created_by !== currentUserId ? (
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => handleAcceptDebt(d.id, 'active')}
+                                  className="px-2.5 py-1 bg-[var(--primary)] text-[var(--on-primary)] rounded-md font-mono text-xs font-bold hover:opacity-90 transition-opacity shadow-xs"
+                                >
+                                  Accept
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    if (confirm('Decline this agreement?')) handleAcceptDebt(d.id, 'declined');
+                                  }}
+                                  className="px-2 py-1 border border-[var(--error)]/30 text-[var(--error)] rounded-md font-mono text-xs font-bold hover:bg-[var(--error)]/10"
+                                >
+                                  Decline
+                                </button>
+                              </div>
+                            ) : (
+                              <Link
+                                href={`/directory/detail?id=${otherPerson?.id || d.id}`}
+                                className="font-mono text-xs text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] font-bold hover:underline ml-1"
+                              >
+                                Ledger
+                              </Link>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -459,6 +613,17 @@ export default function TransactionsPage() {
           </div>
         )}
       </div>
+
+      {/* Counterparty Note Modal */}
+      {selectedDebtForNote && (
+        <CounterpartyNoteModal
+          isOpen={Boolean(selectedDebtForNote)}
+          debt={selectedDebtForNote}
+          currentUserId={currentUserId || ''}
+          onClose={() => setSelectedDebtForNote(null)}
+          onNoteUpdated={fetchTransactions}
+        />
+      )}
     </div>
   );
 }

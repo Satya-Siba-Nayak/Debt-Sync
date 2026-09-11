@@ -7,6 +7,7 @@ import { Contact, Profile } from '@/lib/types/database';
 import { formatCurrency, SUPPORTED_CURRENCIES } from '@/lib/utils/currency';
 import { projectDebtGrowth } from '@/lib/utils/interest';
 import { findProfileByIdentifier } from '@/lib/utils/profile-lookup';
+import { checkDebtRequestCooldown, type CooldownCheckResult } from '@/lib/utils/debt-cooldown';
 import { PhoneInput } from '../ui/PhoneInput';
 
 interface RecordDebtModalProps {
@@ -34,11 +35,16 @@ export function RecordDebtModal({
   // Form states
   const [people, setPeople] = useState<PersonOption[]>([]);
   const [selectedPersonId, setSelectedPersonId] = useState(preselectedContactId || '');
+  const [personSearch, setPersonSearch] = useState('');
   const [newPersonName, setNewPersonName] = useState('');
   const [newPersonEmail, setNewPersonEmail] = useState('');
   const [newPersonPhone, setNewPersonPhone] = useState('');
   const [defaultCountryCode, setDefaultCountryCode] = useState('+91');
   const [isAddingNewPerson, setIsAddingNewPerson] = useState(false);
+
+  // Anti-harassment cooldown states
+  const [cooldown, setCooldown] = useState<CooldownCheckResult | null>(null);
+  const [checkingCooldown, setCheckingCooldown] = useState(false);
 
   const [principal, setPrincipal] = useState<number>(1500);
   const [currency, setCurrency] = useState('inr');
@@ -59,6 +65,30 @@ export function RecordDebtModal({
       setIsAddingNewPerson(false);
     }
   }, [preselectedContactId, isOpen]);
+
+  // Verify anti-harassment cooldown when selected contact changes
+  useEffect(() => {
+    async function verifyCooldown() {
+      const targetId = selectedPersonId || preselectedContactId;
+      if (!targetId || isAddingNewPerson) {
+        setCooldown(null);
+        return;
+      }
+      setCheckingCooldown(true);
+      try {
+        const res = await checkDebtRequestCooldown(supabase, targetId);
+        setCooldown(res);
+      } catch (err) {
+        console.error('Failed to verify debt request cooldown:', err);
+      } finally {
+        setCheckingCooldown(false);
+      }
+    }
+
+    if (isOpen) {
+      verifyCooldown();
+    }
+  }, [selectedPersonId, preselectedContactId, isAddingNewPerson, isOpen, supabase]);
 
   // Load contacts and counterparties
   useEffect(() => {
@@ -90,15 +120,17 @@ export function RecordDebtModal({
         }
       }
 
-      // 2. Fetch counterparties from existing debts
+      // 2. Fetch counterparties from existing debts (excluding declined debts to respect privacy)
       const { data: debtData } = await supabase
         .from('debts')
         .select(`
+          status,
           lender_id, borrower_id,
           lender:profiles!debts_lender_id_fkey(id, email, full_name, phone),
           borrower:profiles!debts_borrower_id_fkey(id, email, full_name, phone)
         `)
-        .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`);
+        .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`)
+        .neq('status', 'declined');
 
       if (debtData) {
         for (const d of debtData as any[]) {
@@ -150,7 +182,7 @@ export function RecordDebtModal({
       }
       loadContacts();
     }
-  }, [isOpen, preselectedContactId, selectedPersonId, supabase]);
+  }, [isOpen, preselectedContactId, supabase]);
 
   // Projected growth preview (12 months)
   const projection = projectDebtGrowth(
@@ -203,19 +235,21 @@ export function RecordDebtModal({
           if (shadowError) throw shadowError;
           targetUserId = shadowId;
         }
-
-        // Add to contacts
-        await supabase.from('contacts').insert({
-          owner_id: user.id,
-          contact_id: targetUserId,
-          nickname: newPersonName.trim() || null,
-        });
       } else if (!targetUserId && people.length > 0) {
         targetUserId = people[0].id;
       }
 
       if (!targetUserId) {
         throw new Error('Please select or add a person');
+      }
+
+      // Check anti-harassment cooldown before submitting
+      const cooldownCheck = await checkDebtRequestCooldown(supabase, targetUserId);
+      if (!cooldownCheck.allowed) {
+        throw new Error(
+          cooldownCheck.message ||
+          `Request cooldown active: This contact previously declined your requests. Please wait ${cooldownCheck.cooldownRemainingFormatted || 'the cooldown period'} before sending another request.`
+        );
       }
 
       const lenderId = direction === 'lent' ? user.id : targetUserId;
@@ -242,15 +276,8 @@ export function RecordDebtModal({
 
       if (debtError) throw debtError;
 
-      // Ensure the other party is in user's contacts
-      try {
-        await supabase.from('contacts').insert({
-          owner_id: user.id,
-          contact_id: targetUserId,
-        });
-      } catch (_) {
-        // Ignore duplicate error if already a contact
-      }
+      // Privacy: We do NOT insert into contacts here!
+      // Contacts are only created mutually upon explicit acceptance by the counterparty.
 
       // Create activity log
       await supabase.from('activity_log').insert({
@@ -281,6 +308,16 @@ export function RecordDebtModal({
     }
   };
 
+  const filteredPeople = people.filter((p) => {
+    if (!personSearch.trim()) return true;
+    const q = personSearch.toLowerCase();
+    return (
+      p.name.toLowerCase().includes(q) ||
+      p.email.toLowerCase().includes(q) ||
+      (p.phone && p.phone.includes(q))
+    );
+  });
+
   return (
     <Modal
       isOpen={isOpen}
@@ -293,6 +330,20 @@ export function RecordDebtModal({
         {error && (
           <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-[var(--error)] text-sm border border-[var(--error)]/20">
             {error}
+          </div>
+        )}
+
+        {cooldown && !cooldown.allowed && (
+          <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 space-y-1">
+            <div className="flex items-center gap-2 font-mono text-xs font-bold uppercase tracking-wider">
+              <span className="material-symbols-outlined text-[18px]">lock_clock</span>
+              <span>Anti-Harassment Cooldown Active</span>
+            </div>
+            <p className="text-xs leading-relaxed">
+              This contact declined your previous {cooldown.declinedCount} request{cooldown.declinedCount > 1 ? 's' : ''}.
+              To protect privacy and prevent spam, new requests to this contact are paused for another{' '}
+              <span className="font-bold font-mono underline">{cooldown.cooldownRemainingFormatted || 'cooldown period'}</span>.
+            </p>
           </div>
         )}
 
@@ -315,20 +366,37 @@ export function RecordDebtModal({
               </div>
 
               {!isAddingNewPerson ? (
-                <select
-                  value={selectedPersonId || preselectedContactId || (people[0]?.id ?? '')}
-                  onChange={(e) => setSelectedPersonId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--primary)]/10 outline-none text-sm font-medium"
-                >
-                  {people.length === 0 && (
-                    <option value="">No contacts yet — click + New Person</option>
+                <div className="space-y-2">
+                  {people.length > 3 && (
+                    <div className="relative">
+                      <span className="material-symbols-outlined absolute left-3 top-2.5 text-[16px] text-[var(--on-surface-variant)]">
+                        search
+                      </span>
+                      <input
+                        type="text"
+                        placeholder="Search contact name, email, or phone..."
+                        value={personSearch}
+                        onChange={(e) => setPersonSearch(e.target.value)}
+                        className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-[var(--outline-variant)]/30 bg-[var(--surface-container-lowest)] text-xs text-[var(--on-surface)] outline-none focus:border-[var(--primary)]"
+                      />
+                    </div>
                   )}
-                  {people.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} {p.email ? `(${p.email})` : p.phone ? `(${p.phone})` : ''}
-                    </option>
-                  ))}
-                </select>
+
+                  <select
+                    value={selectedPersonId || preselectedContactId || (filteredPeople[0]?.id ?? '')}
+                    onChange={(e) => setSelectedPersonId(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--primary)]/10 outline-none text-sm font-medium"
+                  >
+                    {filteredPeople.length === 0 && (
+                      <option value="">No contacts match your search</option>
+                    )}
+                    {filteredPeople.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} {p.email ? `(${p.email})` : p.phone ? `(${p.phone})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               ) : (
                 <div className="space-y-2.5 p-3 bg-[var(--surface)] rounded-xl border border-[var(--outline-variant)]/30">
                   <input
@@ -597,11 +665,21 @@ export function RecordDebtModal({
             <div className="mt-6 pt-4 border-t border-[var(--outline-variant)]/20">
               <button
                 type="submit"
-                disabled={loading}
-                className="w-full py-3 px-4 bg-[var(--primary)] text-[var(--on-primary)] rounded-xl font-bold font-mono text-sm hover:opacity-95 active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-md disabled:opacity-50"
+                disabled={loading || checkingCooldown || Boolean(cooldown && !cooldown.allowed)}
+                className="w-full py-3 px-4 bg-[var(--primary)] text-[var(--on-primary)] rounded-xl font-bold font-mono text-sm hover:opacity-95 active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <span className="material-symbols-outlined text-[18px]">send</span>
-                <span>{loading ? 'Creating...' : 'Send Request'}</span>
+                <span className="material-symbols-outlined text-[18px]">
+                  {cooldown && !cooldown.allowed ? 'lock' : 'send'}
+                </span>
+                <span>
+                  {loading
+                    ? 'Creating...'
+                    : checkingCooldown
+                    ? 'Checking...'
+                    : cooldown && !cooldown.allowed
+                    ? 'Cooldown Active'
+                    : 'Send Request'}
+                </span>
               </button>
               <p className="text-[11px] text-[var(--on-surface-variant)] text-center mt-2">
                 The other party will be notified to verify and accept these terms.

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ThemeToggle } from '../ui/ThemeToggle';
 import { Avatar, AVATAR_PRESETS } from '../ui/Avatar';
+import { NotificationCenter } from './NotificationCenter';
 import { createClient } from '@/lib/supabase/client';
 import { clearAuthSessionData } from '@/lib/utils/auth-session';
 
@@ -102,7 +103,8 @@ export function TopBar({
           </span>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
+          <NotificationCenter />
           <ThemeToggle />
           {onNewTransaction && (
             <button
@@ -133,7 +135,9 @@ export function TopBar({
           </h1>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          <NotificationCenter />
+
           <Link
             href="/settings"
             className="p-2 text-[var(--on-surface-variant)] hover:text-[var(--primary)] rounded-lg hover:bg-[var(--surface-container)] transition-colors"
