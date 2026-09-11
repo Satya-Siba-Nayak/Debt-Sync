@@ -19,14 +19,41 @@ const SIZE_MAP = {
 
 // Curated stylish avatar presets that look stunning on both dark and light modes
 export const AVATAR_PRESETS = [
-  { id: 'preset-1', label: 'Teal Minimal', url: 'https://api.dicebear.com/7.x/bottts/svg?seed=DebtSync1' },
-  { id: 'preset-2', label: 'Emerald Geometric', url: 'https://api.dicebear.com/7.x/shapes/svg?seed=DebtSync2' },
-  { id: 'preset-3', label: 'Slate Avatar', url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=DebtSync3' },
-  { id: 'preset-4', label: 'Cyan Cyber', url: 'https://api.dicebear.com/7.x/bottts/svg?seed=DebtSync4' },
-  { id: 'preset-5', label: 'Amber Shapes', url: 'https://api.dicebear.com/7.x/shapes/svg?seed=DebtSync5' },
-  { id: 'preset-6', label: 'Indigo Persona', url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=DebtSync6' },
-  { id: 'preset-7', label: 'Crimson Tech', url: 'https://api.dicebear.com/7.x/bottts/svg?seed=DebtSync7' },
-  { id: 'preset-8', label: 'Violet Mosaic', url: 'https://api.dicebear.com/7.x/shapes/svg?seed=DebtSync8' },
+  // Robot / Tech presets (Bottts)
+  { id: 'preset-1', label: 'Teal Bot', url: 'https://api.dicebear.com/7.x/bottts/svg?seed=DebtSyncTeal' },
+  { id: 'preset-2', label: 'Cyber Bot', url: 'https://api.dicebear.com/7.x/bottts/svg?seed=DebtSyncCyber' },
+  { id: 'preset-3', label: 'Crimson Tech', url: 'https://api.dicebear.com/7.x/bottts/svg?seed=DebtSyncCrimson' },
+  { id: 'preset-4', label: 'Mint Android', url: 'https://api.dicebear.com/7.x/bottts/svg?seed=DebtSyncMint' },
+  { id: 'preset-5', label: 'Solar Bot', url: 'https://api.dicebear.com/7.x/bottts/svg?seed=DebtSyncSolar' },
+
+  // Modern Geometric & Abstract (Shapes)
+  { id: 'preset-6', label: 'Emerald Shapes', url: 'https://api.dicebear.com/7.x/shapes/svg?seed=DebtSyncEmerald' },
+  { id: 'preset-7', label: 'Amber Bauhaus', url: 'https://api.dicebear.com/7.x/shapes/svg?seed=DebtSyncAmber' },
+  { id: 'preset-8', label: 'Violet Mosaic', url: 'https://api.dicebear.com/7.x/shapes/svg?seed=DebtSyncViolet' },
+  { id: 'preset-9', label: 'Sunset Shapes', url: 'https://api.dicebear.com/7.x/shapes/svg?seed=DebtSyncSunset' },
+  { id: 'preset-10', label: 'Cosmic Prisms', url: 'https://api.dicebear.com/7.x/shapes/svg?seed=DebtSyncCosmic' },
+  { id: 'preset-11', label: 'Neon Geo', url: 'https://api.dicebear.com/7.x/shapes/svg?seed=DebtSyncNeon' },
+
+  // Notion-style sketches (Notionists)
+  { id: 'preset-12', label: 'Gold Minimal', url: 'https://api.dicebear.com/7.x/notionists/svg?seed=DebtSyncGold' },
+  { id: 'preset-13', label: 'Cobalt Notion', url: 'https://api.dicebear.com/7.x/notionists/svg?seed=DebtSyncCobalt' },
+  { id: 'preset-14', label: 'Sage Minimal', url: 'https://api.dicebear.com/7.x/notionists/svg?seed=DebtSyncSage' },
+
+  // Illustrated Personas (Avataaars)
+  { id: 'preset-15', label: 'Cyan Persona', url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=DebtSyncCyan' },
+  { id: 'preset-16', label: 'Indigo Persona', url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=DebtSyncIndigo' },
+  { id: 'preset-17', label: 'Ruby Adventurer', url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=DebtSyncRuby' },
+  { id: 'preset-18', label: 'Onyx Persona', url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=DebtSyncOnyx' },
+
+  // Anime / Clean Portraits (Lorelei)
+  { id: 'preset-19', label: 'Electric Blue', url: 'https://api.dicebear.com/7.x/lorelei/svg?seed=DebtSyncBlue' },
+  { id: 'preset-20', label: 'Jade Portrait', url: 'https://api.dicebear.com/7.x/lorelei/svg?seed=DebtSyncJade' },
+  { id: 'preset-21', label: 'Coral Portrait', url: 'https://api.dicebear.com/7.x/lorelei/svg?seed=DebtSyncCoral' },
+
+  // Retro Pixel Art (Pixel Art)
+  { id: 'preset-22', label: 'Neon Pixel', url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=DebtSyncPixel' },
+  { id: 'preset-23', label: 'Cyberpunk Pixel', url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=DebtSyncCyberpunk' },
+  { id: 'preset-24', label: 'Arcade Pixel', url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=DebtSyncArcade' },
 ];
 
 export function Avatar({

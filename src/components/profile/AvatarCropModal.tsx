@@ -23,9 +23,9 @@ export function AvatarCropModal({
 
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [rotation, setRotation] = useState(0);
-  const [flipH, setFlipH] = useState(false);
   const [imgDimensions, setImgDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [resolvedSrc, setResolvedSrc] = useState<string | null>(null);
+  const [loadingImage, setLoadingImage] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState('');
 
@@ -34,19 +34,100 @@ export function AvatarCropModal({
   const initialPanRef = useRef({ x: 0, y: 0 });
   const imageRef = useRef<HTMLImageElement | null>(null);
 
-  // Reset transform whenever modal opens or imageSrc changes
+  // Viewport circle diameter in px
+  const circleDiameter = 240;
+
+  // Prepare image source and measure natural dimensions safely
   useEffect(() => {
-    if (isOpen) {
+    let active = true;
+    let localBlobUrl: string | null = null;
+
+    async function prepareImage() {
+      if (!imageSrc) {
+        setResolvedSrc(null);
+        setImgDimensions(null);
+        return;
+      }
+
+      setLoadingImage(true);
+      setError('');
       setZoom(1);
       setPan({ x: 0, y: 0 });
-      setRotation(0);
-      setFlipH(false);
-      setError('');
-      setImgDimensions(null);
+
+      try {
+        let srcToMeasure = imageSrc;
+
+        // Remote images (e.g. DiceBear preset SVGs or external URLs):
+        // Fetch to local blob URL to bypass CORS/tainted canvas issues and ensure SVG dimensions
+        if (imageSrc.startsWith('http://') || imageSrc.startsWith('https://')) {
+          try {
+            const res = await fetch(imageSrc);
+            if (!res.ok) throw new Error(`Failed to fetch image (${res.status})`);
+            const contentType = res.headers.get('content-type') || '';
+
+            if (contentType.includes('svg') || imageSrc.includes('/svg')) {
+              let svgText = await res.text();
+              // Inject explicit dimensions if missing so SVG naturalWidth/Height is guaranteed
+              if (!svgText.includes('width=') || !svgText.includes('height=')) {
+                svgText = svgText.replace(/<svg\b([^>]*)>/i, '<svg width="512" height="512" $1>');
+              }
+              const blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
+              localBlobUrl = URL.createObjectURL(blob);
+              srcToMeasure = localBlobUrl;
+            } else {
+              const blob = await res.blob();
+              localBlobUrl = URL.createObjectURL(blob);
+              srcToMeasure = localBlobUrl;
+            }
+          } catch (fetchErr) {
+            console.warn('Could not proxy remote image to local blob, falling back to direct URL:', fetchErr);
+            srcToMeasure = imageSrc;
+          }
+        }
+
+        // Measure true intrinsic dimensions
+        const testImg = new Image();
+        testImg.crossOrigin = 'anonymous';
+
+        testImg.onload = () => {
+          if (!active) return;
+          const w = testImg.naturalWidth > 0 ? testImg.naturalWidth : 512;
+          const h = testImg.naturalHeight > 0 ? testImg.naturalHeight : 512;
+          setImgDimensions({ width: w, height: h });
+          setResolvedSrc(srcToMeasure);
+          setLoadingImage(false);
+        };
+
+        testImg.onerror = () => {
+          if (!active) return;
+          // Fallback square if natural dimensions couldn't be loaded
+          setImgDimensions({ width: 512, height: 512 });
+          setResolvedSrc(srcToMeasure);
+          setLoadingImage(false);
+        };
+
+        testImg.src = srcToMeasure;
+      } catch (err: any) {
+        if (!active) return;
+        console.error('Error preparing image for crop:', err);
+        setResolvedSrc(imageSrc);
+        setLoadingImage(false);
+      }
     }
+
+    if (isOpen) {
+      prepareImage();
+    }
+
+    return () => {
+      active = false;
+      if (localBlobUrl) {
+        URL.revokeObjectURL(localBlobUrl);
+      }
+    };
   }, [isOpen, imageSrc]);
 
-  // Pointer drag handlers (smooth on mouse, touch, and stylus)
+  // Pointer drag handlers (mouse, touch, and stylus)
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
     isDraggingRef.current = true;
@@ -74,35 +155,34 @@ export function AvatarCropModal({
     } catch (_) {}
   };
 
-  const handleRotateLeft = () => setRotation((prev) => (prev - 90 + 360) % 360);
-  const handleRotateRight = () => setRotation((prev) => (prev + 90) % 360);
-  const handleFlipHorizontal = () => setFlipH((prev) => !prev);
   const handleReset = () => {
     setZoom(1);
     setPan({ x: 0, y: 0 });
-    setRotation(0);
-    setFlipH(false);
   };
 
-  // Base sizing to cover the viewport cleanly
-  const boxSize = 280; // Viewport container size
-  const circleDiameter = 240; // Diameter of circular crop frame
-
-  let baseWidth = boxSize;
-  let baseHeight = boxSize;
+  // Base sizing strictly locking the natural aspect ratio R = W / H
+  // Never deform or widen the photo
+  let baseWidth = circleDiameter;
+  let baseHeight = circleDiameter;
 
   if (imgDimensions && imgDimensions.width > 0 && imgDimensions.height > 0) {
-    const isRotated90 = rotation === 90 || rotation === 270;
-    const effectiveWidth = isRotated90 ? imgDimensions.height : imgDimensions.width;
-    const effectiveHeight = isRotated90 ? imgDimensions.width : imgDimensions.height;
+    const W = imgDimensions.width;
+    const H = imgDimensions.height;
+    const aspect = W / H;
 
-    const baseScale = Math.max(circleDiameter / effectiveWidth, circleDiameter / effectiveHeight);
-    baseWidth = imgDimensions.width * baseScale;
-    baseHeight = imgDimensions.height * baseScale;
+    if (aspect >= 1) {
+      // Landscape or square: lock height to circle diameter, width scales proportionally
+      baseHeight = circleDiameter;
+      baseWidth = circleDiameter * aspect;
+    } else {
+      // Portrait: lock width to circle diameter, height scales proportionally
+      baseWidth = circleDiameter;
+      baseHeight = circleDiameter / aspect;
+    }
   }
 
   const handleCropAndUpload = async () => {
-    if (!imageRef.current) return;
+    if (!imageRef.current || !imgDimensions) return;
     setProcessing(true);
     setError('');
 
@@ -129,10 +209,8 @@ export function AvatarCropModal({
       ctx.save();
       // Move to canvas center + scaled user pan offset
       ctx.translate(C / 2 + pan.x * F, C / 2 + pan.y * F);
-      ctx.rotate((rotation * Math.PI) / 180);
-      if (flipH) ctx.scale(-1, 1);
 
-      // Draw the image centered at translation point
+      // Draw the image centered at translation point preserving exact aspect ratio
       const drawW = baseWidth * zoom * F;
       const drawH = baseHeight * zoom * F;
       ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
@@ -181,7 +259,7 @@ export function AvatarCropModal({
         console.warn('Storage upload error, falling back to base64:', storageErr);
       }
 
-      // Fallback to high-quality base64 if storage bucket is not provisioned
+      // Fallback to high-quality data URL if storage bucket is not provisioned
       if (!finalAvatarUrl) {
         finalAvatarUrl = canvas.toDataURL('image/jpeg', Math.min(quality, 0.85));
       }
@@ -221,8 +299,8 @@ export function AvatarCropModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Edit & Crop Profile Picture"
-      subtitle="Drag to reposition, use the slider to zoom, and rotate or flip as needed. Compressed under 5MB."
+      title="Edit &amp; Crop Profile Picture"
+      subtitle="Drag to reposition and use the zoom slider to frame your picture. Automatically compressed under 5MB."
       maxWidth="max-w-md"
     >
       <div className="flex flex-col items-center gap-4">
@@ -240,95 +318,51 @@ export function AvatarCropModal({
           onPointerCancel={handlePointerUp}
           className="relative w-[280px] h-[280px] rounded-2xl overflow-hidden bg-surface-container-highest flex items-center justify-center select-none touch-none cursor-grab active:cursor-grabbing border-2 border-primary/40 shadow-inner"
         >
-          {/* Image */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            ref={imageRef}
-            src={imageSrc}
-            alt="Crop target"
-            draggable={false}
-            crossOrigin="anonymous"
-            onLoad={(e) => {
-              const img = e.currentTarget;
-              setImgDimensions({
-                width: img.naturalWidth || 500,
-                height: img.naturalHeight || 500,
-              });
-            }}
-            style={{
-              width: `${baseWidth * zoom}px`,
-              height: `${baseHeight * zoom}px`,
-              maxWidth: 'none',
-              maxHeight: 'none',
-              transform: `translate(${pan.x}px, ${pan.y}px) rotate(${rotation}deg) scaleX(${flipH ? -1 : 1})`,
-              transformOrigin: 'center center',
-              transition: isDraggingRef.current ? 'none' : 'transform 0.05s ease-out',
-              pointerEvents: 'none',
-              userSelect: 'none',
-            }}
-            className="shrink-0"
-          />
+          {loadingImage ? (
+            <div className="flex flex-col items-center justify-center gap-2 text-on-surface-variant">
+              <span className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+              <span className="font-mono text-xs">Loading image...</span>
+            </div>
+          ) : resolvedSrc ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              ref={imageRef}
+              src={resolvedSrc}
+              alt="Crop target"
+              draggable={false}
+              crossOrigin="anonymous"
+              style={{
+                width: `${baseWidth * zoom}px`,
+                height: `${baseHeight * zoom}px`,
+                maxWidth: 'none',
+                maxHeight: 'none',
+                aspectRatio: imgDimensions ? `${imgDimensions.width} / ${imgDimensions.height}` : 'auto',
+                transform: `translate(${pan.x}px, ${pan.y}px)`,
+                transformOrigin: 'center center',
+                transition: isDraggingRef.current ? 'none' : 'transform 0.05s ease-out',
+                pointerEvents: 'none',
+                userSelect: 'none',
+              }}
+              className="shrink-0"
+            />
+          ) : null}
 
           {/* Circular Cutout Mask Overlay with 65% outer dimming */}
           <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
             <div className="w-[240px] h-[240px] rounded-full border-2 border-dashed border-primary shadow-[0_0_0_9999px_rgba(0,0,0,0.65)]" />
           </div>
 
-          <span className="absolute bottom-2.5 left-1/2 -translate-x-1/2 text-[10px] font-mono uppercase tracking-wider text-white/80 bg-black/60 px-2.5 py-0.5 rounded-full pointer-events-none backdrop-blur-xs flex items-center gap-1">
+          <span className="absolute bottom-2.5 left-1/2 -translate-x-1/2 text-[10px] font-mono uppercase tracking-wider text-white/90 bg-black/70 px-2.5 py-0.5 rounded-full pointer-events-none backdrop-blur-xs flex items-center gap-1 shadow-sm">
             <span className="material-symbols-outlined text-[13px]">drag_pan</span>
             <span>Drag to Reposition</span>
           </span>
         </div>
 
-        {/* Quick Transform Controls (Rotate Left, Rotate Right, Flip, Reset) */}
-        <div className="flex items-center justify-center gap-2 w-full">
-          <button
-            type="button"
-            onClick={handleRotateLeft}
-            className="p-2 rounded-xl bg-surface-container-low hover:bg-surface-container border border-outline-variant/30 text-on-surface text-xs font-mono transition-colors flex items-center gap-1 cursor-pointer"
-            title="Rotate 90° Left"
-          >
-            <span className="material-symbols-outlined text-[16px]">rotate_left</span>
-            <span className="text-[11px]">-90°</span>
-          </button>
-          <button
-            type="button"
-            onClick={handleRotateRight}
-            className="p-2 rounded-xl bg-surface-container-low hover:bg-surface-container border border-outline-variant/30 text-on-surface text-xs font-mono transition-colors flex items-center gap-1 cursor-pointer"
-            title="Rotate 90° Right"
-          >
-            <span className="material-symbols-outlined text-[16px]">rotate_right</span>
-            <span className="text-[11px]">+90°</span>
-          </button>
-          <button
-            type="button"
-            onClick={handleFlipHorizontal}
-            className={`p-2 rounded-xl border text-xs font-mono transition-colors flex items-center gap-1 cursor-pointer ${
-              flipH
-                ? 'bg-primary/15 border-primary text-primary font-bold'
-                : 'bg-surface-container-low hover:bg-surface-container border-outline-variant/30 text-on-surface'
-            }`}
-            title="Flip Horizontal"
-          >
-            <span className="material-symbols-outlined text-[16px]">flip</span>
-            <span className="text-[11px]">Flip</span>
-          </button>
-          <button
-            type="button"
-            onClick={handleReset}
-            className="p-2 rounded-xl bg-surface-container-low hover:bg-surface-container border border-outline-variant/30 text-on-surface text-xs font-mono transition-colors flex items-center gap-1 cursor-pointer"
-            title="Reset to Center"
-          >
-            <span className="material-symbols-outlined text-[16px]">refresh</span>
-            <span className="text-[11px]">Reset</span>
-          </button>
-        </div>
-
-        {/* Zoom Slider */}
-        <div className="w-full space-y-1.5 px-2">
+        {/* Zoom Controls & Reset */}
+        <div className="w-full space-y-2 px-1">
           <div className="flex justify-between items-center text-xs font-mono text-on-surface-variant">
-            <span className="flex items-center gap-1 font-semibold">
-              <span className="material-symbols-outlined text-[16px]">zoom_in</span>
+            <span className="flex items-center gap-1 font-semibold text-on-surface">
+              <span className="material-symbols-outlined text-[16px] text-primary">zoom_in</span>
               <span>Zoom</span>
             </span>
             <div className="flex items-center gap-2">
@@ -336,25 +370,36 @@ export function AvatarCropModal({
                 type="button"
                 onClick={() => setZoom((z) => Math.max(1, +(z - 0.1).toFixed(2)))}
                 disabled={zoom <= 1}
-                className="w-6 h-6 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface hover:bg-surface-container-high flex items-center justify-center text-sm disabled:opacity-40 cursor-pointer"
+                className="w-6 h-6 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface hover:bg-surface-container-high flex items-center justify-center text-sm disabled:opacity-40 cursor-pointer transition-colors"
+                title="Zoom Out"
               >
                 -
               </button>
               <span className="w-12 text-center font-bold text-on-surface">{Math.round(zoom * 100)}%</span>
               <button
                 type="button"
-                onClick={() => setZoom((z) => Math.min(3.5, +(z + 0.1).toFixed(2)))}
-                disabled={zoom >= 3.5}
-                className="w-6 h-6 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface hover:bg-surface-container-high flex items-center justify-center text-sm disabled:opacity-40 cursor-pointer"
+                onClick={() => setZoom((z) => Math.min(3, +(z + 0.1).toFixed(2)))}
+                disabled={zoom >= 3}
+                className="w-6 h-6 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface hover:bg-surface-container-high flex items-center justify-center text-sm disabled:opacity-40 cursor-pointer transition-colors"
+                title="Zoom In"
               >
                 +
+              </button>
+              <button
+                type="button"
+                onClick={handleReset}
+                className="ml-2 px-2 py-1 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface hover:bg-surface-container-high text-[11px] font-mono flex items-center gap-1 cursor-pointer transition-colors"
+                title="Reset zoom and position"
+              >
+                <span className="material-symbols-outlined text-[14px]">refresh</span>
+                <span>Reset</span>
               </button>
             </div>
           </div>
           <input
             type="range"
             min="1"
-            max="3.5"
+            max="3"
             step="0.05"
             value={zoom}
             onChange={(e) => setZoom(parseFloat(e.target.value))}
@@ -375,7 +420,7 @@ export function AvatarCropModal({
           <button
             type="button"
             onClick={handleCropAndUpload}
-            disabled={processing}
+            disabled={processing || loadingImage}
             className="flex-1 py-2.5 rounded-xl bg-primary text-on-primary font-mono text-xs font-bold hover:opacity-90 transition-opacity shadow-sm flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
           >
             {processing ? (
