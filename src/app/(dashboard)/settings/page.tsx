@@ -13,6 +13,11 @@ import { getRandomSecondaryEmailPlaceholder } from '@/lib/utils/random-placehold
 import { AvatarCropModal } from '@/components/profile/AvatarCropModal';
 import { getStoredTheme, applyTheme, Theme } from '@/lib/utils/theme';
 
+const isPresetAvatar = (url: string | null) => {
+  if (!url) return false;
+  return AVATAR_PRESETS.some((p) => p.url === url) || url.includes('api.dicebear.com');
+};
+
 export default function SettingsPage() {
   const supabase = createClient();
 
@@ -300,18 +305,20 @@ export default function SettingsPage() {
 
                 {avatarUrl && (
                   <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCropImageSrc(avatarUrl);
-                        setIsCropModalOpen(true);
-                      }}
-                      className="px-3.5 py-1.5 rounded-xl border border-primary/40 bg-primary/10 text-primary font-mono text-xs font-bold hover:bg-primary/20 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
-                      title="Crop and zoom avatar"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">crop</span>
-                      <span>Edit &amp; Crop</span>
-                    </button>
+                    {!isPresetAvatar(avatarUrl) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCropImageSrc(avatarUrl);
+                          setIsCropModalOpen(true);
+                        }}
+                        className="px-3.5 py-1.5 rounded-xl border border-primary/40 bg-primary/10 text-primary font-mono text-xs font-bold hover:bg-primary/20 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                        title="Crop and zoom avatar"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">crop</span>
+                        <span>Edit &amp; Crop</span>
+                      </button>
+                    )}
 
                     <button
                       type="button"
@@ -350,26 +357,19 @@ export default function SettingsPage() {
                       <button
                         key={preset.id}
                         type="button"
-                        onClick={() => {
-                          if (avatarUrl === preset.url) {
-                            setCropImageSrc(preset.url);
-                            setIsCropModalOpen(true);
-                          } else {
-                            setAvatarUrl(preset.url);
-                          }
-                        }}
+                        onClick={() => setAvatarUrl(preset.url)}
                         className={`relative w-8 h-8 rounded-xl overflow-hidden border-2 transition-transform hover:scale-105 shrink-0 cursor-pointer ${
                           avatarUrl === preset.url
                             ? 'border-[var(--primary)] ring-2 ring-[var(--primary)]/30 scale-105'
                             : 'border-transparent opacity-80 hover:opacity-100'
                         }`}
-                        title={avatarUrl === preset.url ? `${preset.label} (Click to Crop & Zoom)` : preset.label}
+                        title={preset.label}
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={preset.url} alt={preset.label} className="w-full h-full object-cover pointer-events-none" />
                         {avatarUrl === preset.url && (
-                          <div className="absolute inset-0 bg-[var(--primary)]/20 flex items-center justify-center text-white backdrop-blur-[0.5px]">
-                            <span className="material-symbols-outlined text-[12px] text-[var(--primary)]">crop</span>
+                          <div className="absolute inset-0 bg-[var(--primary)]/25 flex items-center justify-center">
+                            <span className="material-symbols-outlined text-[14px] text-white drop-shadow font-bold">check</span>
                           </div>
                         )}
                       </button>
@@ -395,26 +395,19 @@ export default function SettingsPage() {
                         <button
                           key={preset.id}
                           type="button"
-                          onClick={() => {
-                            if (avatarUrl === preset.url) {
-                              setCropImageSrc(preset.url);
-                              setIsCropModalOpen(true);
-                            } else {
-                              setAvatarUrl(preset.url);
-                            }
-                          }}
+                          onClick={() => setAvatarUrl(preset.url)}
                           className={`relative w-8 h-8 rounded-xl overflow-hidden border-2 transition-transform hover:scale-105 shrink-0 cursor-pointer ${
                             avatarUrl === preset.url
                               ? 'border-[var(--primary)] ring-2 ring-[var(--primary)]/30 scale-105'
                               : 'border-transparent opacity-80 hover:opacity-100'
                           }`}
-                          title={avatarUrl === preset.url ? `${preset.label} (Click to Crop & Zoom)` : preset.label}
+                          title={preset.label}
                         >
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={preset.url} alt={preset.label} className="w-full h-full object-cover pointer-events-none" />
                           {avatarUrl === preset.url && (
-                            <div className="absolute inset-0 bg-[var(--primary)]/20 flex items-center justify-center text-white backdrop-blur-[0.5px]">
-                              <span className="material-symbols-outlined text-[12px] text-[var(--primary)]">crop</span>
+                            <div className="absolute inset-0 bg-[var(--primary)]/25 flex items-center justify-center">
+                              <span className="material-symbols-outlined text-[14px] text-white drop-shadow font-bold">check</span>
                             </div>
                           )}
                         </button>
