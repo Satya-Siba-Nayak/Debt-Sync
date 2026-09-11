@@ -11,6 +11,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { PaymentModal } from '@/components/debts/PaymentModal';
 import { RecordDebtModal } from '@/components/debts/RecordDebtModal';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
+import { PersonAnalyticsChart } from '@/components/directory/PersonAnalyticsChart';
 import Link from 'next/link';
 
 function PersonDebtDetailContent() {
@@ -176,6 +177,17 @@ function PersonDebtDetailContent() {
   const netBalance = totalOutstandingLent - totalOutstandingBorrowed;
   const isNetPositive = netBalance > 0;
 
+  // 3-way Financial Breakdown: Remaining Principal vs Accrued Interest vs Repaid
+  const totalPaid = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const totalOutstanding = Math.abs(netBalance);
+  const remainingPrincipal = Math.max(0, Math.min(totalPrincipal, totalOutstanding));
+  const accruedInterest = Math.max(0, totalOutstanding - remainingPrincipal);
+  const grandTotal = Math.max(1, totalOutstanding + totalPaid);
+
+  const principalPct = Math.round((remainingPrincipal / grandTotal) * 100);
+  const interestPct = Math.round((accruedInterest / grandTotal) * 100);
+  const paidPct = Math.max(0, 100 - principalPct - interestPct);
+
   if (loading) {
     return (
       <div className="py-20 text-center font-mono text-xs text-on-surface-variant flex items-center justify-center gap-2">
@@ -279,35 +291,40 @@ function PersonDebtDetailContent() {
               </div>
             </div>
 
-            {/* Split Bar */}
+            {/* Financial Breakdown 3-Way Split Bar */}
             <div className="mt-8">
               <div className="flex justify-between text-xs font-mono text-on-surface-variant mb-2">
-                <span>Principal: {formatCurrency(totalPrincipal, currency)}</span>
-                <span>Accrued Interest: +{formatCurrency(totalAccruedInterest, currency, { showDecimals: true })}</span>
+                <span>Principal: {formatCurrency(remainingPrincipal, currency)}</span>
+                <span>Interest: +{formatCurrency(accruedInterest, currency, { showDecimals: true })}</span>
+                <span>Repaid: {formatCurrency(totalPaid, currency)}</span>
               </div>
               <div className="w-full h-3 bg-surface-container rounded-full overflow-hidden flex">
                 <div
-                  className="bg-primary h-full"
-                  style={{
-                    width: `${
-                      totalPrincipal + totalAccruedInterest > 0
-                        ? (totalPrincipal / (totalPrincipal + totalAccruedInterest)) * 100
-                        : 100
-                    }%`,
-                  }}
-                  title="Principal"
+                  className="bg-primary h-full transition-all"
+                  style={{ width: `${principalPct}%` }}
+                  title={`Principal: ${principalPct}%`}
                 />
                 <div
-                  className="bg-secondary-container h-full"
-                  style={{
-                    width: `${
-                      totalPrincipal + totalAccruedInterest > 0
-                        ? (totalAccruedInterest / (totalPrincipal + totalAccruedInterest)) * 100
-                        : 0
-                    }%`,
-                  }}
-                  title="Interest"
+                  className="bg-secondary h-full transition-all"
+                  style={{ width: `${interestPct}%` }}
+                  title={`Interest: ${interestPct}%`}
                 />
+                <div
+                  className="bg-emerald-400 h-full transition-all"
+                  style={{ width: `${paidPct}%` }}
+                  title={`Repaid: ${paidPct}%`}
+                />
+              </div>
+              <div className="flex items-center gap-4 text-[11px] font-mono text-on-surface-variant mt-2">
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-primary" /> Principal ({principalPct}%)
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-secondary" /> Interest ({interestPct}%)
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" /> Repaid ({paidPct}%)
+                </span>
               </div>
             </div>
           </div>
@@ -378,6 +395,15 @@ function PersonDebtDetailContent() {
           </div>
         </div>
       </section>
+
+      {/* Ledger Growth & Interest Trajectory Chart */}
+      <PersonAnalyticsChart
+        debts={debts}
+        payments={payments}
+        currentUserId={currentUserId || ''}
+        currency={currency}
+        personName={person?.full_name || person?.email || 'Counterparty'}
+      />
 
       {/* Individual Debts Listing */}
       <section className="bg-surface-container-lowest rounded-2xl p-6 md:p-8 border border-outline-variant/30 shadow-sm">

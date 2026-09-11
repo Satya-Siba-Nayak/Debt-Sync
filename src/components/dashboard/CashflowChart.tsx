@@ -1,157 +1,378 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Chart, registerables } from 'chart.js';
+import { Debt, Payment } from '@/lib/types/database';
 import { formatCurrency } from '@/lib/utils/currency';
+import { generateCashflowData, generatePortfolioGrowthData } from '@/lib/utils/chart-data';
 
-interface CashflowDataPoint {
-  label: string;
-  moneyIn: number;
-  moneyOut: number;
-}
+Chart.register(...registerables);
 
 interface CashflowChartProps {
+  debts?: Debt[];
+  payments?: Payment[];
+  currentUserId?: string | null;
   currency?: string;
-  data1M?: CashflowDataPoint[];
-  data3M?: CashflowDataPoint[];
-  data1Y?: CashflowDataPoint[];
 }
 
 export function CashflowChart({
+  debts = [],
+  payments = [],
+  currentUserId = '',
   currency = 'inr',
-  data1M,
-  data3M,
-  data1Y,
 }: CashflowChartProps) {
-  const [period, setPeriod] = useState<'1M' | '3M' | '1Y'>('3M');
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const chartInstanceRef = useRef<Chart | null>(null);
 
-  // Default fallback mock data representing recent months
-  const default1M: CashflowDataPoint[] = [
-    { label: 'W1', moneyIn: 1200, moneyOut: 2000 },
-    { label: 'W2', moneyIn: 1800, moneyOut: 1500 },
-    { label: 'W3', moneyIn: 3200, moneyOut: 1000 },
-    { label: 'W4', moneyIn: 2500, moneyOut: 3000 },
-  ];
+  const [viewMode, setViewMode] = useState<'growth' | 'cashflow'>('growth');
+  const [projDays, setProjDays] = useState<30 | 90 | 365>(30);
+  const [cashflowPeriod, setCashflowPeriod] = useState<'1M' | '3M' | '1Y'>('3M');
 
-  const default3M: CashflowDataPoint[] = [
-    { label: 'Apr', moneyIn: 4500, moneyOut: 6200 },
-    { label: 'May', moneyIn: 8200, moneyOut: 5100 },
-    { label: 'Jun', moneyIn: 6400, moneyOut: 7800 },
-  ];
+  const activeDebts = debts.filter((d) => d.status !== 'declined');
 
-  const default1Y: CashflowDataPoint[] = [
-    { label: 'Jan', moneyIn: 3000, moneyOut: 5000 },
-    { label: 'Feb', moneyIn: 4200, moneyOut: 3800 },
-    { label: 'Mar', moneyIn: 7800, moneyOut: 6100 },
-    { label: 'Apr', moneyIn: 5100, moneyOut: 4200 },
-    { label: 'May', moneyIn: 6500, moneyOut: 5900 },
-    { label: 'Jun', moneyIn: 8900, moneyOut: 7100 },
-  ];
-
-  const activeData =
-    period === '1M'
-      ? data1M || default1M
-      : period === '3M'
-      ? data3M || default3M
-      : data1Y || default1Y;
-
-  const maxVal = Math.max(
-    ...activeData.flatMap((d) => [d.moneyIn, d.moneyOut]),
-    1000
+  // Compute real data
+  const growthData = generatePortfolioGrowthData(
+    activeDebts,
+    payments,
+    currentUserId || '',
+    projDays
   );
 
+  const cashflowData = generateCashflowData(
+    activeDebts,
+    payments,
+    currentUserId || '',
+    cashflowPeriod
+  );
+
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    const ctx = canvasRef.current.getContext('2d');
+    if (!ctx) return;
+
+    if (chartInstanceRef.current) {
+      chartInstanceRef.current.destroy();
+      chartInstanceRef.current = null;
+    }
+
+    const isDark = document.documentElement.classList.contains('dark');
+    const gridColor = isDark ? 'rgba(255, 255, 255, 0.07)' : 'rgba(0, 0, 0, 0.06)';
+    const textColor = isDark ? '#9198a1' : '#6f797a';
+    const tooltipBg = isDark ? '#1c2128' : '#ffffff';
+    const tooltipText = isDark ? '#e6edf3' : '#131c28';
+    const tooltipBorder = isDark ? '#30363d' : '#bfc8c9';
+
+    if (viewMode === 'growth') {
+      // Linear Gradients for Area Fill
+      const gradLent = ctx.createLinearGradient(0, 0, 0, 300);
+      gradLent.addColorStop(0, isDark ? 'rgba(52, 211, 153, 0.35)' : 'rgba(0, 106, 105, 0.25)');
+      gradLent.addColorStop(1, 'rgba(52, 211, 153, 0.0)');
+
+      const gradOwed = ctx.createLinearGradient(0, 0, 0, 300);
+      gradOwed.addColorStop(0, isDark ? 'rgba(248, 113, 113, 0.30)' : 'rgba(186, 26, 26, 0.20)');
+      gradOwed.addColorStop(1, 'rgba(248, 113, 113, 0.0)');
+
+      chartInstanceRef.current = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: growthData.labels,
+          datasets: [
+            {
+              label: 'Owed to You (Historical)',
+              data: growthData.historicalOwedToYou,
+              borderColor: isDark ? '#34d399' : '#006a69',
+              backgroundColor: gradLent,
+              fill: true,
+              borderWidth: 2.5,
+              tension: 0.3,
+              pointRadius: 0,
+              pointHoverRadius: 5,
+              pointHoverBackgroundColor: isDark ? '#34d399' : '#006a69',
+              spanGaps: false,
+            },
+            {
+              label: 'Owed to You (Projected)',
+              data: growthData.projectedOwedToYou,
+              borderColor: isDark ? '#34d399' : '#006a69',
+              borderDash: [6, 4],
+              borderWidth: 2,
+              fill: false,
+              tension: 0.3,
+              pointRadius: 0,
+              pointHoverRadius: 5,
+              spanGaps: false,
+            },
+            {
+              label: 'You Owe (Historical)',
+              data: growthData.historicalYouOwe,
+              borderColor: isDark ? '#f87171' : '#ba1a1a',
+              backgroundColor: gradOwed,
+              fill: true,
+              borderWidth: 2.5,
+              tension: 0.3,
+              pointRadius: 0,
+              pointHoverRadius: 5,
+              pointHoverBackgroundColor: isDark ? '#f87171' : '#ba1a1a',
+              spanGaps: false,
+            },
+            {
+              label: 'You Owe (Projected)',
+              data: growthData.projectedYouOwe,
+              borderColor: isDark ? '#f87171' : '#ba1a1a',
+              borderDash: [6, 4],
+              borderWidth: 2,
+              fill: false,
+              tension: 0.3,
+              pointRadius: 0,
+              pointHoverRadius: 5,
+              spanGaps: false,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: {
+            mode: 'index',
+            intersect: false,
+          },
+          plugins: {
+            legend: {
+              display: false,
+            },
+            tooltip: {
+              backgroundColor: tooltipBg,
+              titleColor: tooltipText,
+              bodyColor: tooltipText,
+              borderColor: tooltipBorder,
+              borderWidth: 1,
+              padding: 10,
+              boxPadding: 4,
+              bodyFont: { family: 'JetBrains Mono', size: 12 },
+              titleFont: { family: 'Hanken Grotesk', weight: 'bold', size: 13 },
+              callbacks: {
+                label: (context) => {
+                  const val = context.parsed.y;
+                  if (val === null || val === undefined) return '';
+                  const dsLabel = context.dataset.label || '';
+                  const cleanLabel = dsLabel.replace(' (Historical)', '').replace(' (Projected)', '');
+                  const isProj = dsLabel.includes('(Projected)');
+                  return `${cleanLabel}: ${formatCurrency(val, currency, { showDecimals: true })}${isProj ? ' (Proj)' : ''}`;
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              grid: { color: gridColor },
+              ticks: { color: textColor, font: { family: 'JetBrains Mono', size: 11 } },
+            },
+            y: {
+              grid: { color: gridColor },
+              ticks: {
+                color: textColor,
+                font: { family: 'JetBrains Mono', size: 11 },
+                callback: (v) => formatCurrency(Number(v), currency),
+              },
+            },
+          },
+        },
+      });
+    } else {
+      // Cashflow Bar Chart
+      chartInstanceRef.current = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: cashflowData.map((d) => d.label),
+          datasets: [
+            {
+              label: 'Money In (Repayments)',
+              data: cashflowData.map((d) => d.moneyIn),
+              backgroundColor: isDark ? 'rgba(52, 211, 153, 0.85)' : 'rgba(0, 106, 105, 0.85)',
+              borderRadius: 6,
+              borderSkipped: false,
+            },
+            {
+              label: 'Money Out (Loans)',
+              data: cashflowData.map((d) => d.moneyOut),
+              backgroundColor: isDark ? 'rgba(56, 217, 217, 0.75)' : 'rgba(0, 67, 73, 0.75)',
+              borderRadius: 6,
+              borderSkipped: false,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: false,
+            },
+            tooltip: {
+              backgroundColor: tooltipBg,
+              titleColor: tooltipText,
+              bodyColor: tooltipText,
+              borderColor: tooltipBorder,
+              borderWidth: 1,
+              padding: 10,
+              boxPadding: 4,
+              bodyFont: { family: 'JetBrains Mono', size: 12 },
+              titleFont: { family: 'Hanken Grotesk', weight: 'bold', size: 13 },
+              callbacks: {
+                label: (context) => {
+                  const val = context.parsed.y;
+                  return `${context.dataset.label}: ${formatCurrency(Number(val), currency)}`;
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              grid: { color: gridColor },
+              ticks: { color: textColor, font: { family: 'JetBrains Mono', size: 11 } },
+            },
+            y: {
+              grid: { color: gridColor },
+              ticks: {
+                color: textColor,
+                font: { family: 'JetBrains Mono', size: 11 },
+                callback: (v) => formatCurrency(Number(v), currency),
+              },
+            },
+          },
+        },
+      });
+    }
+
+    return () => {
+      if (chartInstanceRef.current) {
+        chartInstanceRef.current.destroy();
+        chartInstanceRef.current = null;
+      }
+    };
+  }, [viewMode, projDays, cashflowPeriod, growthData, cashflowData, currency]);
+
   return (
-    <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 md:p-8 border border-[var(--outline-variant)]/30 flex flex-col h-[380px] shadow-sm">
-      {/* Header with Title & Period Buttons */}
-      <div className="flex justify-between items-center mb-6">
+    <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 md:p-8 border border-[var(--outline-variant)]/30 flex flex-col h-[400px] shadow-sm">
+      {/* Header with Title, Mode Switcher & Timeframe Buttons */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <div>
-          <h3 className="font-heading text-lg md:text-xl font-bold text-[var(--on-surface)]">
-            Cashflow Trend
-          </h3>
+          <div className="flex items-center gap-2">
+            <h3 className="font-heading text-lg md:text-xl font-bold text-[var(--on-surface)]">
+              {viewMode === 'growth' ? 'Portfolio Growth & Projection' : 'Cashflow Movement'}
+            </h3>
+            {viewMode === 'growth' && growthData.hasActiveInterest && (
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                Live Interest
+              </span>
+            )}
+          </div>
           <p className="font-mono text-xs text-[var(--on-surface-variant)] mt-0.5">
-            Money In (Repayments) vs Money Out (Loans)
+            {viewMode === 'growth'
+              ? 'Historical balances with continuous compound interest projection'
+              : 'Money In (Repayments collected) vs Money Out (Loans disbursed)'}
           </p>
         </div>
 
-        <div className="flex bg-[var(--surface-container)] p-1 rounded-xl border border-[var(--outline-variant)]/20">
-          {(['1M', '3M', '1Y'] as const).map((p) => (
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          {/* Mode Selector */}
+          <div className="flex bg-[var(--surface-container)] p-0.5 rounded-xl border border-[var(--outline-variant)]/20">
             <button
-              key={p}
-              onClick={() => setPeriod(p)}
-              className={`px-3 py-1 text-xs font-mono font-bold rounded-lg transition-all ${
-                period === p
-                  ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-sm'
+              onClick={() => setViewMode('growth')}
+              className={`px-2.5 py-1 text-xs font-mono font-bold rounded-lg transition-all ${
+                viewMode === 'growth'
+                  ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-xs'
                   : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
               }`}
             >
-              {p}
+              Growth
             </button>
-          ))}
+            <button
+              onClick={() => setViewMode('cashflow')}
+              className={`px-2.5 py-1 text-xs font-mono font-bold rounded-lg transition-all ${
+                viewMode === 'cashflow'
+                  ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-xs'
+                  : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+              }`}
+            >
+              Cashflow
+            </button>
+          </div>
+
+          {/* Timeframe Selector */}
+          {viewMode === 'growth' ? (
+            <div className="flex bg-[var(--surface-container)] p-0.5 rounded-xl border border-[var(--outline-variant)]/20">
+              {([30, 90, 365] as const).map((days) => (
+                <button
+                  key={days}
+                  onClick={() => setProjDays(days)}
+                  className={`px-2.5 py-1 text-xs font-mono font-bold rounded-lg transition-all ${
+                    projDays === days
+                      ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-xs'
+                      : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                  }`}
+                >
+                  {days === 365 ? '1Y' : `${days}D`}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="flex bg-[var(--surface-container)] p-0.5 rounded-xl border border-[var(--outline-variant)]/20">
+              {(['1M', '3M', '1Y'] as const).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setCashflowPeriod(p)}
+                  className={`px-2.5 py-1 text-xs font-mono font-bold rounded-lg transition-all ${
+                    cashflowPeriod === p
+                      ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-xs'
+                      : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                  }`}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Chart Visual Graphic Area */}
-      <div className="flex-1 relative w-full h-full flex items-end gap-3 pb-3 border-b border-l border-[var(--outline-variant)]/30 pl-3">
-        {/* Background Subtle Grid Lines */}
-        <div
-          className="absolute inset-0 opacity-15 pointer-events-none"
-          style={{
-            background:
-              'repeating-linear-gradient(0deg, transparent, transparent 39px, #6f797a 40px)',
-          }}
-        />
+      {/* Chart Canvas Area */}
+      <div className="flex-1 relative w-full h-full min-h-[220px]">
+        <canvas ref={canvasRef} />
+      </div>
 
-        {/* Dynamic Dual Bars & Tooltips */}
-        {activeData.map((d, i) => {
-          const inHeightPercent = Math.max(10, (d.moneyIn / maxVal) * 100);
-          const outHeightPercent = Math.max(10, (d.moneyOut / maxVal) * 100);
-
-          return (
-            <div
-              key={i}
-              className="flex-1 h-full flex items-end justify-center gap-1.5 z-10 group relative"
-            >
-              {/* Money In Bar (Secondary Teal) */}
-              <div
-                className="w-1/2 bg-[var(--secondary)]/80 hover:bg-[var(--secondary)] rounded-t transition-all cursor-pointer"
-                style={{ height: `${inHeightPercent}%` }}
-              />
-
-              {/* Money Out Bar (Primary Teal) */}
-              <div
-                className="w-1/2 bg-[var(--primary)]/90 hover:bg-[var(--primary)] rounded-t transition-all cursor-pointer"
-                style={{ height: `${outHeightPercent}%` }}
-              />
-
-              {/* Hover Tooltip */}
-              <div className="absolute -top-12 left-1/2 -translate-x-1/2 hidden group-hover:flex flex-col items-center bg-[var(--inverse-surface)] text-[var(--inverse-on-surface)] text-[11px] font-mono px-2 py-1 rounded shadow-lg whitespace-nowrap pointer-events-none z-20">
-                <span>In: {formatCurrency(d.moneyIn, currency)}</span>
-                <span>Out: {formatCurrency(d.moneyOut, currency)}</span>
+      {/* Legend Footer */}
+      <div className="flex flex-wrap items-center justify-between text-xs font-mono text-[var(--on-surface-variant)] mt-3 pt-2 border-t border-[var(--outline-variant)]/15 gap-2">
+        {viewMode === 'growth' ? (
+          <>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-1 bg-[var(--secondary)] rounded-full" />
+                <span>Owed to You</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-1 bg-[var(--error)] rounded-full" />
+                <span>You Owe</span>
               </div>
             </div>
-          );
-        })}
-      </div>
-
-      {/* X-Axis Labels & Legend */}
-      <div className="flex justify-between items-center text-xs font-mono text-[var(--on-surface-variant)] mt-3 px-2">
-        <div className="flex gap-4">
-          <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 rounded-sm bg-[var(--secondary)]" />
-            <span>Money In</span>
+            <div className="flex items-center gap-2 text-[11px] text-[var(--on-surface-variant)]">
+              <span className="inline-block w-4 border-b-2 border-dashed border-[var(--outline)]" />
+              <span>Dashed line = Future Compounding Projection</span>
+            </div>
+          </>
+        ) : (
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 bg-[var(--secondary)] rounded-xs" />
+              <span>Money In (Repayments Received)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 bg-[var(--primary)] rounded-xs" />
+              <span>Money Out (Loans Given)</span>
+            </div>
           </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 rounded-sm bg-[var(--primary)]" />
-            <span>Money Out</span>
-          </div>
-        </div>
-
-        <div className="flex gap-4">
-          {activeData.map((d, i) => (
-            <span key={i} className="font-semibold">
-              {d.label}
-            </span>
-          ))}
-        </div>
+        )}
       </div>
     </div>
   );

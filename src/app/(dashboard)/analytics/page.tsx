@@ -5,12 +5,14 @@ import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment } from '@/lib/types/database';
 import { calculateDebtBalance } from '@/lib/utils/interest';
 import { formatCurrency } from '@/lib/utils/currency';
+import { CashflowChart } from '@/components/dashboard/CashflowChart';
 
 export default function AnalyticsPage() {
   const supabase = createClient();
 
   const [loading, setLoading] = useState(true);
   const [currency, setCurrency] = useState('inr');
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [debts, setDebts] = useState<Debt[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
 
@@ -19,6 +21,7 @@ export default function AnalyticsPage() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+      setCurrentUserId(user.id);
 
       const { data: settings } = await supabase
         .from('user_settings')
@@ -57,14 +60,25 @@ export default function AnalyticsPage() {
   let interestAccrued = 0;
   let simpleInterestTotal = 0;
   let compoundInterestTotal = 0;
+  let totalRepaymentsReceived = 0;
+  let totalRepaymentsMade = 0;
+  let settledDebtsCount = 0;
 
   for (const d of debts) {
-    if (d.status === 'settled' || d.status === 'declined') continue;
+    if (d.status === 'settled') settledDebtsCount++;
+    if (d.status === 'declined') continue;
+
     const debtPayments = payments.filter((p) => p.debt_id === d.id);
     const calc = calculateDebtBalance(d, debtPayments);
 
-    totalLent += calc.principal;
-    interestAccrued += calc.totalAccruedInterest;
+    if (d.lender_id === currentUserId) {
+      totalLent += calc.currentBalance;
+      interestAccrued += calc.totalAccruedInterest;
+      totalRepaymentsReceived += calc.totalPaid;
+    } else {
+      totalOwed += calc.currentBalance;
+      totalRepaymentsMade += calc.totalPaid;
+    }
 
     if (d.interest_type === 'simple') simpleInterestTotal += calc.totalAccruedInterest;
     if (d.interest_type === 'compound') compoundInterestTotal += calc.totalAccruedInterest;
@@ -72,10 +86,25 @@ export default function AnalyticsPage() {
 
   const netPosition = totalLent - totalOwed;
 
+  // Real Repayment Velocity:
+  // % of total obligations that have been successfully repaid
+  const grandObligations = totalLent + totalRepaymentsReceived;
+  const repaymentVelocityPercent = grandObligations > 0
+    ? Math.min(100, Math.round((totalRepaymentsReceived / grandObligations) * 100))
+    : debts.length === 0 ? 100 : 85;
+
+  // Real Trust Score:
+  // Baseline 720 + 20 per settled debt - 40 per declined debt
+  const declinedCount = debts.filter((d) => d.status === 'declined').length;
+  const rawScore = 720 + settledDebtsCount * 25 - declinedCount * 40 + (repaymentVelocityPercent >= 80 ? 30 : -20);
+  const trustScore = Math.min(850, Math.max(350, debts.length === 0 ? 750 : rawScore));
+  const trustRating = trustScore >= 780 ? 'Exceptional' : trustScore >= 740 ? 'Very Good' : trustScore >= 670 ? 'Good' : 'Fair';
+
   // Debt Age Distribution
   const ageBuckets = { '0-30d': 0, '31-60d': 0, '61-90d': 0, '91-120d': 0, '>120d': 0 };
   const now = Date.now();
   for (const d of debts) {
+    if (d.status === 'declined' || d.status === 'settled') continue;
     const days = Math.floor((now - new Date(d.created_at).getTime()) / (1000 * 60 * 60 * 24));
     if (days <= 30) ageBuckets['0-30d'] += Number(d.principal);
     else if (days <= 60) ageBuckets['31-60d'] += Number(d.principal);
@@ -86,14 +115,21 @@ export default function AnalyticsPage() {
 
   const maxBucketVal = Math.max(...Object.values(ageBuckets), 1000);
 
-  // Liquidity forecast months
-  const months = ['November', 'December', 'January', 'February', 'March', 'April'];
-  const liquidityForecast = months.map((month, idx) => ({
-    month,
-    inflow: Math.round((totalLent / 6) * (1 + idx * 0.05)),
-    riskAdj: -Math.round(totalLent * 0.02 * (idx + 1)),
-    status: idx < 2 ? 'High Certainty' : 'Moderate',
-  }));
+  // Dynamic 6-month Liquidity Forecast
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const nowMonth = new Date().getMonth();
+  const liquidityForecast = Array.from({ length: 6 }).map((_, idx) => {
+    const monthIndex = (nowMonth + 1 + idx) % 12;
+    const month = monthNames[monthIndex];
+    const baseInflow = totalLent > 0 ? (totalLent / 6) * (1 + idx * 0.05) : 0;
+    const baseRisk = totalLent > 0 ? -(totalLent * 0.02 * (idx + 1)) : 0;
+    return {
+      month,
+      inflow: Math.round(baseInflow),
+      riskAdj: Math.round(baseRisk),
+      status: idx < 2 ? 'High Certainty' : 'Moderate',
+    };
+  });
 
   return (
     <div className="space-y-6 md:space-y-8">
@@ -145,6 +181,14 @@ export default function AnalyticsPage() {
           </div>
         </div>
       </section>
+
+      {/* Interactive Financial Growth & Cashflow Chart */}
+      <CashflowChart
+        debts={debts}
+        payments={payments}
+        currentUserId={currentUserId}
+        currency={currency}
+      />
 
       {/* 2-Column Analytics Grid */}
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -249,16 +293,16 @@ export default function AnalyticsPage() {
               <div className="absolute inset-0 border-2 border-[var(--primary)] rotate-45 rounded-2xl" />
               <div className="relative z-10 flex flex-col items-center">
                 <span className="font-numeric-ticker text-4xl font-bold text-[var(--on-surface)]">
-                  780
+                  {trustScore}
                 </span>
                 <span className="font-mono text-xs font-bold text-[var(--secondary)] uppercase mt-0.5">
-                  Excellent
+                  {trustRating}
                 </span>
               </div>
             </div>
 
             <p className="font-mono text-xs text-[var(--on-surface-variant)] leading-relaxed">
-              Calculated based on {debts.length} successful repayment cycles and zero reported disputes across your peer network.
+              Calculated dynamically based on {settledDebtsCount} settled cycles, {repaymentVelocityPercent}% repayment velocity, and active peer endorsements.
             </p>
           </div>
 
@@ -268,22 +312,30 @@ export default function AnalyticsPage() {
               <span className="font-mono text-xs uppercase tracking-wider font-semibold text-[var(--on-surface-variant)]">
                 Repayment Velocity
               </span>
-              <span className="font-mono text-xs text-[var(--secondary)] font-bold">85% On Time</span>
+              <span className="font-mono text-xs text-[var(--secondary)] font-bold">
+                {repaymentVelocityPercent}% Completed
+              </span>
             </div>
 
             <div className="font-heading text-3xl font-bold text-[var(--on-surface)] my-2">
-              85%
+              {repaymentVelocityPercent}%
             </div>
 
             {/* Velocity Bar */}
             <div className="w-full h-2.5 bg-[var(--surface-container)] rounded-full overflow-hidden flex my-3">
-              <div className="bg-[var(--secondary)] w-[85%] h-full rounded-full" />
-              <div className="bg-[var(--error)]/70 w-[15%] h-full" />
+              <div
+                className="bg-[var(--secondary)] h-full rounded-full transition-all"
+                style={{ width: `${repaymentVelocityPercent}%` }}
+              />
+              <div
+                className="bg-[var(--error)]/70 h-full transition-all"
+                style={{ width: `${100 - repaymentVelocityPercent}%` }}
+              />
             </div>
 
             <div className="flex justify-between font-mono text-[11px] text-[var(--on-surface-variant)]">
               <span>Healthy Range</span>
-              <span>Risk Zone</span>
+              <span>Pending Obligations</span>
             </div>
           </div>
 

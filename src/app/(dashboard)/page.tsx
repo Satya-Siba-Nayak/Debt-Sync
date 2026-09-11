@@ -29,6 +29,7 @@ export default function GlobalDashboardPage() {
   const [activeLentCount, setActiveLentCount] = useState(0);
   const [activeOwedCount, setActiveOwedCount] = useState(0);
   const [totalInterestAccrued, setTotalInterestAccrued] = useState(0);
+  const [borrowingInterestAccrued, setBorrowingInterestAccrued] = useState(0);
   const [dailyAccrualRate, setDailyAccrualRate] = useState(0);
 
   const fetchDashboardData = useCallback(async () => {
@@ -78,7 +79,8 @@ export default function GlobalDashboardPage() {
       let owedSum = 0;
       let lentCount = 0;
       let owedCount = 0;
-      let accruedInterestSum = 0;
+      let lenderInterestSum = 0;
+      let borrowerInterestSum = 0;
 
       for (const d of allDebts) {
         if (d.status === 'settled' || d.status === 'declined') continue;
@@ -90,11 +92,12 @@ export default function GlobalDashboardPage() {
           // User is lender: money owed TO user
           lentSum += calc.currentBalance;
           lentCount++;
-          accruedInterestSum += calc.totalAccruedInterest;
+          lenderInterestSum += calc.totalAccruedInterest;
         } else {
           // User is borrower: money user OWES
           owedSum += calc.currentBalance;
           owedCount++;
+          borrowerInterestSum += calc.totalAccruedInterest;
         }
       }
 
@@ -103,7 +106,8 @@ export default function GlobalDashboardPage() {
       setNetPosition(lentSum - owedSum);
       setActiveLentCount(lentCount);
       setActiveOwedCount(owedCount);
-      setTotalInterestAccrued(accruedInterestSum);
+      setTotalInterestAccrued(lenderInterestSum);
+      setBorrowingInterestAccrued(borrowerInterestSum);
 
       const rates = calculatePortfolioAccrualRates(
         allDebts.filter((d) => d.lender_id === user.id)
@@ -252,7 +256,12 @@ export default function GlobalDashboardPage() {
       {/* 2. Middle Row: Cashflow Trend Chart & Live Accrual Ticker */}
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
-          <CashflowChart currency={currency} />
+          <CashflowChart
+            debts={debts}
+            payments={payments}
+            currentUserId={currentUserId}
+            currency={currency}
+          />
         </div>
 
         <div className="lg:col-span-1">
@@ -260,6 +269,8 @@ export default function GlobalDashboardPage() {
             totalInterestAccrued={totalInterestAccrued}
             dailyRate={dailyAccrualRate}
             currency={currency}
+            lendingInterestTotal={totalInterestAccrued}
+            borrowingInterestTotal={borrowingInterestAccrued}
           />
         </div>
       </section>
