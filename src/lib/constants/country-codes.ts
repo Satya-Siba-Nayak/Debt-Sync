@@ -90,6 +90,25 @@ export function parsePhoneNumber(
     }
   }
 
+  // If no '+' prefix, check common Indian number formats:
+  const digitsOnly = clean.replace(/[^\d]/g, '');
+
+  // 12 digits starting with 91 (e.g. 919876543210) -> extract +91 dial code
+  if (digitsOnly.length === 12 && digitsOnly.startsWith('91')) {
+    return {
+      dialCode: '+91',
+      nationalNumber: digitsOnly.slice(2),
+    };
+  }
+
+  // 11 digits starting with 0 (e.g. 09876543210) -> strip leading trunk 0
+  if (digitsOnly.length === 11 && digitsOnly.startsWith('0')) {
+    return {
+      dialCode: defaultCountryCode,
+      nationalNumber: digitsOnly.slice(1),
+    };
+  }
+
   return { dialCode: defaultCountryCode, nationalNumber: clean };
 }
 
