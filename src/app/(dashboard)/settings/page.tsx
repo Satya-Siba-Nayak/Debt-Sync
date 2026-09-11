@@ -35,6 +35,7 @@ export default function SettingsPage() {
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
   const [cropImageSrc, setCropImageSrc] = useState<string | null>(null);
   const [isCropModalOpen, setIsCropModalOpen] = useState(false);
+  const [showAllPresets, setShowAllPresets] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -261,8 +262,8 @@ export default function SettingsPage() {
           </h3>
 
           {/* Avatar / Profile Picture */}
-          <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 rounded-2xl bg-[var(--surface-container-low)] border border-[var(--outline-variant)]/20">
-            <div className="relative group self-start sm:self-center">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 rounded-2xl bg-[var(--surface-container-low)] border border-[var(--outline-variant)]/20 overflow-hidden">
+            <div className="relative group self-start sm:self-center shrink-0">
               <Avatar src={avatarUrl} name={fullName || email} size="xl" />
               <button
                 type="button"
@@ -274,7 +275,7 @@ export default function SettingsPage() {
               </button>
             </div>
 
-            <div className="flex-1 space-y-2">
+            <div className="flex-1 min-w-0 space-y-2.5">
               <div className="flex flex-wrap items-center gap-2">
                 <input
                   type="file"
@@ -312,63 +313,120 @@ export default function SettingsPage() {
                       onClick={() => setAvatarUrl(null)}
                       className="px-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-red-500/10 hover:text-[var(--error)] text-[var(--on-surface-variant)] font-mono text-xs font-semibold transition-colors cursor-pointer"
                     >
-                      Remove Photo
+                      Remove
                     </button>
                   </>
                 )}
               </div>
 
-              {/* Presets Gallery */}
-              <div>
+              {/* Presets Gallery with Cute Arrow Toggle */}
+              <div className="pt-0.5">
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="font-mono text-[11px] text-[var(--outline)]">
                     Or choose a preset avatar:
                   </span>
-                  {avatarUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllPresets(!showAllPresets)}
+                    className="text-[11px] font-mono text-[var(--primary)] hover:underline flex items-center gap-1 cursor-pointer"
+                    title={showAllPresets ? 'Collapse preset avatars' : 'Expand all preset avatars'}
+                  >
+                    <span>{showAllPresets ? 'Show less' : `+${AVATAR_PRESETS.length - 6} more`}</span>
+                    <span className="material-symbols-outlined text-[14px]">
+                      {showAllPresets ? 'keyboard_arrow_up' : 'keyboard_arrow_down'}
+                    </span>
+                  </button>
+                </div>
+
+                {/* Collapsed Row: 6 presets + cute arrow button */}
+                {!showAllPresets ? (
+                  <div className="flex items-center gap-2">
+                    {AVATAR_PRESETS.slice(0, 6).map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => {
+                          if (avatarUrl === preset.url) {
+                            setCropImageSrc(preset.url);
+                            setIsCropModalOpen(true);
+                          } else {
+                            setAvatarUrl(preset.url);
+                          }
+                        }}
+                        className={`relative w-8 h-8 rounded-xl overflow-hidden border-2 transition-transform hover:scale-105 shrink-0 cursor-pointer ${
+                          avatarUrl === preset.url
+                            ? 'border-[var(--primary)] ring-2 ring-[var(--primary)]/30 scale-105'
+                            : 'border-transparent opacity-80 hover:opacity-100'
+                        }`}
+                        title={avatarUrl === preset.url ? `${preset.label} (Click to Crop & Zoom)` : preset.label}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={preset.url} alt={preset.label} className="w-full h-full object-cover pointer-events-none" />
+                        {avatarUrl === preset.url && (
+                          <div className="absolute inset-0 bg-[var(--primary)]/20 flex items-center justify-center text-white backdrop-blur-[0.5px]">
+                            <span className="material-symbols-outlined text-[12px] text-[var(--primary)]">crop</span>
+                          </div>
+                        )}
+                      </button>
+                    ))}
+
+                    {/* Cute Arrow Button to expand all */}
                     <button
                       type="button"
-                      onClick={() => {
-                        setCropImageSrc(avatarUrl);
-                        setIsCropModalOpen(true);
-                      }}
-                      className="text-[11px] font-mono text-[var(--primary)] hover:underline flex items-center gap-1 cursor-pointer"
-                      title="Open crop & zoom editor"
+                      onClick={() => setShowAllPresets(true)}
+                      className="w-8 h-8 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--primary)] flex items-center justify-center transition-all cursor-pointer shrink-0 shadow-2xs group"
+                      title={`Show ${AVATAR_PRESETS.length - 6} more preset avatars`}
                     >
-                      <span className="material-symbols-outlined text-[13px]">crop</span>
-                      <span>Crop / Zoom Avatar</span>
+                      <span className="material-symbols-outlined text-[18px] transition-transform group-hover:translate-y-0.5">
+                        keyboard_arrow_down
+                      </span>
                     </button>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                  {AVATAR_PRESETS.map((preset) => (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      onClick={() => {
-                        if (avatarUrl === preset.url) {
-                          setCropImageSrc(preset.url);
-                          setIsCropModalOpen(true);
-                        } else {
-                          setAvatarUrl(preset.url);
-                        }
-                      }}
-                      className={`relative w-8 h-8 rounded-xl overflow-hidden border-2 transition-transform hover:scale-105 shrink-0 cursor-pointer ${
-                        avatarUrl === preset.url
-                          ? 'border-[var(--primary)] ring-2 ring-[var(--primary)]/30 scale-105'
-                          : 'border-transparent opacity-80 hover:opacity-100'
-                      }`}
-                      title={avatarUrl === preset.url ? `${preset.label} (Click to Crop & Zoom)` : preset.label}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={preset.url} alt={preset.label} className="w-full h-full object-cover pointer-events-none" />
-                      {avatarUrl === preset.url && (
-                        <div className="absolute inset-0 bg-[var(--primary)]/20 flex items-center justify-center text-white backdrop-blur-[0.5px]">
-                          <span className="material-symbols-outlined text-[12px] text-[var(--primary)]">crop</span>
-                        </div>
-                      )}
-                    </button>
-                  ))}
-                </div>
+                  </div>
+                ) : (
+                  /* Expanded Grid: All presets cleanly contained in a tidy grid */
+                  <div className="p-2 rounded-xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30">
+                    <div className="grid grid-cols-6 sm:grid-cols-8 gap-2">
+                      {AVATAR_PRESETS.map((preset) => (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => {
+                            if (avatarUrl === preset.url) {
+                              setCropImageSrc(preset.url);
+                              setIsCropModalOpen(true);
+                            } else {
+                              setAvatarUrl(preset.url);
+                            }
+                          }}
+                          className={`relative w-8 h-8 rounded-xl overflow-hidden border-2 transition-transform hover:scale-105 shrink-0 cursor-pointer ${
+                            avatarUrl === preset.url
+                              ? 'border-[var(--primary)] ring-2 ring-[var(--primary)]/30 scale-105'
+                              : 'border-transparent opacity-80 hover:opacity-100'
+                          }`}
+                          title={avatarUrl === preset.url ? `${preset.label} (Click to Crop & Zoom)` : preset.label}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={preset.url} alt={preset.label} className="w-full h-full object-cover pointer-events-none" />
+                          {avatarUrl === preset.url && (
+                            <div className="absolute inset-0 bg-[var(--primary)]/20 flex items-center justify-center text-white backdrop-blur-[0.5px]">
+                              <span className="material-symbols-outlined text-[12px] text-[var(--primary)]">crop</span>
+                            </div>
+                          )}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setShowAllPresets(false)}
+                        className="w-8 h-8 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-high)] hover:bg-[var(--surface-container-highest)] text-[var(--primary)] flex items-center justify-center transition-all cursor-pointer shrink-0 group"
+                        title="Collapse presets"
+                      >
+                        <span className="material-symbols-outlined text-[18px] transition-transform group-hover:-translate-y-0.5">
+                          keyboard_arrow_up
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
