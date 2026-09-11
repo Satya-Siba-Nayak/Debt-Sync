@@ -66,15 +66,15 @@ export default function RootLayout({
                   var isDark = false;
                   if (theme === 'dark') {
                     isDark = true;
-                  } else if (theme === 'light') {
-                    isDark = false;
-                  } else {
-                    // 'system' or not set: check system preference
+                  } else if (theme === 'system') {
                     try {
                       isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
                     } catch (e) {
                       isDark = false;
                     }
+                  } else {
+                    // 'light' or default / not set: Default to Light mode
+                    isDark = false;
                   }
 
                   if (isDark) {
@@ -85,12 +85,18 @@ export default function RootLayout({
                 } catch (_) {}
 
                 if ('serviceWorker' in navigator) {
-                  window.addEventListener('load', function() {
-                    navigator.serviceWorker.register('/sw.js').then(
-                      function(reg) { /* PWA SW registered */ },
-                      function(err) { /* SW registration failed */ }
-                    );
-                  });
+                  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                    navigator.serviceWorker.getRegistrations().then(function(regs) {
+                      for (var i = 0; i < regs.length; i++) regs[i].unregister();
+                    });
+                  } else {
+                    window.addEventListener('load', function() {
+                      navigator.serviceWorker.register('/sw.js').then(
+                        function(reg) { /* PWA SW registered */ },
+                        function(err) { /* SW registration failed */ }
+                      );
+                    });
+                  }
                 }
               })();
             `,

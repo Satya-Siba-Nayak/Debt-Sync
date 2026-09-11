@@ -1,4 +1,4 @@
-const CACHE_NAME = 'debtsync-cache-v2';
+const CACHE_NAME = 'debtsync-cache-v3';
 const PRECACHE_ASSETS = [
   '/',
   '/manifest.json',
@@ -31,8 +31,13 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Skip cross-origin requests, Supabase API calls, and non-GET requests
-  if (event.request.method !== 'GET' || url.origin !== self.location.origin) {
+  // Skip cross-origin requests, Supabase API calls, non-GET requests, and localhost development
+  if (
+    event.request.method !== 'GET' ||
+    url.origin !== self.location.origin ||
+    url.hostname === 'localhost' ||
+    url.hostname === '127.0.0.1'
+  ) {
     return;
   }
 

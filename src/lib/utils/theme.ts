@@ -22,7 +22,7 @@ function setCookie(name: string, value: string, days: number = 365): void {
 }
 
 export function getStoredTheme(): Theme {
-  if (typeof window === 'undefined') return 'system';
+  if (typeof window === 'undefined') return 'light';
 
   // 1. Check debtsync_theme in localStorage first
   try {
@@ -40,7 +40,7 @@ export function getStoredTheme(): Theme {
     }
   } catch (_) {}
 
-  return 'system';
+  return 'light';
 }
 
 export function applyTheme(theme: Theme) {
@@ -64,15 +64,15 @@ export function applyTheme(theme: Theme) {
   let isDark = false;
   if (theme === 'dark') {
     isDark = true;
-  } else if (theme === 'light') {
-    isDark = false;
-  } else {
-    // 'system'
+  } else if (theme === 'system') {
     try {
       isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
     } catch (_) {
       isDark = false;
     }
+  } else {
+    // 'light' or default fallback
+    isDark = false;
   }
 
   if (isDark) {
