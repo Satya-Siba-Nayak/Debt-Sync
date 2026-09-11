@@ -7,29 +7,35 @@ import { BottomNav } from './BottomNav';
 import { RecordDebtModal } from '../debts/RecordDebtModal';
 import { createClient } from '@/lib/supabase/client';
 
+import { useRouter } from 'next/navigation';
+
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<{ full_name?: string; email?: string } | null>(null);
   const supabase = createClient();
+  const router = useRouter();
 
   useEffect(() => {
     async function loadUser() {
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('full_name, email')
-          .eq('id', user.id)
-          .single();
-
-        setUserProfile({
-          full_name: profile?.full_name || user.user_metadata?.full_name,
-          email: user.email,
-        });
+      if (!user) {
+        router.replace('/login');
+        return;
       }
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('full_name, email')
+        .eq('id', user.id)
+        .single();
+
+      setUserProfile({
+        full_name: profile?.full_name || user.user_metadata?.full_name,
+        email: user.email,
+      });
     }
     loadUser();
-  }, [supabase]);
+  }, [router, supabase]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--background)] text-[var(--on-background)] font-body-md">

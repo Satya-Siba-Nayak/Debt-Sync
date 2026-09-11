@@ -177,7 +177,7 @@ export default function TransactionsPage() {
 
                     <td className="py-4 text-right">
                       <Link
-                        href={`/directory/${otherPerson?.id || d.id}`}
+                        href={`/directory/detail?id=${otherPerson?.id || d.id}`}
                         className="font-mono text-xs text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] font-bold hover:underline"
                       >
                         Ledger

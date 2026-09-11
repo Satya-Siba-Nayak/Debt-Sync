@@ -46,7 +46,7 @@ export function PersonCard({ person, currency = 'inr', onRecordDebt }: PersonCar
             </div>
             <div>
               <Link
-                href={`/directory/${person.id}`}
+                href={`/directory/detail?id=${person.id}`}
                 className="font-heading font-bold text-base text-[var(--on-surface)] hover:text-[var(--primary)] transition-colors line-clamp-1"
               >
                 {person.name}
@@ -140,7 +140,7 @@ export function PersonCard({ person, currency = 'inr', onRecordDebt }: PersonCar
 
         <div className="mt-3 pt-2 border-t border-[var(--outline-variant)]/20 flex gap-2">
           <Link
-            href={`/directory/${person.id}`}
+            href={`/directory/detail?id=${person.id}`}
             className="flex-1 py-1.5 px-2 bg-[var(--surface-container-lowest)] hover:bg-[var(--surface-container)] rounded-lg text-center font-mono text-xs font-semibold text-[var(--on-surface)] transition-colors border border-[var(--outline-variant)]/20"
           >
             Ledger
