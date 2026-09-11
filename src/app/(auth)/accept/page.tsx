@@ -5,6 +5,8 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Debt } from '@/lib/types/database';
 import { formatCurrency } from '@/lib/utils/currency';
+import { Avatar } from '@/components/ui/Avatar';
+import { claimUserProfile } from '@/lib/utils/claim-profile';
 import Link from 'next/link';
 
 function AcceptDebtContent() {
@@ -16,7 +18,7 @@ function AcceptDebtContent() {
 
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
-  const [debt, setDebt] = useState<Debt | null>(null);
+  const [debt, setDebt] = useState<any>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -34,18 +36,59 @@ function AcceptDebtContent() {
         const { data: { user } } = await supabase.auth.getUser();
         setCurrentUser(user);
 
+        if (user) {
+          await claimUserProfile(user);
+        }
+
+        // 1. Try secure RPC function (works even if user is not yet logged in)
+        try {
+          const { data: rpcData, error: rpcErr } = await supabase.rpc('get_debt_for_acceptance', {
+            p_debt_id: debtId,
+          });
+
+          if (!rpcErr && rpcData && rpcData.length > 0) {
+            const d = rpcData[0];
+            setDebt({
+              ...d,
+              lender: {
+                id: d.lender_id,
+                full_name: d.lender_name,
+                email: d.lender_email,
+                avatar_url: d.lender_avatar,
+              },
+              borrower: {
+                id: d.borrower_id,
+                full_name: d.borrower_name,
+                email: d.borrower_email,
+                avatar_url: d.borrower_avatar,
+              },
+            });
+            setLoading(false);
+            return;
+          }
+        } catch (_) {}
+
+        // 2. Direct table query fallback
         const { data, error: debtError } = await supabase
           .from('debts')
           .select(`
             *,
-            lender:profiles!debts_lender_id_fkey(id, email, full_name),
-            borrower:profiles!debts_borrower_id_fkey(id, email, full_name)
+            lender:profiles!debts_lender_id_fkey(id, email, full_name, avatar_url),
+            borrower:profiles!debts_borrower_id_fkey(id, email, full_name, avatar_url)
           `)
           .eq('id', debtId)
           .single();
 
-        if (debtError) throw debtError;
-        setDebt(data as any);
+        if (debtError) {
+          if (!user) {
+            // Unauthenticated user: will show prompt to sign in
+            setError('');
+          } else {
+            throw debtError;
+          }
+        } else {
+          setDebt(data as any);
+        }
       } catch (err: any) {
         setError(err.message || 'Could not load debt agreement');
       } finally {
@@ -69,23 +112,44 @@ function AcceptDebtContent() {
         return;
       }
 
-      const { error: updateError } = await supabase
-        .from('debts')
-        .update({
-          status: decision,
-          accepted_at: decision === 'active' ? new Date().toISOString() : null,
-        })
-        .eq('id', debt.id);
+      await claimUserProfile(user);
 
-      if (updateError) throw updateError;
+      // 1. Try secure RPC accept_debt
+      let rpcSuccess = false;
+      try {
+        const { data: rpcRes, error: rpcErr } = await supabase.rpc('accept_debt', {
+          p_debt_id: debt.id,
+          p_decision: decision,
+        });
+        if (!rpcErr && rpcRes && rpcRes.success) {
+          rpcSuccess = true;
+        }
+      } catch (_) {}
 
-      // Add to activity log
-      await supabase.from('activity_log').insert({
-        user_id: user.id,
-        debt_id: debt.id,
-        action: decision === 'active' ? 'debt_accepted' : 'debt_declined',
-        details: { decision },
-      });
+      // 2. Fallback to direct table update if RPC not present
+      if (!rpcSuccess) {
+        const { error: updateError } = await supabase
+          .from('debts')
+          .update({
+            status: decision,
+            accepted_at: decision === 'active' ? new Date().toISOString() : null,
+          })
+          .eq('id', debt.id);
+
+        if (updateError) throw updateError;
+
+        try {
+          await supabase.from('activity_log').insert({
+            user_id: user.id,
+            debt_id: debt.id,
+            action: decision === 'active' ? 'debt_accepted' : 'debt_declined',
+            details: { decision },
+          });
+        } catch (_) {}
+      }
+
+      // Notify any active components to reload
+      window.dispatchEvent(new CustomEvent('debtsync:refresh'));
 
       setMessage(
         decision === 'active'
@@ -95,7 +159,7 @@ function AcceptDebtContent() {
 
       setTimeout(() => {
         router.push('/');
-      }, 2000);
+      }, 1500);
     } catch (err: any) {
       setError(err.message || 'Action failed');
     } finally {
@@ -114,7 +178,7 @@ function AcceptDebtContent() {
     );
   }
 
-  if (error || !debt) {
+  if (error || (!debt && currentUser)) {
     return (
       <div className="min-h-screen bg-surface flex items-center justify-center p-6">
         <div className="bg-surface-container-lowest p-8 rounded-2xl border border-outline-variant/30 max-w-md text-center shadow-xl">
@@ -138,15 +202,42 @@ function AcceptDebtContent() {
     );
   }
 
+  if (!currentUser && !debt) {
+    return (
+      <div className="min-h-screen bg-surface flex items-center justify-center p-4 md:p-6">
+        <div className="w-full max-w-md bg-surface-container-lowest rounded-2xl p-6 md:p-8 border border-outline-variant/30 shadow-xl text-center space-y-4">
+          <div className="w-12 h-12 rounded-xl bg-primary text-on-primary font-bold text-2xl flex items-center justify-center mx-auto shadow-md">
+            D
+          </div>
+          <h2 className="font-heading text-xl font-bold text-on-surface">
+            Sign In to Verify Agreement
+          </h2>
+          <p className="text-xs font-mono text-on-surface-variant">
+            Please sign in with your email to review and accept this debt agreement.
+          </p>
+          <Link
+            href={`/login?next=/accept?token=${debtId}`}
+            className="w-full inline-block py-3 px-4 rounded-xl bg-primary text-on-primary font-mono text-xs font-bold hover:opacity-95 shadow-md transition-all"
+          >
+            Sign In to Review &amp; Accept
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   const lenderName = debt.lender?.full_name || debt.lender?.email || 'Counterparty';
 
   return (
     <div className="min-h-screen bg-surface flex items-center justify-center p-4 md:p-6">
       <div className="w-full max-w-lg bg-surface-container-lowest rounded-2xl p-6 md:p-8 border border-outline-variant/30 shadow-xl">
         <div className="text-center mb-6">
-          <div className="w-12 h-12 rounded-xl bg-primary-container text-on-primary-container font-bold text-xl flex items-center justify-center mx-auto mb-3 shadow-sm">
-            D
-          </div>
+          <Avatar
+            src={debt.lender?.avatar_url}
+            name={lenderName}
+            size="lg"
+            className="mx-auto mb-3 shadow-md"
+          />
           <h1 className="font-heading text-xl md:text-2xl font-bold text-on-surface">
             Review Debt Agreement
           </h1>

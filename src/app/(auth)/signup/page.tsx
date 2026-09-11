@@ -1,13 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { PhoneInput } from '@/components/ui/PhoneInput';
 import { checkIdentifierConflict } from '@/lib/utils/profile-lookup';
+import { claimUserProfile } from '@/lib/utils/claim-profile';
 
-export default function SignupPage() {
+function SignupContent() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
@@ -17,6 +18,8 @@ export default function SignupPage() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextUrl = searchParams.get('next') || '/';
   const supabase = createClient();
 
   const handleSignup = async (e: React.FormEvent) => {
@@ -45,7 +48,7 @@ export default function SignupPage() {
       email: cleanEmail,
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextUrl)}`,
         data: {
           full_name: fullName.trim(),
           phone: phone.trim() || null,
@@ -58,8 +61,9 @@ export default function SignupPage() {
       setLoading(false);
     } else {
       // If user session is returned immediately (e.g. email confirmation disabled)
-      if (data.session) {
-        router.push('/');
+      if (data.session && data.user) {
+        await claimUserProfile(data.user);
+        router.push(nextUrl);
       } else {
         setMessage(
           'Account created! If email confirmation is enabled on your project, please check your inbox to activate.'
@@ -179,11 +183,22 @@ export default function SignupPage() {
 
         <p className="text-center text-sm text-on-surface-variant mt-6">
           Already have an account?{' '}
-          <Link href="/login" className="text-primary font-bold hover:underline">
+          <Link
+            href={`/login${nextUrl && nextUrl !== '/' ? `?next=${encodeURIComponent(nextUrl)}` : ''}`}
+            className="text-primary font-bold hover:underline"
+          >
             Sign In
           </Link>
         </p>
       </div>
     </div>
+  );
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-surface flex items-center justify-center font-mono text-xs text-on-surface-variant">Loading...</div>}>
+      <SignupContent />
+    </Suspense>
   );
 }

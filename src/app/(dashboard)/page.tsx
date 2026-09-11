@@ -10,6 +10,7 @@ import { CashflowChart } from '@/components/dashboard/CashflowChart';
 import { formatCurrency } from '@/lib/utils/currency';
 import { Chip } from '@/components/ui/Chip';
 import { Avatar } from '@/components/ui/Avatar';
+import { claimUserProfile } from '@/lib/utils/claim-profile';
 import Link from 'next/link';
 
 export default function GlobalDashboardPage() {
@@ -36,6 +37,9 @@ export default function GlobalDashboardPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       setCurrentUserId(user.id);
+
+      // Claim any pending debts associated with user's email
+      await claimUserProfile(user);
 
       // Fetch user settings for default currency
       const { data: settings } = await supabase
@@ -112,17 +116,128 @@ export default function GlobalDashboardPage() {
     }
   }, [supabase]);
 
+  const handleAcceptDebt = async (debtId: string, decision: 'active' | 'declined') => {
+    try {
+      // 1. Try secure RPC
+      let success = false;
+      try {
+        const { data: rpcRes, error: rpcErr } = await supabase.rpc('accept_debt', {
+          p_debt_id: debtId,
+          p_decision: decision,
+        });
+        if (!rpcErr && rpcRes && rpcRes.success) success = true;
+      } catch (_) {}
+
+      if (!success) {
+        const { error: updateErr } = await supabase
+          .from('debts')
+          .update({
+            status: decision,
+            accepted_at: decision === 'active' ? new Date().toISOString() : null,
+          })
+          .eq('id', debtId);
+        if (updateErr) throw updateErr;
+      }
+
+      window.dispatchEvent(new CustomEvent('debtsync:refresh'));
+      fetchDashboardData();
+    } catch (err: any) {
+      console.error('Error updating debt:', err);
+      alert(err.message || 'Failed to update debt agreement');
+    }
+  };
+
   useEffect(() => {
     fetchDashboardData();
 
-    // Listen to custom refresh events triggered after debt creation
+    // 1. Local custom event listener
     const handleRefresh = () => fetchDashboardData();
     window.addEventListener('debtsync:refresh', handleRefresh);
-    return () => window.removeEventListener('debtsync:refresh', handleRefresh);
-  }, [fetchDashboardData]);
+
+    // 2. Supabase Realtime channel for instant multi-device sync
+    const channel = supabase
+      .channel('dashboard-realtime-debts')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'debts' }, () => {
+        fetchDashboardData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, () => {
+        fetchDashboardData();
+      })
+      .subscribe();
+
+    return () => {
+      window.removeEventListener('debtsync:refresh', handleRefresh);
+      supabase.removeChannel(channel);
+    };
+  }, [fetchDashboardData, supabase]);
+
+  const incomingPendingDebts = debts.filter(
+    (d) => d.status === 'pending' && d.created_by !== currentUserId
+  );
 
   return (
     <div className="flex flex-col gap-6 md:gap-8">
+      {/* Incoming Agreements Awaiting Acceptance Alert */}
+      {incomingPendingDebts.length > 0 && (
+        <section className="bg-amber-500/10 border border-amber-500/30 dark:bg-amber-950/20 rounded-2xl p-5 md:p-6 space-y-4 animate-in fade-in duration-300">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 font-bold text-sm">
+              <span className="material-symbols-outlined text-[20px]">notifications_active</span>
+              <span>Incoming Agreement Awaiting Your Approval</span>
+            </div>
+            <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-800 dark:text-amber-300">
+              {incomingPendingDebts.length} Pending
+            </span>
+          </div>
+
+          <div className="space-y-3">
+            {incomingPendingDebts.map((d) => {
+              const isLender = d.lender_id === currentUserId;
+              const counterparty = isLender ? d.borrower : d.lender;
+              const name = counterparty?.full_name || counterparty?.email || 'Counterparty';
+
+              return (
+                <div
+                  key={d.id}
+                  className="bg-[var(--surface-container-lowest)] p-4 rounded-xl border border-[var(--outline-variant)]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs"
+                >
+                  <div className="flex items-center gap-3">
+                    <Avatar src={counterparty?.avatar_url} name={name} size="md" />
+                    <div>
+                      <div className="font-heading font-bold text-sm text-[var(--on-surface)]">
+                        {name} <span className="font-normal text-xs text-[var(--on-surface-variant)]">recorded a transaction:</span>
+                      </div>
+                      <div className="font-mono text-xs text-[var(--on-surface-variant)] mt-0.5">
+                        {isLender ? 'You Lent' : 'You Borrowed'}: <strong className="text-[var(--on-surface)] text-sm">{formatCurrency(d.principal, d.currency || currency)}</strong>
+                        {' '}&bull;{' '}
+                        {d.interest_type === 'none' ? '0% Interest-Free' : `${d.interest_rate}% ${d.interest_type}`}
+                        {d.notes ? ` &bull; "${d.notes}"` : ''}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 self-end sm:self-auto">
+                    <button
+                      onClick={() => handleAcceptDebt(d.id, 'declined')}
+                      className="px-3 py-1.5 rounded-xl border border-error/30 text-error font-mono text-xs font-bold hover:bg-error/10 transition-colors cursor-pointer"
+                    >
+                      Decline
+                    </button>
+                    <button
+                      onClick={() => handleAcceptDebt(d.id, 'active')}
+                      className="px-4 py-1.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 transition-opacity shadow-xs flex items-center gap-1 cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">check</span>
+                      <span>Accept Agreement</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* 1. Top Bento Summary Grid */}
       <BalanceCards
         netPosition={netPosition}
@@ -259,6 +374,29 @@ export default function GlobalDashboardPage() {
                         </span>
                       </div>
                     </div>
+
+                    {d.status === 'pending' && d.created_by !== currentUserId && (
+                      <div className="mt-3 pt-2.5 border-t border-[var(--outline-variant)]/15 flex items-center justify-end gap-2">
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleAcceptDebt(d.id, 'declined');
+                          }}
+                          className="px-3 py-1 rounded-lg border border-error/30 text-error font-mono text-xs font-bold hover:bg-error/10"
+                        >
+                          Decline
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleAcceptDebt(d.id, 'active');
+                          }}
+                          className="px-3.5 py-1 rounded-lg bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 shadow-xs"
+                        >
+                          Accept
+                        </button>
+                      </div>
+                    )}
                   </Link>
                 );
               })}
@@ -346,12 +484,22 @@ export default function GlobalDashboardPage() {
                         </td>
 
                         <td className="py-4 text-right">
-                          <Link
-                            href={`/directory/detail?id=${otherPerson?.id || d.id}`}
-                            className="font-mono text-xs text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] font-bold hover:underline"
-                          >
-                            Details
-                          </Link>
+                          <div className="flex items-center justify-end gap-2">
+                            {d.status === 'pending' && d.created_by !== currentUserId ? (
+                              <button
+                                onClick={() => handleAcceptDebt(d.id, 'active')}
+                                className="px-2.5 py-1 rounded-lg bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 shadow-xs cursor-pointer"
+                              >
+                                Accept
+                              </button>
+                            ) : null}
+                            <Link
+                              href={`/directory/detail?id=${otherPerson?.id || d.id}`}
+                              className="font-mono text-xs text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] font-bold hover:underline"
+                            >
+                              Details
+                            </Link>
+                          </div>
                         </td>
                       </tr>
                     );

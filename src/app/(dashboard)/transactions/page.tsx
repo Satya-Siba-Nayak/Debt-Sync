@@ -7,6 +7,7 @@ import { calculateDebtBalance } from '@/lib/utils/interest';
 import { formatCurrency } from '@/lib/utils/currency';
 import { Chip } from '@/components/ui/Chip';
 import { Avatar } from '@/components/ui/Avatar';
+import { claimUserProfile } from '@/lib/utils/claim-profile';
 import Link from 'next/link';
 
 export default function TransactionsPage() {
@@ -25,6 +26,8 @@ export default function TransactionsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       setCurrentUserId(user.id);
+
+      await claimUserProfile(user);
 
       const { data: settings } = await supabase
         .from('user_settings')
@@ -54,9 +57,57 @@ export default function TransactionsPage() {
     }
   }, [supabase]);
 
+  const handleAcceptDebt = async (debtId: string, decision: 'active' | 'declined') => {
+    try {
+      let success = false;
+      try {
+        const { data: rpcRes, error: rpcErr } = await supabase.rpc('accept_debt', {
+          p_debt_id: debtId,
+          p_decision: decision,
+        });
+        if (!rpcErr && rpcRes && rpcRes.success) success = true;
+      } catch (_) {}
+
+      if (!success) {
+        const { error: updateErr } = await supabase
+          .from('debts')
+          .update({
+            status: decision,
+            accepted_at: decision === 'active' ? new Date().toISOString() : null,
+          })
+          .eq('id', debtId);
+        if (updateErr) throw updateErr;
+      }
+
+      window.dispatchEvent(new CustomEvent('debtsync:refresh'));
+      fetchTransactions();
+    } catch (err: any) {
+      console.error('Error updating debt:', err);
+      alert(err.message || 'Failed to update debt agreement');
+    }
+  };
+
   useEffect(() => {
     fetchTransactions();
-  }, [fetchTransactions]);
+
+    const handleRefresh = () => fetchTransactions();
+    window.addEventListener('debtsync:refresh', handleRefresh);
+
+    const channel = supabase
+      .channel('transactions-realtime-updates')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'debts' }, () => {
+        fetchTransactions();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, () => {
+        fetchTransactions();
+      })
+      .subscribe();
+
+    return () => {
+      window.removeEventListener('debtsync:refresh', handleRefresh);
+      supabase.removeChannel(channel);
+    };
+  }, [fetchTransactions, supabase]);
 
   const filteredDebts = debts.filter((d) => {
     const isLender = d.lender_id === currentUserId;
@@ -177,6 +228,36 @@ export default function TransactionsPage() {
                         </span>
                       </div>
                     </div>
+
+                    {d.status === 'pending' && d.created_by !== currentUserId && (
+                      <div className="mt-3 pt-3 border-t border-amber-500/20 flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-mono text-amber-500 font-medium">Awaiting your approval</span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleAcceptDebt(d.id, 'active');
+                            }}
+                            className="px-3 py-1 bg-[var(--primary)] text-[var(--on-primary)] rounded-lg font-mono text-xs font-bold hover:opacity-90 shadow-sm"
+                          >
+                            Accept
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              if (confirm('Decline this agreement?')) handleAcceptDebt(d.id, 'declined');
+                            }}
+                            className="px-2.5 py-1 border border-[var(--error)]/30 text-[var(--error)] rounded-lg font-mono text-xs font-bold hover:bg-[var(--error)]/10"
+                          >
+                            Decline
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </Link>
                 );
               })}
@@ -268,12 +349,31 @@ export default function TransactionsPage() {
                         </td>
 
                         <td className="py-4 text-right">
-                          <Link
-                            href={`/directory/detail?id=${otherPerson?.id || d.id}`}
-                            className="font-mono text-xs text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] font-bold hover:underline"
-                          >
-                            Ledger
-                          </Link>
+                          {d.status === 'pending' && d.created_by !== currentUserId ? (
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => handleAcceptDebt(d.id, 'active')}
+                                className="px-2.5 py-1 bg-[var(--primary)] text-[var(--on-primary)] rounded-md font-mono text-xs font-bold hover:opacity-90 transition-opacity shadow-xs"
+                              >
+                                Accept
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (confirm('Decline this agreement?')) handleAcceptDebt(d.id, 'declined');
+                                }}
+                                className="px-2 py-1 border border-[var(--error)]/30 text-[var(--error)] rounded-md font-mono text-xs font-bold hover:bg-[var(--error)]/10"
+                              >
+                                Decline
+                              </button>
+                            </div>
+                          ) : (
+                            <Link
+                              href={`/directory/detail?id=${otherPerson?.id || d.id}`}
+                              className="font-mono text-xs text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] font-bold hover:underline"
+                            >
+                              Ledger
+                            </Link>
+                          )}
                         </td>
                       </tr>
                     );

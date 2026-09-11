@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { claimUserProfile } from '@/lib/utils/claim-profile';
 
-export default function LoginPage() {
+function LoginContent() {
   const [authMode, setAuthMode] = useState<'password' | 'magic_link'>('password');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -14,6 +15,8 @@ export default function LoginPage() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextUrl = searchParams.get('next') || '/';
   const supabase = createClient();
 
   const handlePasswordLogin = async (e: React.FormEvent) => {
@@ -22,7 +25,7 @@ export default function LoginPage() {
     setError('');
     setMessage('');
 
-    const { error: authError } = await supabase.auth.signInWithPassword({
+    const { data, error: authError } = await supabase.auth.signInWithPassword({
       email: email.trim().toLowerCase(),
       password,
     });
@@ -31,7 +34,10 @@ export default function LoginPage() {
       setError(authError.message);
       setLoading(false);
     } else {
-      router.push('/');
+      if (data?.user) {
+        await claimUserProfile(data.user);
+      }
+      router.push(nextUrl);
     }
   };
 
@@ -44,7 +50,7 @@ export default function LoginPage() {
     const { error: authError } = await supabase.auth.signInWithOtp({
       email: email.trim().toLowerCase(),
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextUrl)}`,
       },
     });
 
@@ -220,11 +226,22 @@ export default function LoginPage() {
 
         <p className="text-center text-sm text-on-surface-variant mt-6">
           Don&apos;t have an account?{' '}
-          <Link href="/signup" className="text-primary font-bold hover:underline">
+          <Link
+            href={`/signup${nextUrl && nextUrl !== '/' ? `?next=${encodeURIComponent(nextUrl)}` : ''}`}
+            className="text-primary font-bold hover:underline"
+          >
             Sign Up
           </Link>
         </p>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-surface flex items-center justify-center font-mono text-xs text-on-surface-variant">Loading...</div>}>
+      <LoginContent />
+    </Suspense>
   );
 }

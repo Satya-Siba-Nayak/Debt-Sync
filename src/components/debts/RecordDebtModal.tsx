@@ -269,6 +269,7 @@ export function RecordDebtModal({
       setNewPersonPhone('');
       setIsAddingNewPerson(false);
       onDebtCreated?.();
+      window.dispatchEvent(new CustomEvent('debtsync:refresh'));
       onClose();
     } catch (err: any) {
       setError(err.message || 'Failed to record debt');

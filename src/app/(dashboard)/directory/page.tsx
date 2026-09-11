@@ -9,6 +9,7 @@ import { PersonCard, PersonSummary } from '@/components/directory/PersonCard';
 import { AddPersonModal } from '@/components/directory/AddPersonModal';
 import { RecordDebtModal } from '@/components/debts/RecordDebtModal';
 import { isSameEmail } from '@/lib/utils/email-normalize';
+import { claimUserProfile } from '@/lib/utils/claim-profile';
 
 export default function PeopleDirectoryPage() {
   const supabase = createClient();
@@ -28,6 +29,8 @@ export default function PeopleDirectoryPage() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+
+      await claimUserProfile(user);
 
       // Settings
       const { data: settings } = await supabase
@@ -140,7 +143,28 @@ export default function PeopleDirectoryPage() {
 
   useEffect(() => {
     fetchDirectoryData();
-  }, [fetchDirectoryData]);
+
+    const handleRefresh = () => fetchDirectoryData();
+    window.addEventListener('debtsync:refresh', handleRefresh);
+
+    const channel = supabase
+      .channel('directory-realtime-updates')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'debts' }, () => {
+        fetchDirectoryData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, () => {
+        fetchDirectoryData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts' }, () => {
+        fetchDirectoryData();
+      })
+      .subscribe();
+
+    return () => {
+      window.removeEventListener('debtsync:refresh', handleRefresh);
+      supabase.removeChannel(channel);
+    };
+  }, [fetchDirectoryData, supabase]);
 
   // Aggregate stats across contacts
   const totalContacts = people.length;

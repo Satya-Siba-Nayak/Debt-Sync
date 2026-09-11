@@ -10,6 +10,7 @@ import { Chip } from '@/components/ui/Chip';
 import { Avatar } from '@/components/ui/Avatar';
 import { PaymentModal } from '@/components/debts/PaymentModal';
 import { RecordDebtModal } from '@/components/debts/RecordDebtModal';
+import { claimUserProfile } from '@/lib/utils/claim-profile';
 import Link from 'next/link';
 
 function PersonDebtDetailContent() {
@@ -41,6 +42,9 @@ function PersonDebtDetailContent() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       setCurrentUserId(user.id);
+
+      // Claim any pending debts associated with user
+      await claimUserProfile(user);
 
       // Currency setting
       const { data: settings } = await supabase
@@ -96,9 +100,57 @@ function PersonDebtDetailContent() {
     }
   }, [personId, supabase]);
 
+  const handleAcceptDebt = async (debtId: string, decision: 'active' | 'declined') => {
+    try {
+      let success = false;
+      try {
+        const { data: rpcRes, error: rpcErr } = await supabase.rpc('accept_debt', {
+          p_debt_id: debtId,
+          p_decision: decision,
+        });
+        if (!rpcErr && rpcRes && rpcRes.success) success = true;
+      } catch (_) {}
+
+      if (!success) {
+        const { error: updateErr } = await supabase
+          .from('debts')
+          .update({
+            status: decision,
+            accepted_at: decision === 'active' ? new Date().toISOString() : null,
+          })
+          .eq('id', debtId);
+        if (updateErr) throw updateErr;
+      }
+
+      window.dispatchEvent(new CustomEvent('debtsync:refresh'));
+      fetchDetails();
+    } catch (err: any) {
+      console.error('Error updating debt:', err);
+      alert(err.message || 'Failed to update debt agreement');
+    }
+  };
+
   useEffect(() => {
     fetchDetails();
-  }, [fetchDetails]);
+
+    const handleRefresh = () => fetchDetails();
+    window.addEventListener('debtsync:refresh', handleRefresh);
+
+    const channel = supabase
+      .channel(`person-detail-${personId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'debts' }, () => {
+        fetchDetails();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, () => {
+        fetchDetails();
+      })
+      .subscribe();
+
+    return () => {
+      window.removeEventListener('debtsync:refresh', handleRefresh);
+      supabase.removeChannel(channel);
+    };
+  }, [fetchDetails, personId, supabase]);
 
   // Calculations across all debts with this person
   let totalOutstandingLent = 0;
@@ -339,20 +391,31 @@ function PersonDebtDetailContent() {
           <div className="space-y-4">
             {debts.map((d) => {
               const isLender = d.lender_id === currentUserId;
+              const isIncomingPending = d.status === 'pending' && d.created_by !== currentUserId;
+              const isOutgoingPending = d.status === 'pending' && d.created_by === currentUserId;
               const debtPayments = payments.filter((p) => p.debt_id === d.id);
               const calc = calculateDebtBalance(d, debtPayments);
 
               return (
                 <div
                   key={d.id}
-                  className="p-4 rounded-xl border border-outline-variant/20 bg-surface-container-low flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                  className={`p-4 rounded-xl border ${
+                    isIncomingPending
+                      ? 'border-amber-500/40 bg-amber-500/5'
+                      : 'border-outline-variant/20 bg-surface-container-low'
+                  } flex flex-col sm:flex-row sm:items-center justify-between gap-4`}
                 >
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className={`font-mono text-xs font-bold ${isLender ? 'text-secondary' : 'text-error'}`}>
                         {isLender ? 'You Lent' : 'You Borrowed'}
                       </span>
                       <Chip label={d.status} variant={d.status === 'active' ? 'active' : d.status === 'settled' ? 'settled' : 'default'} />
+                      {isIncomingPending && (
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-500 font-semibold uppercase">
+                          Action Required
+                        </span>
+                      )}
                     </div>
 
                     <div className="font-mono text-sm font-bold text-on-surface mt-1">
@@ -365,9 +428,38 @@ function PersonDebtDetailContent() {
                     {d.notes && (
                       <p className="text-xs text-on-surface-variant mt-1">{d.notes}</p>
                     )}
+
+                    {isOutgoingPending && (
+                      <p className="text-[11px] font-mono text-on-surface-variant mt-2 flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-[14px] text-amber-500">schedule</span>
+                        Waiting for {person?.full_name || 'counterparty'} to review &amp; accept
+                      </p>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-3 self-end sm:self-auto">
+                    {isIncomingPending && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleAcceptDebt(d.id, 'active')}
+                          className="py-1.5 px-3 rounded-lg bg-primary text-on-primary font-mono text-xs font-bold hover:opacity-90 transition-opacity cursor-pointer shadow-sm flex items-center gap-1"
+                        >
+                          <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                          Accept
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (confirm('Are you sure you want to decline this agreement?')) {
+                              handleAcceptDebt(d.id, 'declined');
+                            }
+                          }}
+                          className="py-1.5 px-3 rounded-lg border border-error/30 text-error font-mono text-xs font-bold hover:bg-error/10 transition-colors cursor-pointer"
+                        >
+                          Decline
+                        </button>
+                      </div>
+                    )}
+
                     {d.status === 'active' && calc.currentBalance > 0 && (
                       <button
                         onClick={() => setActiveDebtForPayment({ debt: d, balance: calc.currentBalance })}
