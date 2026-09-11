@@ -106,15 +106,22 @@ export default function SettingsPage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!file.type.startsWith('image/')) {
-      setError('Please select an image file (PNG, JPG, WebP)');
+    if (!file.type.startsWith('image/') && !file.name.match(/\.(jpe?g|png|webp|gif|bmp|heic|svg)$/i)) {
+      setError('Please select a valid image file (PNG, JPG, WebP, etc.)');
       return;
     }
 
+    setError('');
     const reader = new FileReader();
     reader.onload = (event) => {
-      setCropImageSrc(event.target?.result as string);
-      setIsCropModalOpen(true);
+      const result = event.target?.result as string;
+      if (result) {
+        setCropImageSrc(result);
+        setIsCropModalOpen(true);
+      }
+    };
+    reader.onerror = () => {
+      setError('Failed to load selected image file');
     };
     reader.readAsDataURL(file);
     if (e.target) e.target.value = '';
@@ -273,7 +280,7 @@ export default function SettingsPage() {
                   type="file"
                   ref={fileInputRef}
                   onChange={handleImageUpload}
-                  accept="image/png,image/jpeg,image/webp"
+                  accept="image/*"
                   className="hidden"
                 />
                 <button
@@ -286,13 +293,28 @@ export default function SettingsPage() {
                 </button>
 
                 {avatarUrl && (
-                  <button
-                    type="button"
-                    onClick={() => setAvatarUrl(null)}
-                    className="px-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-red-500/10 hover:text-[var(--error)] text-[var(--on-surface-variant)] font-mono text-xs font-semibold transition-colors cursor-pointer"
-                  >
-                    Remove Photo
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCropImageSrc(avatarUrl);
+                        setIsCropModalOpen(true);
+                      }}
+                      className="px-3.5 py-1.5 rounded-xl border border-primary/40 bg-primary/10 text-primary font-mono text-xs font-bold hover:bg-primary/20 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      title="Re-crop, rotate, or adjust current photo"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">crop</span>
+                      <span>Edit &amp; Crop</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setAvatarUrl(null)}
+                      className="px-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-red-500/10 hover:text-[var(--error)] text-[var(--on-surface-variant)] font-mono text-xs font-semibold transition-colors cursor-pointer"
+                    >
+                      Remove Photo
+                    </button>
+                  </>
                 )}
               </div>
 
@@ -572,7 +594,7 @@ export default function SettingsPage() {
           userId={userId}
           onAvatarSaved={(newUrl) => {
             setAvatarUrl(newUrl);
-            setMessage('Profile picture cropped and optimized under 5MB. Click "Save Settings" to persist.');
+            setMessage('Profile picture cropped, optimized under 5MB, and saved successfully!');
           }}
         />
       )}
