@@ -47,9 +47,10 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{
             __html: `
               try {
-                const storedTheme = localStorage.getItem('theme');
+                const storedTheme = localStorage.getItem('debtsync_theme') || localStorage.getItem('theme');
                 const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-                if (storedTheme === 'dark' || (!storedTheme && systemDark)) {
+                const isDark = storedTheme === 'dark' || ((!storedTheme || storedTheme === 'system') && systemDark);
+                if (isDark) {
                   document.documentElement.classList.add('dark');
                 } else {
                   document.documentElement.classList.remove('dark');
@@ -72,7 +73,7 @@ export default function RootLayout({
           href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
         />
       </head>
-      <body className="min-h-screen bg-[var(--surface)] text-[var(--on-surface)] antialiased transition-colors duration-200">
+      <body className="min-h-screen bg-[var(--surface)] text-[var(--on-surface)] antialiased">
         {children}
       </body>
     </html>

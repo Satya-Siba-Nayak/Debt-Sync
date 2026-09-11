@@ -11,6 +11,7 @@ import { isSameEmail } from '@/lib/utils/email-normalize';
 import { Avatar, AVATAR_PRESETS } from '@/components/ui/Avatar';
 import { getRandomSecondaryEmailPlaceholder } from '@/lib/utils/random-placeholders';
 import { AvatarCropModal } from '@/components/profile/AvatarCropModal';
+import { getStoredTheme, applyTheme, Theme } from '@/lib/utils/theme';
 
 export default function SettingsPage() {
   const supabase = createClient();
@@ -81,7 +82,7 @@ export default function SettingsPage() {
         // Load settings
         const { data: userSettings } = await supabase
           .from('user_settings')
-          .select('default_currency, default_country_code')
+          .select('default_currency, default_country_code, theme_preference')
           .eq('user_id', user.id)
           .single();
 
@@ -92,6 +93,9 @@ export default function SettingsPage() {
           setDefaultCountryCode((userSettings as any).default_country_code);
         } else if (localCode) {
           setDefaultCountryCode(localCode);
+        }
+        if (userSettings?.theme_preference) {
+          applyTheme(userSettings.theme_preference as Theme);
         }
       } catch (err) {
         console.error('Error loading settings:', err);
@@ -195,6 +199,7 @@ export default function SettingsPage() {
         user_id: user.id,
         default_currency: currency,
         default_country_code: defaultCountryCode,
+        theme_preference: getStoredTheme(),
         updated_at: new Date().toISOString(),
       };
 
