@@ -4,6 +4,8 @@ import React, { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { SUPPORTED_CURRENCIES } from '@/lib/utils/currency';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
+import { PhoneInput } from '@/components/ui/PhoneInput';
+import { COUNTRY_CODES, CountryCode } from '@/lib/constants/country-codes';
 
 export default function SettingsPage() {
   const supabase = createClient();
@@ -17,6 +19,7 @@ export default function SettingsPage() {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [currency, setCurrency] = useState('inr');
+  const [defaultCountryCode, setDefaultCountryCode] = useState('+91');
   const [newPassword, setNewPassword] = useState('');
   const [secondaryEmails, setSecondaryEmails] = useState<string[]>([]);
   const [newSecondaryEmail, setNewSecondaryEmail] = useState('');
@@ -42,15 +45,22 @@ export default function SettingsPage() {
           setSecondaryEmails(profile.secondary_emails || []);
         }
 
+        const localCode = typeof window !== 'undefined' ? localStorage.getItem('debtsync_default_country_code') : null;
+
         // Load settings
         const { data: userSettings } = await supabase
           .from('user_settings')
-          .select('default_currency')
+          .select('default_currency, default_country_code')
           .eq('user_id', user.id)
           .single();
 
         if (userSettings?.default_currency) {
           setCurrency(userSettings.default_currency);
+        }
+        if ((userSettings as any)?.default_country_code) {
+          setDefaultCountryCode((userSettings as any).default_country_code);
+        } else if (localCode) {
+          setDefaultCountryCode(localCode);
         }
       } catch (err) {
         console.error('Error loading settings:', err);
@@ -103,16 +113,28 @@ export default function SettingsPage() {
         }
       }
 
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('debtsync_default_country_code', defaultCountryCode);
+      }
+
       // Update user_settings
+      const settingsPayload: any = {
+        user_id: user.id,
+        default_currency: currency,
+        default_country_code: defaultCountryCode,
+        updated_at: new Date().toISOString(),
+      };
+
       const { error: settingsError } = await supabase
         .from('user_settings')
-        .upsert({
-          user_id: user.id,
-          default_currency: currency,
-          updated_at: new Date().toISOString(),
-        });
+        .upsert(settingsPayload);
 
-      if (settingsError) throw settingsError;
+      if (settingsError && settingsError.message?.includes('default_country_code')) {
+        delete settingsPayload.default_country_code;
+        await supabase.from('user_settings').upsert(settingsPayload);
+      } else if (settingsError) {
+        throw settingsError;
+      }
 
       // Update password if entered
       if (newPassword.trim()) {
@@ -249,12 +271,10 @@ export default function SettingsPage() {
             <label className="font-mono text-xs text-[var(--on-surface-variant)] block mb-1">
               Phone Number <span className="normal-case text-[var(--outline)]">(for peer directory contact)</span>
             </label>
-            <input
-              type="tel"
+            <PhoneInput
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="+91 98765 43210"
-              className="w-full px-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-sm outline-none focus:border-[var(--primary)]"
+              onChange={setPhone}
+              defaultCountryCode={defaultCountryCode}
             />
           </div>
         </div>
@@ -262,7 +282,7 @@ export default function SettingsPage() {
         {/* Preferences */}
         <div className="pt-6 border-t border-[var(--outline-variant)]/20 space-y-4">
           <h3 className="font-mono text-xs uppercase tracking-wider font-semibold text-[var(--on-surface-variant)]">
-            Regional & Appearance Defaults
+            Regional &amp; Appearance Defaults
           </h3>
 
           <div>
@@ -282,6 +302,26 @@ export default function SettingsPage() {
             </select>
             <p className="text-[11px] font-mono text-[var(--on-surface-variant)] mt-1">
               Powered by Fawaz Ahmed exchange rates API. Cross-currency debts automatically convert to your native currency.
+            </p>
+          </div>
+
+          <div>
+            <label className="font-mono text-xs text-[var(--on-surface-variant)] block mb-1">
+              Default Phone Country Code
+            </label>
+            <select
+              value={defaultCountryCode}
+              onChange={(e) => setDefaultCountryCode(e.target.value)}
+              className="w-full px-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-sm outline-none focus:border-[var(--primary)] font-mono"
+            >
+              {COUNTRY_CODES.map((c: CountryCode) => (
+                <option key={`${c.code}-${c.dialCode}`} value={c.dialCode}>
+                  {c.flag} {c.name} ({c.dialCode})
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] font-mono text-[var(--on-surface-variant)] mt-1">
+              Preselected country code when adding contacts or recording debts. Default: India (+91).
             </p>
           </div>
 

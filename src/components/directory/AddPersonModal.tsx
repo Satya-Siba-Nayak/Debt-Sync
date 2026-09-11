@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Modal } from '../ui/Modal';
+import { PhoneInput } from '../ui/PhoneInput';
 import { createClient } from '@/lib/supabase/client';
 import { findProfileByIdentifier } from '@/lib/utils/profile-lookup';
 
@@ -22,6 +23,14 @@ export function AddPersonModal({
   const [nickname, setNickname] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [defaultCountryCode, setDefaultCountryCode] = useState('+91');
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('debtsync_default_country_code');
+      if (saved) setDefaultCountryCode(saved);
+    }
+  }, [isOpen]);
 
   const supabase = createClient();
 
@@ -129,12 +138,10 @@ export function AddPersonModal({
           <label className="font-mono text-xs tracking-wider uppercase text-[var(--on-surface-variant)] block mb-1.5">
             Phone Number <span className="normal-case text-[var(--outline)]">(optional, for record)</span>
           </label>
-          <input
-            type="tel"
+          <PhoneInput
             value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="+91 98765 43210"
-            className="w-full px-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-sm outline-none focus:border-[var(--primary)]"
+            onChange={setPhone}
+            defaultCountryCode={defaultCountryCode}
           />
         </div>
 

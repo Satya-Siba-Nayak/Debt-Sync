@@ -7,6 +7,7 @@ import { Contact, Profile } from '@/lib/types/database';
 import { formatCurrency, SUPPORTED_CURRENCIES } from '@/lib/utils/currency';
 import { projectDebtGrowth } from '@/lib/utils/interest';
 import { findProfileByIdentifier } from '@/lib/utils/profile-lookup';
+import { PhoneInput } from '../ui/PhoneInput';
 
 interface RecordDebtModalProps {
   isOpen: boolean;
@@ -28,6 +29,8 @@ export function RecordDebtModal({
   const [selectedPersonId, setSelectedPersonId] = useState(preselectedContactId || '');
   const [newPersonName, setNewPersonName] = useState('');
   const [newPersonEmail, setNewPersonEmail] = useState('');
+  const [newPersonPhone, setNewPersonPhone] = useState('');
+  const [defaultCountryCode, setDefaultCountryCode] = useState('+91');
   const [isAddingNewPerson, setIsAddingNewPerson] = useState(false);
 
   const [principal, setPrincipal] = useState<number>(1500);
@@ -64,6 +67,10 @@ export function RecordDebtModal({
     }
 
     if (isOpen) {
+      if (typeof window !== 'undefined') {
+        const saved = localStorage.getItem('debtsync_default_country_code');
+        if (saved) setDefaultCountryCode(saved);
+      }
       loadContacts();
     }
   }, [isOpen, preselectedContactId, supabase]);
@@ -91,22 +98,29 @@ export function RecordDebtModal({
 
       // If user wants to add a new person inline
       if (isAddingNewPerson) {
-        if (!newPersonEmail.trim()) {
-          throw new Error('Please provide an email address for the other party');
+        if (!newPersonEmail.trim() && !newPersonPhone.trim()) {
+          throw new Error('Please provide an email or phone number for the other party');
         }
 
+        const targetEmail = newPersonEmail.trim().toLowerCase();
+        const targetPhone = newPersonPhone.trim();
+
         // Check if profile exists across primary email, secondary emails, or phone
-        const existingProfile = await findProfileByIdentifier(newPersonEmail.trim());
+        const existingProfile = targetEmail
+          ? await findProfileByIdentifier(targetEmail)
+          : (targetPhone ? await findProfileByIdentifier(targetPhone) : null);
 
         if (existingProfile) {
           targetUserId = existingProfile.id;
         } else {
           // Create shadow profile
           const shadowId = crypto.randomUUID();
+          const fallbackEmail = targetEmail || `${targetPhone.replace(/[^\d]/g, '')}@phone.debtsync.local`;
           const { error: shadowError } = await supabase.from('profiles').insert({
             id: shadowId,
-            email: newPersonEmail.trim().toLowerCase(),
-            full_name: newPersonName.trim() || newPersonEmail.split('@')[0],
+            email: fallbackEmail,
+            full_name: newPersonName.trim() || (targetEmail ? targetEmail.split('@')[0] : targetPhone),
+            phone: targetPhone || null,
             is_shadow: true,
           });
           if (shadowError) throw shadowError;
@@ -162,6 +176,10 @@ export function RecordDebtModal({
         },
       });
 
+      setNewPersonName('');
+      setNewPersonEmail('');
+      setNewPersonPhone('');
+      setIsAddingNewPerson(false);
       onDebtCreated?.();
       onClose();
     } catch (err: any) {
@@ -220,7 +238,7 @@ export function RecordDebtModal({
                   ))}
                 </select>
               ) : (
-                <div className="space-y-2 p-3 bg-[var(--surface)] rounded-xl border border-[var(--outline-variant)]/30">
+                <div className="space-y-2.5 p-3 bg-[var(--surface)] rounded-xl border border-[var(--outline-variant)]/30">
                   <input
                     type="text"
                     placeholder="Full Name (e.g. Sarah Jenkins)"
@@ -233,8 +251,13 @@ export function RecordDebtModal({
                     placeholder="Email Address (e.g. sarah@example.com)"
                     value={newPersonEmail}
                     onChange={(e) => setNewPersonEmail(e.target.value)}
-                    required={isAddingNewPerson}
                     className="w-full px-3 py-2 rounded-lg border border-[var(--outline-variant)]/40 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] text-sm outline-none focus:border-[var(--primary)]"
+                  />
+                  <PhoneInput
+                    value={newPersonPhone}
+                    onChange={setNewPersonPhone}
+                    defaultCountryCode={defaultCountryCode}
+                    placeholder="Phone Number (optional)"
                   />
                 </div>
               )}

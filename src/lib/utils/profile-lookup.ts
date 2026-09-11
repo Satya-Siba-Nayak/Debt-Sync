@@ -32,13 +32,25 @@ export async function findProfileByIdentifier(identifier: string): Promise<Profi
   if (byEmail) return byEmail as Profile;
 
   // 2. Check phone if identifier resembles a phone number
-  const { data: byPhone } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('phone', identifier.trim())
-    .single();
+  const digits = identifier.replace(/[^\d]/g, '');
+  if (digits.length >= 6) {
+    const { data: byPhoneExact } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('phone', identifier.trim())
+      .single();
 
-  if (byPhone) return byPhone as Profile;
+    if (byPhoneExact) return byPhoneExact as Profile;
+
+    // Search by digit substring in phone
+    const { data: byPhoneLike } = await supabase
+      .from('profiles')
+      .select('*')
+      .ilike('phone', `%${digits}%`)
+      .limit(1);
+
+    if (byPhoneLike && byPhoneLike.length > 0) return byPhoneLike[0] as Profile;
+  }
 
   // 3. Check secondary_emails array (contains clean email)
   const { data: bySecondary } = await supabase

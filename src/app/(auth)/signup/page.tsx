@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { PhoneInput } from '@/components/ui/PhoneInput';
 
 export default function SignupPage() {
   const [email, setEmail] = useState('');
@@ -139,12 +140,10 @@ export default function SignupPage() {
               <label className="font-mono text-xs tracking-wider uppercase text-on-surface-variant block mb-1.5 font-semibold">
                 Phone Number <span className="normal-case text-outline text-[11px]">(optional, for directory)</span>
               </label>
-              <input
-                type="tel"
+              <PhoneInput
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+91 98765 43210"
-                className="w-full px-4 py-3 rounded-xl border border-outline-variant/50 bg-surface text-on-surface focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm font-medium"
+                onChange={setPhone}
+                defaultCountryCode="+91"
               />
             </div>
 

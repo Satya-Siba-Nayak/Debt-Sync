@@ -153,11 +153,18 @@ export default function PeopleDirectoryPage() {
       return true;
     })
     .filter((p) => {
-      const q = searchQuery.toLowerCase();
+      const q = searchQuery.toLowerCase().trim();
+      const qDigits = q.replace(/[^\d]/g, '');
+      const phoneDigits = p.phone ? p.phone.replace(/[^\d]/g, '') : '';
+      const phoneMatches = Boolean(
+        (p.phone && p.phone.toLowerCase().includes(q)) ||
+        (qDigits.length >= 3 && phoneDigits.includes(qDigits))
+      );
+
       return (
         p.name.toLowerCase().includes(q) ||
         p.email.toLowerCase().includes(q) ||
-        (p.phone && p.phone.includes(q)) ||
+        phoneMatches ||
         (p.secondaryEmails && p.secondaryEmails.some((sec) => sec.toLowerCase().includes(q)))
       );
     })

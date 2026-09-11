@@ -14,6 +14,7 @@ export type UserSettings = {
   user_id: string;
   default_currency: string;
   theme_preference: 'light' | 'dark' | 'system';
+  default_country_code?: string;
   created_at: string;
   updated_at: string;
 };
