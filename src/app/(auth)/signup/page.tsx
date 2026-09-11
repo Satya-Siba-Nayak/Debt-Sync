@@ -3,14 +3,18 @@
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 export default function SignupPage() {
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const router = useRouter();
   const supabase = createClient();
 
   const handleSignup = async (e: React.FormEvent) => {
@@ -19,23 +23,40 @@ export default function SignupPage() {
     setError('');
     setMessage('');
 
-    const { error: authError } = await supabase.auth.signInWithOtp({
-      email,
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters long');
+      setLoading(false);
+      return;
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+
+    const { data, error: authError } = await supabase.auth.signUp({
+      email: cleanEmail,
+      password,
       options: {
         emailRedirectTo: `${window.location.origin}/auth/callback`,
         data: {
-          full_name: fullName,
-          phone: phone || null,
+          full_name: fullName.trim(),
+          phone: phone.trim() || null,
         },
       },
     });
 
     if (authError) {
       setError(authError.message);
+      setLoading(false);
     } else {
-      setMessage('Check your email for the confirmation link!');
+      // If user session is returned immediately (e.g. email confirmation disabled)
+      if (data.session) {
+        router.push('/');
+      } else {
+        setMessage(
+          'Account created! If email confirmation is enabled on your project, please check your inbox to activate.'
+        );
+        setLoading(false);
+      }
     }
-    setLoading(false);
   };
 
   return (
@@ -85,10 +106,33 @@ export default function SignupPage() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@university.edu"
+                placeholder="you@example.com"
                 required
                 className="w-full px-4 py-3 rounded-xl border border-outline-variant/50 bg-surface text-on-surface focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm font-medium"
               />
+            </div>
+
+            <div>
+              <label className="font-mono text-xs tracking-wider uppercase text-on-surface-variant block mb-1.5 font-semibold">
+                Password
+              </label>
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="At least 6 characters"
+                  required
+                  className="w-full px-4 py-3 pr-10 rounded-xl border border-outline-variant/50 bg-surface text-on-surface focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm font-medium"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-[20px] hover:text-on-surface"
+                >
+                  {showPassword ? 'visibility_off' : 'visibility'}
+                </button>
+              </div>
             </div>
 
             <div>
@@ -109,7 +153,7 @@ export default function SignupPage() {
               disabled={loading}
               className="w-full py-3 px-4 bg-primary text-on-primary rounded-xl font-bold font-mono text-sm hover:opacity-90 active:scale-[0.99] transition-all disabled:opacity-50 shadow-md cursor-pointer mt-2"
             >
-              {loading ? 'Creating...' : 'Create Account'}
+              {loading ? 'Creating account...' : 'Create Account'}
             </button>
           </form>
 
