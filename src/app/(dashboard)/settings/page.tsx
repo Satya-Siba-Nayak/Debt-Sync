@@ -17,6 +17,7 @@ export default function SettingsPage() {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [currency, setCurrency] = useState('inr');
+  const [newPassword, setNewPassword] = useState('');
 
   useEffect(() => {
     async function loadSettings() {
@@ -89,6 +90,18 @@ export default function SettingsPage() {
         });
 
       if (settingsError) throw settingsError;
+
+      // Update password if entered
+      if (newPassword.trim()) {
+        if (newPassword.trim().length < 6) {
+          throw new Error('Password must be at least 6 characters long');
+        }
+        const { error: pwdError } = await supabase.auth.updateUser({
+          password: newPassword.trim(),
+        });
+        if (pwdError) throw pwdError;
+        setNewPassword('');
+      }
 
       setMessage('Settings updated successfully!');
     } catch (err: any) {
@@ -205,6 +218,29 @@ export default function SettingsPage() {
               </span>
             </div>
             <ThemeToggle />
+          </div>
+        </div>
+
+        {/* Security & Password */}
+        <div className="pt-6 border-t border-[var(--outline-variant)]/20 space-y-4">
+          <h3 className="font-mono text-xs uppercase tracking-wider font-semibold text-[var(--on-surface-variant)]">
+            Security &amp; Password
+          </h3>
+          <p className="text-xs text-[var(--on-surface-variant)]">
+            Set or update your password to sign in quickly without waiting for email magic links.
+          </p>
+
+          <div>
+            <label className="font-mono text-xs text-[var(--on-surface-variant)] block mb-1">
+              New Password
+            </label>
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="Leave blank to keep unchanged"
+              className="w-full px-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-sm outline-none focus:border-[var(--primary)]"
+            />
           </div>
         </div>
 
