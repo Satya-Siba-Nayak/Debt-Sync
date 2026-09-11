@@ -9,6 +9,7 @@ import { checkIdentifierConflict } from '@/lib/utils/profile-lookup';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { getRandomSampleName } from '@/lib/utils/random-placeholders';
 import { checkAuthRateLimit } from '@/lib/utils/rate-limit';
+import { ERROR_CODES, formatErrorWithCode, parseAuthError } from '@/lib/constants/error-codes';
 
 function SignupContent() {
   const [email, setEmail] = useState('');
@@ -31,7 +32,12 @@ function SignupContent() {
     setMessage('');
 
     if (password.length < 6) {
-      setError('Password must be at least 6 characters long');
+      setError(
+        formatErrorWithCode(
+          'Password must be at least 6 characters long.',
+          ERROR_CODES.AUTH_PASSWORD_TOO_SHORT
+        )
+      );
       setLoading(false);
       return;
     }
@@ -41,15 +47,29 @@ function SignupContent() {
     // Check for duplicate accounts (taking Gmail aliases and phone into account)
     const conflict = await checkIdentifierConflict(cleanEmail, phone.trim() || undefined);
     if (conflict.hasConflict) {
-      setError(conflict.message || 'An account already exists with this email (or alias) or phone number.');
+      const code = conflict.message?.toLowerCase().includes('phone')
+        ? ERROR_CODES.AUTH_PHONE_EXISTS
+        : ERROR_CODES.AUTH_EMAIL_EXISTS;
+      setError(
+        formatErrorWithCode(
+          conflict.message || 'An account already exists with this email (or alias) or phone number.',
+          code
+        )
+      );
       setLoading(false);
       return;
     }
 
-    // Background rate limit protection: max 3/hr per session, max 10/day per IP
+    // Client/session rate limit protection (max 3/hr per session, max 5/day per session)
     const rateCheck = await checkAuthRateLimit('signup', cleanEmail);
     if (!rateCheck.allowed) {
-      setError(rateCheck.message || 'Too many account creation attempts. Please try again later.');
+      setError(
+        rateCheck.message ||
+          formatErrorWithCode(
+            'Rate limit reached. Please try again later.',
+            rateCheck.code || ERROR_CODES.AUTH_RATE_LIMIT_SESSION_1H
+          )
+      );
       setLoading(false);
       return;
     }
@@ -67,7 +87,8 @@ function SignupContent() {
     });
 
     if (authError) {
-      setError(authError.message);
+      const parsed = parseAuthError(authError);
+      setError(formatErrorWithCode(parsed.message, parsed.code));
       setLoading(false);
     } else {
       // If user session is returned immediately (e.g. email confirmation disabled)

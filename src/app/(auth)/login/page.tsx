@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { checkAuthRateLimit, checkAccountStatusForLogin } from '@/lib/utils/rate-limit';
+import { ERROR_CODES, formatErrorWithCode, parseAuthError } from '@/lib/constants/error-codes';
 
 function LoginContent() {
   const [authMode, setAuthMode] = useState<'password' | 'magic_link'>('password');
@@ -18,7 +19,7 @@ function LoginContent() {
   const [error, setError] = useState('');
   const [emailError, setEmailError] = useState('');
   const [emailRecommendation, setEmailRecommendation] = useState<{
-    type: 'not_found' | 'secondary' | 'shadow';
+    type: 'secondary' | 'not_found' | 'shadow';
     primaryEmail?: string;
   } | null>(null);
   const router = useRouter();
@@ -36,7 +37,12 @@ function LoginContent() {
 
     const rawId = identifier.trim();
     if (!rawId) {
-      setError('Please enter your email or phone number');
+      setError(
+        formatErrorWithCode(
+          'Please enter your email or phone number.',
+          ERROR_CODES.AUTH_INVALID_CREDENTIALS
+        )
+      );
       setLoading(false);
       return;
     }
@@ -62,7 +68,8 @@ function LoginContent() {
     });
 
     if (authError) {
-      setError(authError.message);
+      const parsed = parseAuthError(authError);
+      setError(formatErrorWithCode(parsed.message, parsed.code));
       setLoading(false);
     } else {
       if (data?.user) {
@@ -91,14 +98,24 @@ function LoginContent() {
     const accountStatus = await checkAccountStatusForLogin(cleanEmail);
 
     if (accountStatus.status === 'not_found') {
-      setEmailError('No DebtSync account found with this email');
+      setEmailError(
+        formatErrorWithCode(
+          'No DebtSync account found with this email',
+          ERROR_CODES.AUTH_ACCOUNT_NOT_FOUND
+        )
+      );
       setEmailRecommendation({ type: 'not_found' });
       setLoading(false);
       return;
     }
 
     if (accountStatus.status === 'secondary') {
-      setEmailError('Please use your primary email address for magic links');
+      setEmailError(
+        formatErrorWithCode(
+          'Please use your primary email address for magic links',
+          ERROR_CODES.AUTH_MAGIC_LINK_USE_PRIMARY
+        )
+      );
       setEmailRecommendation({
         type: 'secondary',
         primaryEmail: accountStatus.primary_email,
@@ -108,7 +125,12 @@ function LoginContent() {
     }
 
     if (accountStatus.status === 'shadow') {
-      setEmailError('Account setup pending');
+      setEmailError(
+        formatErrorWithCode(
+          'Account setup pending. Please sign up to activate.',
+          ERROR_CODES.AUTH_SHADOW_SETUP_PENDING
+        )
+      );
       setEmailRecommendation({ type: 'shadow' });
       setLoading(false);
       return;
@@ -117,7 +139,12 @@ function LoginContent() {
     // 2. Background rate limit check: max 5 emails per 6 hours
     const rateCheck = await checkAuthRateLimit('magic_link', cleanEmail);
     if (!rateCheck.allowed) {
-      setError(rateCheck.message || 'Too many magic link requests. Please wait a while.');
+      setError(
+        formatErrorWithCode(
+          rateCheck.message || 'Too many magic link requests. Please wait a while.',
+          rateCheck.code || ERROR_CODES.AUTH_RATE_LIMIT_EMAIL_6H
+        )
+      );
       setLoading(false);
       return;
     }
@@ -131,12 +158,18 @@ function LoginContent() {
     });
 
     if (authError) {
+      const parsed = parseAuthError(authError);
       const errMsg = authError.message.toLowerCase();
       if (errMsg.includes('not found') || errMsg.includes('invalid') || errMsg.includes('user')) {
-        setEmailError('No account found with this email address');
+        setEmailError(
+          formatErrorWithCode(
+            'No account found with this email address',
+            ERROR_CODES.AUTH_ACCOUNT_NOT_FOUND
+          )
+        );
         setEmailRecommendation({ type: 'not_found' });
       } else {
-        setError(authError.message);
+        setError(formatErrorWithCode(parsed.message, parsed.code));
       }
     } else {
       setMessage('Check your email for the magic link!');
@@ -147,7 +180,12 @@ function LoginContent() {
   const handleForgotPassword = async () => {
     const rawId = identifier.trim();
     if (!rawId) {
-      setError('Please enter your email or phone number first to reset your password');
+      setError(
+        formatErrorWithCode(
+          'Please enter your email or phone number first to reset your password',
+          ERROR_CODES.AUTH_INVALID_CREDENTIALS
+        )
+      );
       return;
     }
     setLoading(true);
@@ -166,7 +204,12 @@ function LoginContent() {
     // Verify account existence before sending password reset
     const accountStatus = await checkAccountStatusForLogin(targetEmail);
     if (accountStatus.status === 'not_found') {
-      setError('No account found with this email or phone. Please sign up to create an account.');
+      setError(
+        formatErrorWithCode(
+          'No account found with this email or phone. Please sign up to create an account.',
+          ERROR_CODES.AUTH_ACCOUNT_NOT_FOUND
+        )
+      );
       setLoading(false);
       return;
     }
@@ -174,7 +217,12 @@ function LoginContent() {
     // Rate limit check: max 5 emails per 6 hours
     const rateCheck = await checkAuthRateLimit('password_reset', targetEmail);
     if (!rateCheck.allowed) {
-      setError(rateCheck.message || 'Too many password reset requests. Please wait a while.');
+      setError(
+        formatErrorWithCode(
+          rateCheck.message || 'Too many password reset requests. Please wait a while.',
+          rateCheck.code || ERROR_CODES.AUTH_RATE_LIMIT_EMAIL_6H
+        )
+      );
       setLoading(false);
       return;
     }
@@ -187,7 +235,8 @@ function LoginContent() {
     );
 
     if (resetError) {
-      setError(resetError.message);
+      const parsed = parseAuthError(resetError);
+      setError(formatErrorWithCode(parsed.message, parsed.code));
     } else {
       setMessage('Password reset instructions have been sent to your primary email.');
     }

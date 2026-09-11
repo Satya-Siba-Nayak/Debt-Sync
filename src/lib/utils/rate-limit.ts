@@ -1,10 +1,12 @@
 import { createClient } from '@/lib/supabase/client';
+import { ERROR_CODES, formatErrorWithCode } from '@/lib/constants/error-codes';
 
 export type RateLimitAction = 'signup' | 'magic_link' | 'password_reset';
 
 export interface RateLimitResult {
   allowed: boolean;
   message?: string;
+  code?: string;
   reason?: string;
 }
 
@@ -12,6 +14,7 @@ export interface AccountStatusResult {
   status: 'primary' | 'secondary' | 'shadow' | 'not_found' | 'invalid';
   primary_email?: string;
   message?: string;
+  code?: string;
 }
 
 /**
@@ -35,7 +38,7 @@ export function getClientSessionId(): string {
  * Client-side fast timestamp cache check to avoid unnecessary network calls
  * on repeated button presses or automated script loops
  */
-function checkClientTimestamps(action: RateLimitAction): { allowed: boolean; message?: string } {
+function checkClientTimestamps(action: RateLimitAction): { allowed: boolean; message?: string; code?: string } {
   if (typeof window === 'undefined') return { allowed: true };
 
   try {
@@ -52,27 +55,39 @@ function checkClientTimestamps(action: RateLimitAction): { allowed: boolean; mes
       const last1h = valid.filter((t) => now - t < 60 * 60 * 1000);
 
       if (last1h.length >= 3) {
+        const code = ERROR_CODES.AUTH_RATE_LIMIT_SESSION_1H;
         return {
           allowed: false,
-          message:
+          code,
+          message: formatErrorWithCode(
             'Too many accounts created from this browser session. Maximum 3 accounts per hour allowed. Please try again later.',
+            code
+          ),
         };
       }
       if (valid.length >= 5) {
+        const code = ERROR_CODES.AUTH_RATE_LIMIT_SESSION_24H;
         return {
           allowed: false,
-          message:
+          code,
+          message: formatErrorWithCode(
             'Daily account creation limit reached for this browser session (max 5/day). Please try again tomorrow.',
+            code
+          ),
         };
       }
     } else {
       // Email actions ('magic_link', 'password_reset')
       const valid = timestamps.filter((t) => now - t < 6 * 60 * 60 * 1000);
       if (valid.length >= 5) {
+        const code = ERROR_CODES.AUTH_RATE_LIMIT_EMAIL_6H;
         return {
           allowed: false,
-          message:
+          code,
+          message: formatErrorWithCode(
             'Rate limit reached: Maximum 5 security emails allowed every 6 hours. Please check your inbox or try again later.',
+            code
+          ),
         };
       }
     }
@@ -106,7 +121,9 @@ function recordClientTimestamp(action: RateLimitAction) {
 
 /**
  * Full Rate Limit Verification
- * Checks client local cache first, then validates against server route /api/auth/rate-limit
+ * Checks client session cache first, then validates directly against Supabase RPC.
+ * Works seamlessly across static exports (Cloudflare Pages), mobile apps, and shared WiFi NATs.
+ * Fails OPEN if RPC or network encounters any error to never block legitimate users.
  */
 export async function checkAuthRateLimit(
   action: RateLimitAction,
@@ -115,31 +132,52 @@ export async function checkAuthRateLimit(
   // 1. Client-side instant evaluation
   const localCheck = checkClientTimestamps(action);
   if (!localCheck.allowed) {
-    return { allowed: false, message: localCheck.message };
+    return {
+      allowed: false,
+      message: localCheck.message,
+      code: localCheck.code,
+    };
   }
 
-  // 2. Server API Route evaluation (validates IP address and persistent HttpOnly cookie)
+  // 2. Direct Supabase RPC check (eliminates reliance on Next.js /api server routes)
   try {
     const clientSessionId = getClientSessionId();
-    const res = await fetch('/api/auth/rate-limit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action,
-        identifier: identifier ? identifier.trim().toLowerCase() : undefined,
-        clientSessionId,
-      }),
+    const supabase = createClient();
+
+    const { data, error } = await supabase.rpc('check_and_record_rate_limit', {
+      p_action: action,
+      p_identifier: identifier ? identifier.trim().toLowerCase() : null,
+      p_ip_address: 'client-direct',
+      p_session_id: clientSessionId,
     });
 
-    const data = await res.json().catch(() => ({}));
+    if (error) {
+      // Fail-open for legitimate users if RPC is unconfigured or blocked
+      recordClientTimestamp(action);
+      return { allowed: true };
+    }
 
-    if (!res.ok || data?.allowed === false) {
+    if (data && data.allowed === false) {
+      const reason = data.reason || 'rate_limit';
+      const code =
+        reason === 'session_hourly_limit'
+          ? ERROR_CODES.AUTH_RATE_LIMIT_SESSION_1H
+          : reason === 'session_daily_limit'
+          ? ERROR_CODES.AUTH_RATE_LIMIT_SESSION_24H
+          : reason === 'email_limit'
+          ? ERROR_CODES.AUTH_RATE_LIMIT_EMAIL_6H
+          : reason === 'ip_daily_limit'
+          ? ERROR_CODES.AUTH_RATE_LIMIT_IP_24H
+          : ERROR_CODES.AUTH_RATE_LIMIT_GENERIC;
+
       return {
         allowed: false,
-        message:
-          data?.message ||
-          'Rate limit exceeded. Please wait a while before trying again.',
-        reason: data?.reason,
+        code,
+        message: formatErrorWithCode(
+          data.message || 'Rate limit reached. Please wait a while before trying again.',
+          code
+        ),
+        reason,
       };
     }
 
@@ -147,7 +185,7 @@ export async function checkAuthRateLimit(
     recordClientTimestamp(action);
     return { allowed: true };
   } catch (err) {
-    console.warn('Rate limit server check warning (proceeding):', err);
+    console.warn('Rate limit direct check notice (failing open):', err);
     recordClientTimestamp(action);
     return { allowed: true };
   }
@@ -172,7 +210,18 @@ export async function checkAccountStatusForLogin(
     });
 
     if (!error && data && data.status) {
-      return data as AccountStatusResult;
+      const resData = data as AccountStatusResult;
+      if (resData.status === 'not_found') {
+        resData.code = ERROR_CODES.AUTH_ACCOUNT_NOT_FOUND;
+        resData.message = formatErrorWithCode(resData.message || 'No account found with this email address.', resData.code);
+      } else if (resData.status === 'secondary') {
+        resData.code = ERROR_CODES.AUTH_MAGIC_LINK_USE_PRIMARY;
+        resData.message = formatErrorWithCode(resData.message || 'Please use your primary email address for magic links.', resData.code);
+      } else if (resData.status === 'shadow') {
+        resData.code = ERROR_CODES.AUTH_SHADOW_SETUP_PENDING;
+        resData.message = formatErrorWithCode(resData.message || 'Account setup pending.', resData.code);
+      }
+      return resData;
     }
   } catch (_) {}
 
@@ -186,10 +235,12 @@ export async function checkAccountStatusForLogin(
 
     if (primary) {
       if (primary.is_shadow) {
+        const code = ERROR_CODES.AUTH_SHADOW_SETUP_PENDING;
         return {
           status: 'shadow',
           primary_email: primary.email,
-          message: 'This email has recorded peer debts but has not completed account signup yet.',
+          code,
+          message: formatErrorWithCode('This email has recorded peer debts but has not completed account signup yet.', code),
         };
       }
       return { status: 'primary', primary_email: primary.email };
@@ -201,16 +252,20 @@ export async function checkAccountStatusForLogin(
       .contains('secondary_emails', [clean]);
 
     if (secondaryList && secondaryList.length > 0) {
+      const code = ERROR_CODES.AUTH_MAGIC_LINK_USE_PRIMARY;
       return {
         status: 'secondary',
         primary_email: secondaryList[0].email,
-        message: 'This email is registered as a secondary email for an account.',
+        code,
+        message: formatErrorWithCode('This email is registered as a secondary email for an account.', code),
       };
     }
 
+    const code = ERROR_CODES.AUTH_ACCOUNT_NOT_FOUND;
     return {
       status: 'not_found',
-      message: 'No account found with this email address.',
+      code,
+      message: formatErrorWithCode('No account found with this email address.', code),
     };
   } catch (fallbackErr) {
     console.warn('Account status check fallback error:', fallbackErr);
