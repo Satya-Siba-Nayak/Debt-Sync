@@ -51,7 +51,7 @@ export default function RootLayout({
                   var theme = null;
                   // 1. Try reading from localStorage safely
                   try {
-                    theme = localStorage.getItem('debtsync_theme') || localStorage.getItem('theme');
+                    theme = localStorage.getItem('debtsync_theme');
                   } catch (e) {}
 
                   // 2. Fallback to reading from document.cookie

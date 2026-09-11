@@ -11,7 +11,7 @@ import { isSameEmail } from '@/lib/utils/email-normalize';
 import { Avatar, AVATAR_PRESETS } from '@/components/ui/Avatar';
 import { getRandomSecondaryEmailPlaceholder } from '@/lib/utils/random-placeholders';
 import { AvatarCropModal } from '@/components/profile/AvatarCropModal';
-import { getStoredTheme, applyTheme, Theme } from '@/lib/utils/theme';
+import { getStoredTheme } from '@/lib/utils/theme';
 import {
   isPresetAvatar,
   removeCustomAvatar,
@@ -135,24 +135,7 @@ export default function SettingsPage() {
         } else if (localCode) {
           setDefaultCountryCode(localCode);
         }
-        if (userSettings?.theme_preference) {
-          const dbTheme = userSettings.theme_preference as Theme;
-          const currentLocalTheme = getStoredTheme();
-          // If the DB has an explicit preference ('dark' or 'light'), apply it.
-          // If the DB is default 'system', but the user explicitly chose 'dark' or 'light' locally,
-          // preserve the user's choice and sync it to the database instead of reverting to white/system.
-          if (dbTheme === 'dark' || dbTheme === 'light') {
-            applyTheme(dbTheme, false);
-          } else if (dbTheme === 'system' && (currentLocalTheme === 'dark' || currentLocalTheme === 'light')) {
-            supabase
-              .from('user_settings')
-              .update({ theme_preference: currentLocalTheme })
-              .eq('user_id', user.id)
-              .then(() => {});
-          } else {
-            applyTheme(dbTheme, false);
-          }
-        }
+
       } catch (err) {
         console.error('Error loading settings:', err);
       } finally {

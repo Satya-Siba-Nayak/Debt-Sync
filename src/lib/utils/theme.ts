@@ -2,7 +2,6 @@ export type Theme = 'light' | 'dark' | 'system';
 
 const COOKIE_NAME = 'debtsync_theme';
 const STORAGE_KEY = 'debtsync_theme';
-const LEGACY_STORAGE_KEY = 'theme';
 
 function getCookie(name: string): string | null {
   if (typeof document === 'undefined') return null;
@@ -25,15 +24,13 @@ function setCookie(name: string, value: string, days: number = 365): void {
 export function getStoredTheme(): Theme {
   if (typeof window === 'undefined') return 'system';
 
-  // 1. Check localStorage first
+  // 1. Check debtsync_theme in localStorage first
   try {
-    const theme = (localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY)) as Theme;
+    const theme = localStorage.getItem(STORAGE_KEY) as Theme;
     if (theme === 'light' || theme === 'dark' || theme === 'system') {
       return theme;
     }
-  } catch (_) {
-    // localStorage might be blocked or restricted (e.g. Zen / Firefox strict privacy or container mode)
-  }
+  } catch (_) {}
 
   // 2. Fall back to persistent cookie
   try {
@@ -46,7 +43,7 @@ export function getStoredTheme(): Theme {
   return 'system';
 }
 
-export function applyTheme(theme: Theme, syncToDb: boolean = true) {
+export function applyTheme(theme: Theme) {
   if (typeof window === 'undefined') return;
 
   const root = document.documentElement;
@@ -54,10 +51,11 @@ export function applyTheme(theme: Theme, syncToDb: boolean = true) {
   // 1. Persist to localStorage safely
   try {
     localStorage.setItem(STORAGE_KEY, theme);
-    localStorage.setItem(LEGACY_STORAGE_KEY, theme);
+    // Remove stale generic key if present
+    localStorage.removeItem('theme');
   } catch (_) {}
 
-  // 2. Persist to cookie (crucial for Linux / Zen / Firefox privacy modes & initial head script)
+  // 2. Persist to cookie (for SSR / head script on reload)
   try {
     setCookie(COOKIE_NAME, theme, 365);
   } catch (_) {}
@@ -91,26 +89,5 @@ export function applyTheme(theme: Theme, syncToDb: boolean = true) {
       })
     );
   } catch (_) {}
-
-  // 5. Asynchronously synchronize with Supabase user_settings if authenticated
-  if (syncToDb) {
-    try {
-      import('@/lib/supabase/client').then(({ createClient }) => {
-        try {
-          const supabase = createClient();
-          supabase.auth.getSession().then(({ data }: any) => {
-            const userId = data?.session?.user?.id;
-            if (userId) {
-              supabase
-                .from('user_settings')
-                .update({ theme_preference: theme })
-                .eq('user_id', userId)
-                .then(() => {});
-            }
-          }).catch(() => {});
-        } catch (_) {}
-      }).catch(() => {});
-    } catch (_) {}
-  }
 }
 
