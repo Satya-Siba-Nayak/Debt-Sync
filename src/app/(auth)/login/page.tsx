@@ -15,6 +15,7 @@ function LoginContent() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [emailError, setEmailError] = useState('');
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextUrl = searchParams.get('next') || '/';
@@ -25,10 +26,11 @@ function LoginContent() {
     setLoading(true);
     setError('');
     setMessage('');
+    setEmailError('');
 
     const rawId = identifier.trim();
     if (!rawId) {
-      setError('Please enter your email, alternate email, or phone number');
+      setError('Please enter your email or phone number');
       setLoading(false);
       return;
     }
@@ -69,13 +71,26 @@ function LoginContent() {
     setLoading(true);
     setError('');
     setMessage('');
+    setEmailError('');
 
     const cleanEmail = primaryEmail.trim().toLowerCase();
     if (!cleanEmail || !cleanEmail.includes('@')) {
-      setError('Magic link requires a valid primary email address');
+      setEmailError('Please enter a valid email address');
       setLoading(false);
       return;
     }
+
+    // Check if user entered an alternate/secondary email instead of primary
+    try {
+      const { data: resolvedEmail } = await supabase.rpc('resolve_login_identifier', {
+        p_identifier: cleanEmail,
+      });
+      if (resolvedEmail && resolvedEmail.toLowerCase() !== cleanEmail) {
+        setEmailError('Please use your primary email address for magic links');
+        setLoading(false);
+        return;
+      }
+    } catch (_) {}
 
     const { error: authError } = await supabase.auth.signInWithOtp({
       email: cleanEmail,
@@ -85,9 +100,14 @@ function LoginContent() {
     });
 
     if (authError) {
-      setError(authError.message);
+      const errMsg = authError.message.toLowerCase();
+      if (errMsg.includes('not found') || errMsg.includes('invalid') || errMsg.includes('user')) {
+        setEmailError('Please use your primary email address');
+      } else {
+        setError(authError.message);
+      }
     } else {
-      setMessage('Check your primary email for the magic link!');
+      setMessage('Check your email for the magic link!');
     }
     setLoading(false);
   };
@@ -182,8 +202,8 @@ function LoginContent() {
           </h2>
           <p className="text-sm text-on-surface-variant mb-6 font-medium">
             {authMode === 'password'
-              ? 'Sign in with your primary email, secondary email, or phone'
-              : 'Enter your primary email for a secure passwordless link'}
+              ? 'Enter your credentials to access your ledger'
+              : 'Enter your email to receive a sign-in link'}
           </p>
 
           <form
@@ -193,13 +213,16 @@ function LoginContent() {
             {authMode === 'password' ? (
               <div>
                 <label className="font-mono text-xs tracking-wider uppercase text-on-surface-variant block mb-1.5 font-semibold">
-                  Email, Alternate Email, or Phone
+                  Email / Phone
                 </label>
                 <input
                   type="text"
                   value={identifier}
-                  onChange={(e) => setIdentifier(e.target.value)}
-                  placeholder="Primary email, work email, or +91 phone"
+                  onChange={(e) => {
+                    setIdentifier(e.target.value);
+                    if (error) setError('');
+                  }}
+                  placeholder="name@example.com or phone"
                   required
                   autoComplete="username"
                   className="w-full px-4 py-3 rounded-xl border border-outline-variant/50 bg-surface text-on-surface focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm font-medium"
@@ -207,26 +230,30 @@ function LoginContent() {
               </div>
             ) : (
               <div>
-                <div className="flex justify-between items-center mb-1.5">
-                  <label className="font-mono text-xs tracking-wider uppercase text-on-surface-variant font-semibold">
-                    Primary Email Address
-                  </label>
-                  <span className="text-[10px] font-mono text-[var(--outline)] uppercase font-semibold">
-                    Primary Only
-                  </span>
-                </div>
+                <label className="font-mono text-xs tracking-wider uppercase text-on-surface-variant block mb-1.5 font-semibold">
+                  Email
+                </label>
                 <input
                   type="email"
                   value={primaryEmail}
-                  onChange={(e) => setPrimaryEmail(e.target.value)}
-                  placeholder="you@example.com (Primary email only)"
+                  onChange={(e) => {
+                    setPrimaryEmail(e.target.value);
+                    if (emailError) setEmailError('');
+                    if (error) setError('');
+                  }}
+                  placeholder="name@example.com"
                   required
                   autoComplete="email"
-                  className="w-full px-4 py-3 rounded-xl border border-outline-variant/50 bg-surface text-on-surface focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm font-medium"
+                  className={`w-full px-4 py-3 rounded-xl border ${
+                    emailError ? 'border-error ring-1 ring-error/40' : 'border-outline-variant/50'
+                  } bg-surface text-on-surface focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm font-medium`}
                 />
-                <p className="text-[11px] font-mono text-on-surface-variant mt-1.5">
-                  Magic links are strictly sent to your registered primary email address.
-                </p>
+                {emailError && (
+                  <p className="text-[11px] font-mono text-error mt-1.5 flex items-center gap-1 animate-fadeIn">
+                    <span className="material-symbols-outlined text-[13px]">error</span>
+                    <span>{emailError}</span>
+                  </p>
+                )}
               </div>
             )}
 
@@ -248,7 +275,10 @@ function LoginContent() {
                   <input
                     type={showPassword ? 'text' : 'password'}
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      if (error) setError('');
+                    }}
                     placeholder="••••••••"
                     required
                     className="w-full px-4 py-3 pr-10 rounded-xl border border-outline-variant/50 bg-surface text-on-surface focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm font-medium"
@@ -256,7 +286,7 @@ function LoginContent() {
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-[20px] hover:text-on-surface"
+                    className="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-[20px] hover:text-on-surface cursor-pointer"
                   >
                     {showPassword ? 'visibility_off' : 'visibility'}
                   </button>
@@ -272,7 +302,7 @@ function LoginContent() {
               {loading
                 ? 'Processing...'
                 : authMode === 'password'
-                ? 'Sign In with Password'
+                ? 'Sign In'
                 : 'Send Magic Link'}
             </button>
           </form>

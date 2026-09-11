@@ -288,11 +288,11 @@ function PersonDebtDetailContent() {
           {hasActiveDebts && (
             <button
               onClick={() => setIsBulkModalOpen(true)}
-              className="py-2.5 px-4 rounded-xl bg-gradient-to-r from-primary to-teal-600 text-on-primary font-mono text-xs font-bold hover:opacity-95 shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
-              title="Bulk repay multiple debts with Avalanche or FIFO"
+              className="py-2.5 px-4 rounded-xl bg-primary text-on-primary font-mono text-xs font-bold hover:opacity-95 shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+              title="Bulk repay multiple debts"
             >
               <span className="material-symbols-outlined text-[18px]">bolt</span>
-              <span>Smart Bulk Repayment</span>
+              <span>Bulk Repay</span>
             </button>
           )}
           <button
@@ -465,11 +465,11 @@ function PersonDebtDetailContent() {
             {hasActiveDebts && (
               <button
                 onClick={() => setIsBulkModalOpen(true)}
-                className="py-2 px-3.5 rounded-xl bg-gradient-to-r from-primary to-teal-600 text-on-primary font-mono text-xs font-bold hover:opacity-95 shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
-                title="Settle multiple debts at once using Avalanche, Due Date, or FIFO strategy"
+                className="py-2 px-3.5 rounded-xl bg-primary text-on-primary font-mono text-xs font-bold hover:opacity-95 shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                title="Bulk repay multiple debts"
               >
                 <span className="material-symbols-outlined text-[16px]">bolt</span>
-                <span>Smart Bulk Repayment</span>
+                <span>Bulk Repay</span>
               </button>
             )}
           </div>
@@ -496,7 +496,7 @@ function PersonDebtDetailContent() {
                   : 'text-on-surface-variant hover:text-on-surface'
               }`}
             >
-              They owe you ({theyOweDebts.length})
+              They Owe ({theyOweDebts.length})
             </button>
             <button
               onClick={() => setFilterDirection('you_owe')}
@@ -506,12 +506,12 @@ function PersonDebtDetailContent() {
                   : 'text-on-surface-variant hover:text-on-surface'
               }`}
             >
-              You owe them ({youOweDebts.length})
+              You Owe ({youOweDebts.length})
             </button>
           </div>
 
           <div className="flex items-center gap-2 font-mono text-xs px-3 py-1.5 rounded-xl bg-surface-container-low border border-outline-variant/20">
-            <span className="text-on-surface-variant">Filtered Balance:</span>
+            <span className="text-on-surface-variant">Balance:</span>
             <span className={`font-bold ${
               filterDirection === 'they_owe'
                 ? 'text-secondary'
@@ -525,9 +525,6 @@ function PersonDebtDetailContent() {
             }`}>
               {filterDirection === 'all' && filteredBalance > 0 ? '+' : ''}
               {formatCurrency(filteredBalance, currency, { showDecimals: true })}
-            </span>
-            <span className="text-[11px] text-on-surface-variant">
-              ({displayDebts.length} {displayDebts.length === 1 ? 'record' : 'records'})
             </span>
           </div>
         </div>
