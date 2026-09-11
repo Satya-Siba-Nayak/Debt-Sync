@@ -12,11 +12,12 @@ import { Avatar, AVATAR_PRESETS } from '@/components/ui/Avatar';
 import { getRandomSecondaryEmailPlaceholder } from '@/lib/utils/random-placeholders';
 import { AvatarCropModal } from '@/components/profile/AvatarCropModal';
 import { getStoredTheme, applyTheme, Theme } from '@/lib/utils/theme';
-
-const isPresetAvatar = (url: string | null) => {
-  if (!url) return false;
-  return AVATAR_PRESETS.some((p) => p.url === url) || url.includes('api.dicebear.com');
-};
+import {
+  isPresetAvatar,
+  removeCustomAvatar,
+  getLocalRecentAvatars,
+  setLocalRecentAvatars,
+} from '@/lib/utils/avatar-storage';
 
 export default function SettingsPage() {
   const supabase = createClient();
@@ -31,6 +32,7 @@ export default function SettingsPage() {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [recentCustomAvatars, setRecentCustomAvatars] = useState<string[]>([]);
   const [currency, setCurrency] = useState('inr');
   const [defaultCountryCode, setDefaultCountryCode] = useState('+91');
   const [newPassword, setNewPassword] = useState('');
@@ -69,17 +71,48 @@ export default function SettingsPage() {
         setEmail(user.email || '');
 
         // Load profile
-        const { data: profile } = await supabase
+        let profile: any = null;
+        const { data: pData, error: pErr } = await supabase
           .from('profiles')
-          .select('full_name, phone, secondary_emails, avatar_url')
+          .select('full_name, phone, secondary_emails, avatar_url, recent_custom_avatars')
           .eq('id', user.id)
           .single();
+
+        if (!pErr && pData) {
+          profile = pData;
+        } else {
+          // Graceful fallback if recent_custom_avatars column is not yet migrated
+          const { data: fallbackData } = await supabase
+            .from('profiles')
+            .select('full_name, phone, secondary_emails, avatar_url')
+            .eq('id', user.id)
+            .single();
+          profile = fallbackData;
+        }
 
         if (profile) {
           setFullName(profile.full_name || '');
           setPhone(profile.phone || '');
           setSecondaryEmails(profile.secondary_emails || []);
           setAvatarUrl(profile.avatar_url || null);
+
+          // Resolve recent custom avatars (strictly custom photos, max 2)
+          const rawRecent = Array.isArray(profile.recent_custom_avatars)
+            ? profile.recent_custom_avatars.filter((u: string) => u && !isPresetAvatar(u))
+            : getLocalRecentAvatars(user.id);
+
+          // If current avatar is a custom photo, make sure it's reflected in recent list
+          let initialRecent = rawRecent;
+          if (
+            profile.avatar_url &&
+            !isPresetAvatar(profile.avatar_url) &&
+            !initialRecent.includes(profile.avatar_url)
+          ) {
+            initialRecent = [profile.avatar_url, ...initialRecent].slice(0, 2);
+          }
+
+          setRecentCustomAvatars(initialRecent.slice(0, 2));
+          setLocalRecentAvatars(user.id, initialRecent.slice(0, 2));
         }
 
         const localCode = typeof window !== 'undefined' ? localStorage.getItem('debtsync_default_country_code') : null;
@@ -156,22 +189,34 @@ export default function SettingsPage() {
       }
 
       // Update profile
+      const profilePayload: any = {
+        full_name: fullName.trim(),
+        phone: phone.trim() || null,
+        secondary_emails: secondaryEmails,
+        avatar_url: avatarUrl,
+        recent_custom_avatars: recentCustomAvatars,
+      };
+
       const { error: profileError } = await supabase
         .from('profiles')
-        .update({
-          full_name: fullName.trim(),
-          phone: phone.trim() || null,
-          secondary_emails: secondaryEmails,
-          avatar_url: avatarUrl,
-        })
+        .update(profilePayload)
         .eq('id', user.id);
 
-      if (profileError) throw profileError;
+      if (profileError && profileError.message?.includes('recent_custom_avatars')) {
+        delete profilePayload.recent_custom_avatars;
+        await supabase.from('profiles').update(profilePayload).eq('id', user.id);
+      } else if (profileError) {
+        throw profileError;
+      }
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(
           new CustomEvent('debtsync:user_updated', {
-            detail: { avatarUrl, fullName: fullName.trim() },
+            detail: {
+              avatarUrl,
+              fullName: fullName.trim(),
+              recentCustomAvatars,
+            },
           })
         );
       }
@@ -330,6 +375,62 @@ export default function SettingsPage() {
                   </>
                 )}
               </div>
+
+              {/* Recent Custom Photos (Strictly up to 2, older auto-purged from server) */}
+              {recentCustomAvatars.length > 0 && (
+                <div className="pt-0.5">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="font-mono text-[11px] text-[var(--outline)] flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-[13px]">history</span>
+                      Recent custom photos ({recentCustomAvatars.length}/2):
+                    </span>
+                    <span className="font-mono text-[10px] text-[var(--outline)]/70">
+                      Older photos auto-purged from server
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {recentCustomAvatars.map((url, idx) => (
+                      <div key={url} className="relative group/custom shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setAvatarUrl(url)}
+                          className={`relative w-8 h-8 rounded-xl overflow-hidden border-2 transition-transform hover:scale-105 shrink-0 cursor-pointer shadow-2xs ${
+                            avatarUrl === url
+                              ? 'border-[var(--primary)] ring-2 ring-[var(--primary)]/30 scale-105'
+                              : 'border-transparent opacity-80 hover:opacity-100'
+                          }`}
+                          title={`Custom Photo ${idx + 1} (Click to apply)`}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={url} alt={`Custom ${idx + 1}`} className="w-full h-full object-cover pointer-events-none" />
+                          {avatarUrl === url && (
+                            <div className="absolute inset-0 bg-[var(--primary)]/25 flex items-center justify-center">
+                              <span className="material-symbols-outlined text-[14px] text-white drop-shadow font-bold">check</span>
+                            </div>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (userId) {
+                              const updated = await removeCustomAvatar(supabase, userId, url, recentCustomAvatars);
+                              setRecentCustomAvatars(updated);
+                              if (avatarUrl === url) {
+                                setAvatarUrl(updated[0] || null);
+                              }
+                            }
+                          }}
+                          className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-red-600 text-white flex items-center justify-center opacity-0 group-hover/custom:opacity-100 transition-opacity cursor-pointer shadow-xs hover:scale-110"
+                          title="Delete this custom photo from server"
+                        >
+                          <span className="material-symbols-outlined text-[10px]">close</span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Presets Gallery with Cute Arrow Toggle */}
               <div className="pt-0.5">
@@ -677,9 +778,13 @@ export default function SettingsPage() {
           }}
           imageSrc={cropImageSrc}
           userId={userId}
-          onAvatarSaved={(newUrl) => {
+          currentRecent={recentCustomAvatars}
+          onAvatarSaved={(newUrl, updatedRecent) => {
             setAvatarUrl(newUrl);
-            setMessage('Profile picture cropped, optimized under 5MB, and saved successfully!');
+            if (updatedRecent) {
+              setRecentCustomAvatars(updatedRecent);
+            }
+            setMessage('Profile picture cropped, saved, and optimized under 5MB!');
           }}
         />
       )}

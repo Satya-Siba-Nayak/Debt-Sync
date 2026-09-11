@@ -3,13 +3,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Modal } from '../ui/Modal';
 import { createClient } from '@/lib/supabase/client';
+import { manageCustomAvatarsOnUpload, getLocalRecentAvatars } from '@/lib/utils/avatar-storage';
 
 interface AvatarCropModalProps {
   isOpen: boolean;
   onClose: () => void;
   imageSrc: string | null;
   userId: string;
-  onAvatarSaved: (newUrl: string) => void;
+  currentRecent?: string[];
+  onAvatarSaved: (newUrl: string, updatedRecent?: string[]) => void;
 }
 
 export function AvatarCropModal({
@@ -17,6 +19,7 @@ export function AvatarCropModal({
   onClose,
   imageSrc,
   userId,
+  currentRecent,
   onAvatarSaved,
 }: AvatarCropModalProps) {
   const supabase = createClient();
@@ -264,26 +267,52 @@ export function AvatarCropModal({
         finalAvatarUrl = canvas.toDataURL('image/jpeg', Math.min(quality, 0.85));
       }
 
-      // 5. Persist directly to Supabase profile immediately
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({ avatar_url: finalAvatarUrl })
-        .eq('id', userId);
+      // 5. Enforce strictly max 2 recent custom photos; delete older ones from server storage
+      const existingList = currentRecent && currentRecent.length > 0
+        ? currentRecent
+        : getLocalRecentAvatars(userId);
 
-      if (profileError) {
-        console.warn('Profile direct update notice:', profileError.message);
+      const updatedRecent = await manageCustomAvatarsOnUpload(
+        supabase,
+        userId,
+        finalAvatarUrl,
+        existingList
+      );
+
+      // Persist directly to Supabase profile immediately
+      try {
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .update({
+            avatar_url: finalAvatarUrl,
+            recent_custom_avatars: updatedRecent,
+          })
+          .eq('id', userId);
+
+        if (profileError) {
+          // If recent_custom_avatars column does not exist in DB yet, fallback gracefully
+          await supabase
+            .from('profiles')
+            .update({ avatar_url: finalAvatarUrl })
+            .eq('id', userId);
+        }
+      } catch (profileErr) {
+        console.warn('Profile direct update notice:', profileErr);
       }
 
       // 6. Notify application components in real-time
       if (typeof window !== 'undefined') {
         window.dispatchEvent(
           new CustomEvent('debtsync:user_updated', {
-            detail: { avatarUrl: finalAvatarUrl },
+            detail: {
+              avatarUrl: finalAvatarUrl,
+              recentCustomAvatars: updatedRecent,
+            },
           })
         );
       }
 
-      onAvatarSaved(finalAvatarUrl);
+      onAvatarSaved(finalAvatarUrl, updatedRecent);
       onClose();
     } catch (err: any) {
       console.error('Crop & Save Error:', err);

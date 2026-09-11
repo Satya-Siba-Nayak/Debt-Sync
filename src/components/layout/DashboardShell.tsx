@@ -9,10 +9,17 @@ import { PWAInstallPrompt } from '../ui/PWAInstallPrompt';
 import { createClient } from '@/lib/supabase/client';
 
 import { useRouter } from 'next/navigation';
+import { getLocalRecentAvatars } from '@/lib/utils/avatar-storage';
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
-  const [userProfile, setUserProfile] = useState<{ full_name?: string; email?: string; avatar_url?: string | null } | null>(null);
+  const [userProfile, setUserProfile] = useState<{
+    id?: string;
+    full_name?: string;
+    email?: string;
+    avatar_url?: string | null;
+    recent_custom_avatars?: string[];
+  } | null>(null);
   const supabase = createClient();
   const router = useRouter();
 
@@ -24,16 +31,34 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const { data: profile } = await supabase
+      let profile: any = null;
+      const { data: p1, error: p1Err } = await supabase
         .from('profiles')
-        .select('full_name, email, avatar_url')
+        .select('id, full_name, email, avatar_url, recent_custom_avatars')
         .eq('id', user.id)
         .single();
 
+      if (!p1Err && p1) {
+        profile = p1;
+      } else {
+        const { data: p2 } = await supabase
+          .from('profiles')
+          .select('id, full_name, email, avatar_url')
+          .eq('id', user.id)
+          .single();
+        profile = p2;
+      }
+
+      const recentFromDb = Array.isArray(profile?.recent_custom_avatars)
+        ? profile.recent_custom_avatars
+        : getLocalRecentAvatars(user.id);
+
       setUserProfile({
+        id: user.id,
         full_name: profile?.full_name || user.user_metadata?.full_name,
         email: user.email,
         avatar_url: profile?.avatar_url || null,
+        recent_custom_avatars: recentFromDb,
       });
     }
     loadUser();
@@ -43,8 +68,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       const detail = e.detail;
       setUserProfile((prev) => ({
         ...prev,
-        full_name: detail.fullName || prev?.full_name,
+        full_name: detail.fullName !== undefined ? detail.fullName : prev?.full_name,
         avatar_url: detail.avatarUrl !== undefined ? detail.avatarUrl : prev?.avatar_url,
+        recent_custom_avatars: detail.recentCustomAvatars !== undefined ? detail.recentCustomAvatars : prev?.recent_custom_avatars,
       }));
     };
     window.addEventListener('debtsync:user_updated', handleUserUpdated);
@@ -59,9 +85,11 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col md:ml-60 h-screen overflow-y-auto pb-24 md:pb-8">
         <TopBar
+          userId={userProfile?.id}
           userName={userProfile?.full_name}
           userEmail={userProfile?.email}
           avatarUrl={userProfile?.avatar_url}
+          recentCustomAvatars={userProfile?.recent_custom_avatars}
           onNewTransaction={() => setIsRecordModalOpen(true)}
         />
 
