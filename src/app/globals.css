@@ -41,38 +41,38 @@
 }
 
 .dark {
-  /* Dark Theme Palette (from secure_ledger_aesthetics_1) */
-  --primary: #74ffff;
-  --primary-container: #00e5e5;
-  --on-primary: #003737;
-  --on-primary-container: #006262;
-  --primary-fixed-dim: #00dddd;
+  /* Eye-Friendly Dark Theme Palette (Calming Slate-Teal) */
+  --primary: #38d9d9;
+  --primary-container: #0d5c63;
+  --on-primary: #042124;
+  --on-primary-container: #bbf7f7;
+  --primary-fixed-dim: #2ec4c4;
 
-  --secondary: #4fdad9;
-  --secondary-container: #004f50;
-  --on-secondary: #003737;
-  --on-secondary-container: #98f2f0;
+  --secondary: #34d399;
+  --secondary-container: #064e3b;
+  --on-secondary: #022c22;
+  --on-secondary-container: #a7f3d0;
 
-  --surface: #0A0C10;
-  --surface-dim: #111318;
-  --surface-container-lowest: #161B22;
+  --surface: #0d1117;
+  --surface-dim: #090d12;
+  --surface-container-lowest: #161b22;
   --surface-container-low: #1c2128;
-  --surface-container: #21262D;
-  --surface-container-high: #30363D;
-  --surface-container-highest: #484f58;
-  --on-surface: #F0F6FC;
-  --on-surface-variant: #8B949E;
+  --surface-container: #22272e;
+  --surface-container-high: #2d333b;
+  --surface-container-highest: #373e47;
+  --on-surface: #e6edf3;
+  --on-surface-variant: #9198a1;
 
-  --outline: #849493;
-  --outline-variant: #30363D;
+  --outline: #636e7b;
+  --outline-variant: #30363d;
 
-  --error: #F85149;
-  --error-container: #490202;
-  --on-error-container: #ffdad6;
-  --success: #3FB950;
+  --error: #f87171;
+  --error-container: #501313;
+  --on-error-container: #fecaca;
+  --success: #4ade80;
 
-  --background: #0A0C10;
-  --on-background: #F0F6FC;
+  --background: #0d1117;
+  --on-background: #e6edf3;
 }
 
 @theme {
