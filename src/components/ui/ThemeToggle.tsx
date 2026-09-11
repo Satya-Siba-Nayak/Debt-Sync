@@ -21,7 +21,7 @@ export function ThemeToggle() {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleMediaChange = () => {
       if (getStoredTheme() === 'system') {
-        applyTheme('system');
+        applyTheme('system', false);
       }
     };
 

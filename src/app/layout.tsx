@@ -46,25 +46,53 @@ export default function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html: `
-              try {
-                const storedTheme = localStorage.getItem('debtsync_theme') || localStorage.getItem('theme');
-                const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-                const isDark = storedTheme === 'dark' || ((!storedTheme || storedTheme === 'system') && systemDark);
-                if (isDark) {
-                  document.documentElement.classList.add('dark');
-                } else {
-                  document.documentElement.classList.remove('dark');
-                }
-              } catch (_) {}
+              (function() {
+                try {
+                  var theme = null;
+                  // 1. Try reading from localStorage safely
+                  try {
+                    theme = localStorage.getItem('debtsync_theme') || localStorage.getItem('theme');
+                  } catch (e) {}
 
-              if ('serviceWorker' in navigator) {
-                window.addEventListener('load', function() {
-                  navigator.serviceWorker.register('/sw.js').then(
-                    function(reg) { /* PWA SW registered */ },
-                    function(err) { /* SW registration failed */ }
-                  );
-                });
-              }
+                  // 2. Fallback to reading from document.cookie
+                  if (!theme) {
+                    try {
+                      var match = document.cookie.match(/(?:^|;\\s*)debtsync_theme=([^;]+)/);
+                      if (match) theme = decodeURIComponent(match[1]);
+                    } catch (e) {}
+                  }
+
+                  // 3. Resolve whether dark mode should be applied
+                  var isDark = false;
+                  if (theme === 'dark') {
+                    isDark = true;
+                  } else if (theme === 'light') {
+                    isDark = false;
+                  } else {
+                    // 'system' or not set: check system preference
+                    try {
+                      isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                    } catch (e) {
+                      isDark = false;
+                    }
+                  }
+
+                  if (isDark) {
+                    document.documentElement.classList.add('dark');
+                  } else {
+                    document.documentElement.classList.remove('dark');
+                  }
+                } catch (_) {}
+
+                if ('serviceWorker' in navigator) {
+                  window.addEventListener('load', function() {
+                    navigator.serviceWorker.register('/sw.js').then(
+                      function(reg) { /* PWA SW registered */ },
+                      function(err) { /* SW registration failed */ }
+                    );
+                  });
+                }
+              })();
             `,
           }}
         />

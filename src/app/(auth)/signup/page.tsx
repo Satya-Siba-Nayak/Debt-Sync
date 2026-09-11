@@ -10,6 +10,7 @@ import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { getRandomSampleName } from '@/lib/utils/random-placeholders';
 import { checkAuthRateLimit } from '@/lib/utils/rate-limit';
 import { ERROR_CODES, formatErrorWithCode, parseAuthError } from '@/lib/constants/error-codes';
+import { ThemeToggle } from '@/components/ui/ThemeToggle';
 
 function SignupContent() {
   const [email, setEmail] = useState('');
@@ -105,7 +106,10 @@ function SignupContent() {
   };
 
   return (
-    <div className="min-h-screen bg-surface flex items-center justify-center p-4 sm:p-6">
+    <div className="min-h-screen bg-surface flex items-center justify-center p-4 sm:p-6 relative">
+      <div className="fixed top-4 right-4 z-50">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-md">
         {/* Brand Header */}
         <div className="text-center mb-8">
