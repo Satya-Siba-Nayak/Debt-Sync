@@ -50,6 +50,18 @@ export async function findProfileByIdentifier(identifier: string): Promise<Profi
       .limit(1);
 
     if (byPhoneLike && byPhoneLike.length > 0) return byPhoneLike[0] as Profile;
+
+    // Handle numbers with or without country code headers (match last 10 digits)
+    if (digits.length >= 10) {
+      const last10 = digits.slice(-10);
+      const { data: byLast10 } = await supabase
+        .from('profiles')
+        .select('*')
+        .ilike('phone', `%${last10}%`)
+        .limit(1);
+
+      if (byLast10 && byLast10.length > 0) return byLast10[0] as Profile;
+    }
   }
 
   // 3. Check secondary_emails array (contains clean email)

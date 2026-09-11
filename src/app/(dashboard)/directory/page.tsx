@@ -158,7 +158,11 @@ export default function PeopleDirectoryPage() {
       const phoneDigits = p.phone ? p.phone.replace(/[^\d]/g, '') : '';
       const phoneMatches = Boolean(
         (p.phone && p.phone.toLowerCase().includes(q)) ||
-        (qDigits.length >= 3 && phoneDigits.includes(qDigits))
+        (qDigits.length >= 3 && (
+          phoneDigits.includes(qDigits) ||
+          qDigits.includes(phoneDigits) ||
+          (qDigits.length >= 10 && phoneDigits.length >= 10 && qDigits.slice(-10) === phoneDigits.slice(-10))
+        ))
       );
 
       return (

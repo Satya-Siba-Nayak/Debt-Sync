@@ -30,7 +30,21 @@ AS $$
          trim(p.phone) = trim(search_term)
          OR regexp_replace(p.phone, '\D', '', 'g') = regexp_replace(search_term, '\D', '', 'g')
          OR regexp_replace(p.phone, '\D', '', 'g') LIKE '%' || regexp_replace(search_term, '\D', '', 'g')
+         OR regexp_replace(search_term, '\D', '', 'g') LIKE '%' || regexp_replace(p.phone, '\D', '', 'g')
+         OR (
+           length(regexp_replace(p.phone, '\D', '', 'g')) >= 10 
+           AND length(regexp_replace(search_term, '\D', '', 'g')) >= 10
+           AND RIGHT(regexp_replace(p.phone, '\D', '', 'g'), 10) = RIGHT(regexp_replace(search_term, '\D', '', 'g'), 10)
+         )
        )
      )
   LIMIT 1;
 $$;
+
+-- OPTIONAL: Normalize existing 10-digit phone numbers in profiles table without country header to '+91 '
+-- Run this if you want existing legacy numbers to have +91 header in the database:
+-- UPDATE public.profiles 
+-- SET phone = '+91 ' || trim(phone) 
+-- WHERE phone IS NOT NULL 
+--   AND phone !~ '^\+' 
+--   AND length(regexp_replace(phone, '\D', '', 'g')) = 10;
