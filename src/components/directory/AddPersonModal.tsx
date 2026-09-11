@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Modal } from '../ui/Modal';
 import { createClient } from '@/lib/supabase/client';
+import { findProfileByIdentifier } from '@/lib/utils/profile-lookup';
 
 interface AddPersonModalProps {
   isOpen: boolean;
@@ -36,12 +37,8 @@ export function AddPersonModal({
       const targetEmail = email.trim().toLowerCase();
       if (!targetEmail) throw new Error('Email is required');
 
-      // Check if user already exists
-      const { data: existingProfile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('email', targetEmail)
-        .single();
+      // Check if user already exists across primary email, secondary emails, or phone
+      const existingProfile = await findProfileByIdentifier(targetEmail) || (phone.trim() ? await findProfileByIdentifier(phone.trim()) : null);
 
       let contactId = existingProfile?.id;
 

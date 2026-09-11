@@ -6,6 +6,7 @@ export type Profile = {
   avatar_url: string | null;
   is_shadow: boolean;
   claimed_at: string | null;
+  secondary_emails?: string[];
   created_at: string;
 };
 

@@ -15,6 +15,7 @@ export interface PersonSummary {
   owedAmount: number;
   status: 'active' | 'settled' | 'pending';
   isShadow?: boolean;
+  secondaryEmails?: string[];
 }
 
 interface PersonCardProps {
@@ -89,6 +90,12 @@ export function PersonCard({ person, currency = 'inr', onRecordDebt }: PersonCar
             </span>
             <span className="truncate">{person.email}</span>
           </div>
+          {person.secondaryEmails && person.secondaryEmails.length > 0 && (
+            <div className="flex items-center gap-2 text-[11px] text-[var(--outline)] pt-0.5">
+              <span className="material-symbols-outlined text-[14px]">school</span>
+              <span className="truncate">{person.secondaryEmails.join(', ')}</span>
+            </div>
+          )}
         </div>
       </div>
 

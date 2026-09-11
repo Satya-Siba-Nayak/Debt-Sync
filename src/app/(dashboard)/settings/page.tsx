@@ -18,6 +18,8 @@ export default function SettingsPage() {
   const [phone, setPhone] = useState('');
   const [currency, setCurrency] = useState('inr');
   const [newPassword, setNewPassword] = useState('');
+  const [secondaryEmails, setSecondaryEmails] = useState<string[]>([]);
+  const [newSecondaryEmail, setNewSecondaryEmail] = useState('');
 
   useEffect(() => {
     async function loadSettings() {
@@ -30,13 +32,14 @@ export default function SettingsPage() {
         // Load profile
         const { data: profile } = await supabase
           .from('profiles')
-          .select('full_name, phone')
+          .select('full_name, phone, secondary_emails')
           .eq('id', user.id)
           .single();
 
         if (profile) {
           setFullName(profile.full_name || '');
           setPhone(profile.phone || '');
+          setSecondaryEmails(profile.secondary_emails || []);
         }
 
         // Load settings
@@ -75,10 +78,30 @@ export default function SettingsPage() {
         .update({
           full_name: fullName.trim(),
           phone: phone.trim() || null,
+          secondary_emails: secondaryEmails,
         })
         .eq('id', user.id);
 
       if (profileError) throw profileError;
+
+      // Merge any shadow profiles that match these secondary emails
+      for (const secEmail of secondaryEmails) {
+        const { data: shadowList } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('email', secEmail.toLowerCase())
+          .eq('is_shadow', true);
+
+        if (shadowList && shadowList.length > 0) {
+          for (const shadow of shadowList) {
+            // Re-point debts from shadow to real user
+            await supabase.from('debts').update({ lender_id: user.id }).eq('lender_id', shadow.id);
+            await supabase.from('debts').update({ borrower_id: user.id }).eq('borrower_id', shadow.id);
+            // Delete shadow profile
+            await supabase.from('profiles').delete().eq('id', shadow.id);
+          }
+        }
+      }
 
       // Update user_settings
       const { error: settingsError } = await supabase
@@ -145,7 +168,7 @@ export default function SettingsPage() {
 
           <div>
             <label className="font-mono text-xs text-[var(--on-surface-variant)] block mb-1">
-              Email Address
+              Primary Email
             </label>
             <input
               type="email"
@@ -153,6 +176,60 @@ export default function SettingsPage() {
               value={email}
               className="w-full px-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/20 bg-[var(--surface-container-low)] text-[var(--on-surface-variant)] text-sm cursor-not-allowed"
             />
+          </div>
+
+          <div>
+            <label className="font-mono text-xs text-[var(--on-surface-variant)] block mb-1">
+              Secondary / Alternate Emails <span className="normal-case text-[var(--outline)]">(College, Work, etc.)</span>
+            </label>
+            <p className="text-[11px] font-mono text-[var(--on-surface-variant)] mb-2">
+              If someone adds you by any of these emails, their transactions will automatically link to your account.
+            </p>
+
+            {/* List of active secondary emails */}
+            {secondaryEmails.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {secondaryEmails.map((sec) => (
+                  <span
+                    key={sec}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[var(--surface-container)] text-[var(--primary)] font-mono text-xs font-semibold border border-[var(--outline-variant)]/30"
+                  >
+                    <span>{sec}</span>
+                    <button
+                      type="button"
+                      onClick={() => setSecondaryEmails(secondaryEmails.filter((e) => e !== sec))}
+                      className="text-[var(--on-surface-variant)] hover:text-[var(--error)] ml-1"
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Add email input */}
+            <div className="flex gap-2">
+              <input
+                type="email"
+                value={newSecondaryEmail}
+                onChange={(e) => setNewSecondaryEmail(e.target.value)}
+                placeholder="e.g. satya@college.edu or satya@work.com"
+                className="flex-1 px-4 py-2 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-sm outline-none focus:border-[var(--primary)]"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const clean = newSecondaryEmail.trim().toLowerCase();
+                  if (clean && !secondaryEmails.includes(clean) && clean !== email.toLowerCase()) {
+                    setSecondaryEmails([...secondaryEmails, clean]);
+                    setNewSecondaryEmail('');
+                  }
+                }}
+                className="px-4 py-2 bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--primary)] font-mono text-xs font-bold rounded-xl border border-[var(--outline-variant)]/30"
+              >
+                + Add
+              </button>
+            </div>
           </div>
 
           <div>

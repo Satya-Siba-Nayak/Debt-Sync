@@ -173,6 +173,12 @@ function PersonDebtDetailContent() {
             <p className="font-mono text-xs text-on-surface-variant mt-1">
               {person?.email} {person?.phone && `• ${person?.phone}`}
             </p>
+            {person?.secondary_emails && person.secondary_emails.length > 0 && (
+              <p className="font-mono text-[11px] text-[var(--outline)] mt-0.5 flex items-center gap-1">
+                <span className="material-symbols-outlined text-[13px]">school</span>
+                <span>Secondary: {person.secondary_emails.join(', ')}</span>
+              </p>
+            )}
           </div>
         </div>
 

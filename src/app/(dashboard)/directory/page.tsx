@@ -41,7 +41,7 @@ export default function PeopleDirectoryPage() {
         .from('contacts')
         .select(`
           contact_id, nickname,
-          profile:profiles!contacts_contact_id_fkey(id, email, full_name, phone, is_shadow)
+          profile:profiles!contacts_contact_id_fkey(id, email, full_name, phone, is_shadow, secondary_emails)
         `)
         .eq('owner_id', user.id);
 
@@ -50,8 +50,8 @@ export default function PeopleDirectoryPage() {
         .from('debts')
         .select(`
           *,
-          lender:profiles!debts_lender_id_fkey(id, email, full_name, phone, is_shadow),
-          borrower:profiles!debts_borrower_id_fkey(id, email, full_name, phone, is_shadow)
+          lender:profiles!debts_lender_id_fkey(id, email, full_name, phone, is_shadow, secondary_emails),
+          borrower:profiles!debts_borrower_id_fkey(id, email, full_name, phone, is_shadow, secondary_emails)
         `)
         .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`);
 
@@ -75,6 +75,7 @@ export default function PeopleDirectoryPage() {
             name: c.nickname || c.profile.full_name || c.profile.email,
             email: c.profile.email,
             phone: c.profile.phone,
+            secondaryEmails: c.profile.secondary_emails || [],
             netBalance: 0,
             lentAmount: 0,
             owedAmount: 0,
@@ -96,6 +97,7 @@ export default function PeopleDirectoryPage() {
             name: otherParty.full_name || otherParty.email,
             email: otherParty.email,
             phone: otherParty.phone,
+            secondaryEmails: (otherParty as any).secondary_emails || [],
             netBalance: 0,
             lentAmount: 0,
             owedAmount: 0,
@@ -155,7 +157,8 @@ export default function PeopleDirectoryPage() {
       return (
         p.name.toLowerCase().includes(q) ||
         p.email.toLowerCase().includes(q) ||
-        (p.phone && p.phone.includes(q))
+        (p.phone && p.phone.includes(q)) ||
+        (p.secondaryEmails && p.secondaryEmails.some((sec) => sec.toLowerCase().includes(q)))
       );
     })
     .sort((a, b) => Math.abs(b.netBalance) - Math.abs(a.netBalance));

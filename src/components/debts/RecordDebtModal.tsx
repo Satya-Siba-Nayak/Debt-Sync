@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { Contact, Profile } from '@/lib/types/database';
 import { formatCurrency, SUPPORTED_CURRENCIES } from '@/lib/utils/currency';
 import { projectDebtGrowth } from '@/lib/utils/interest';
+import { findProfileByIdentifier } from '@/lib/utils/profile-lookup';
 
 interface RecordDebtModalProps {
   isOpen: boolean;
@@ -50,7 +51,7 @@ export function RecordDebtModal({
         .from('contacts')
         .select(`
           id, owner_id, contact_id, nickname, created_at,
-          profile:profiles!contacts_contact_id_fkey(id, email, full_name, phone, is_shadow)
+          profile:profiles!contacts_contact_id_fkey(id, email, full_name, phone, is_shadow, secondary_emails)
         `)
         .eq('owner_id', user.id);
 
@@ -94,12 +95,8 @@ export function RecordDebtModal({
           throw new Error('Please provide an email address for the other party');
         }
 
-        // Check if profile exists with this email
-        const { data: existingProfile } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('email', newPersonEmail.trim().toLowerCase())
-          .single();
+        // Check if profile exists across primary email, secondary emails, or phone
+        const existingProfile = await findProfileByIdentifier(newPersonEmail.trim());
 
         if (existingProfile) {
           targetUserId = existingProfile.id;
