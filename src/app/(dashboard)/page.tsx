@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment } from '@/lib/types/database';
-import { calculateDebtBalance, calculatePortfolioAccrualRates } from '@/lib/utils/interest';
+import { calculateDebtBalance, calculatePortfolioAccrualRates, round2 } from '@/lib/utils/interest';
 import { BalanceCards } from '@/components/dashboard/BalanceCards';
 import { LiveTicker } from '@/components/dashboard/LiveTicker';
 import { CashflowChart } from '@/components/dashboard/CashflowChart';
@@ -106,13 +106,13 @@ export default function GlobalDashboardPage() {
         }
       }
 
-      setTotalLent(lentSum);
-      setTotalOwed(owedSum);
-      setNetPosition(lentSum - owedSum);
+      setTotalLent(round2(lentSum));
+      setTotalOwed(round2(owedSum));
+      setNetPosition(round2(lentSum - owedSum));
       setActiveLentCount(lentCount);
       setActiveOwedCount(owedCount);
-      setTotalInterestAccrued(lenderInterestSum);
-      setBorrowingInterestAccrued(borrowerInterestSum);
+      setTotalInterestAccrued(round2(lenderInterestSum));
+      setBorrowingInterestAccrued(round2(borrowerInterestSum));
 
       const rates = calculatePortfolioAccrualRates(
         allDebts.filter((d) => d.lender_id === user.id)

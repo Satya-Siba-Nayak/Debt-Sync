@@ -18,15 +18,18 @@ export function LiveTicker({
   lendingInterestTotal,
   borrowingInterestTotal,
 }: LiveTickerProps) {
-  const [liveVal, setLiveVal] = useState(totalInterestAccrued);
+  // Financial rule: Sub-cent fractional interest (< 0.01) is strictly 0 in base ledger calculation
+  const sanitizedBase = totalInterestAccrued < 0.01 ? 0 : totalInterestAccrued;
+  const [liveVal, setLiveVal] = useState(sanitizedBase);
   const startTimeRef = useRef<number>(Date.now());
-  const initialBaseRef = useRef<number>(totalInterestAccrued);
+  const initialBaseRef = useRef<number>(sanitizedBase);
 
   // Sync when initial prop changes from fetch
   useEffect(() => {
-    initialBaseRef.current = totalInterestAccrued;
+    const base = totalInterestAccrued < 0.01 ? 0 : totalInterestAccrued;
+    initialBaseRef.current = base;
     startTimeRef.current = Date.now();
-    setLiveVal(totalInterestAccrued);
+    setLiveVal(base);
   }, [totalInterestAccrued]);
 
   // Real-time continuous micro-accrual tick effect based on genuine dailyRate
@@ -49,7 +52,7 @@ export function LiveTicker({
   }, [dailyRate]);
 
   const wholePart = Math.floor(liveVal);
-  // Extract 4 decimal places for high-precision live compounding feedback
+  // Extract 4 decimal places for high-precision live compounding feedback (UI fun visualizer)
   const fractional = (liveVal - wholePart).toFixed(4).substring(2);
 
   const monthlyRate = dailyRate * 30.4375;
@@ -136,7 +139,7 @@ export function LiveTicker({
         ) : (
           <div className="bg-[var(--primary-container)]/50 px-4 py-2 rounded-xl border border-[var(--on-primary-container)]/15 text-center w-full">
             <p className="font-mono text-xs text-[var(--on-primary-container)]">
-              All active loans are currently 0% interest-free.
+              All active loans are currently interest-free or settled.
             </p>
           </div>
         )}

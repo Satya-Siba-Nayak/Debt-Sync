@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment, ActivityLogEntry, Profile } from '@/lib/types/database';
-import { calculateDebtBalance } from '@/lib/utils/interest';
+import { calculateDebtBalance, round2 } from '@/lib/utils/interest';
 import { formatCurrency } from '@/lib/utils/currency';
 import { Chip } from '@/components/ui/Chip';
 import { Avatar } from '@/components/ui/Avatar';
@@ -294,10 +294,10 @@ function PersonDebtDetailContent() {
   const isNetPositive = netBalance > 0;
 
   // 3-way Financial Breakdown: Remaining Principal vs Accrued Interest vs Repaid
-  const totalPaid = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
-  const totalOutstanding = Math.abs(netBalance);
-  const remainingPrincipal = Math.max(0, Math.min(totalPrincipal, totalOutstanding));
-  const accruedInterest = Math.max(0, totalOutstanding - remainingPrincipal);
+  const totalPaid = round2(payments.reduce((s, p) => s + (Number(p.amount) || 0), 0));
+  const totalOutstanding = Math.abs(netBalance) <= 0.005 ? 0 : round2(Math.abs(netBalance));
+  const remainingPrincipal = Math.max(0, Math.min(round2(totalPrincipal), totalOutstanding));
+  const accruedInterest = Math.max(0, round2(totalOutstanding - remainingPrincipal));
   const grandTotal = Math.max(1, totalOutstanding + totalPaid);
 
   const principalPct = Math.round((remainingPrincipal / grandTotal) * 100);

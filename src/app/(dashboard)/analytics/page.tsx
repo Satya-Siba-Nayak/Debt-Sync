@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment } from '@/lib/types/database';
-import { calculateDebtBalance } from '@/lib/utils/interest';
+import { calculateDebtBalance, round2 } from '@/lib/utils/interest';
 import { formatCurrency } from '@/lib/utils/currency';
 import { CashflowChart } from '@/components/dashboard/CashflowChart';
 
@@ -102,7 +102,14 @@ export default function AnalyticsPage() {
     if (d.interest_type === 'compound') compoundInterestTotal += calc.totalAccruedInterest;
   }
 
-  const netPosition = totalLent - totalOwed;
+  totalLent = round2(totalLent);
+  totalOwed = round2(totalOwed);
+  interestAccrued = round2(interestAccrued);
+  simpleInterestTotal = round2(simpleInterestTotal);
+  compoundInterestTotal = round2(compoundInterestTotal);
+  totalRepaymentsReceived = round2(totalRepaymentsReceived);
+  totalRepaymentsMade = round2(totalRepaymentsMade);
+  const netPosition = round2(totalLent - totalOwed);
 
   // Real Repayment Velocity:
   // % of total obligations that have been successfully repaid

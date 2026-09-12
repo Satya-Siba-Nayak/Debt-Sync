@@ -5,7 +5,7 @@ import { Modal } from '../ui/Modal';
 import { createClient } from '@/lib/supabase/client';
 import { Contact, Profile } from '@/lib/types/database';
 import { formatCurrency, SUPPORTED_CURRENCIES } from '@/lib/utils/currency';
-import { projectDebtGrowth } from '@/lib/utils/interest';
+import { projectDebtGrowth, round2 } from '@/lib/utils/interest';
 import { findProfileByIdentifier } from '@/lib/utils/profile-lookup';
 import { checkDebtRequestCooldown, type CooldownCheckResult } from '@/lib/utils/debt-cooldown';
 import { PhoneInput } from '../ui/PhoneInput';
@@ -262,10 +262,10 @@ export function RecordDebtModal({
           created_by: user.id,
           lender_id: lenderId,
           borrower_id: borrowerId,
-          principal: Number(principal),
+          principal: round2(Number(principal)),
           currency,
           interest_type: interestType,
-          interest_rate: interestType === 'none' ? null : Number(interestRate),
+          interest_rate: interestType === 'none' ? null : round2(Number(interestRate)),
           compound_freq: interestType === 'compound' ? compoundFreq : null,
           status: 'pending', // pending approval from other party
           due_date: dueDate ? new Date(dueDate).toISOString() : null,
@@ -432,8 +432,8 @@ export function RecordDebtModal({
                 <div className="relative">
                   <input
                     type="number"
-                    min="1"
-                    step="any"
+                    min="0.01"
+                    step="0.01"
                     value={principal}
                     onChange={(e) => setPrincipal(Number(e.target.value))}
                     required
@@ -548,23 +548,81 @@ export function RecordDebtModal({
               {interestType !== 'none' && (
                 <div className="p-4 bg-[var(--surface-container-low)] rounded-xl border border-[var(--outline-variant)]/20 space-y-4">
                   <div>
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="font-mono text-xs text-[var(--on-surface-variant)]">
-                        Annual Percentage Rate (APR)
-                      </span>
-                      <span className="font-mono text-sm font-bold text-[var(--primary)]">
-                        {interestRate}%
-                      </span>
+                    <div className="flex justify-between items-center mb-2">
+                      <div>
+                        <span className="font-mono text-xs font-bold text-[var(--on-surface-variant)] block">
+                          Annual Percentage Rate (APR)
+                        </span>
+                        <span className="font-mono text-[11px] text-[var(--outline)]">
+                          Slide or type directly
+                        </span>
+                      </div>
+                      <div className="relative w-28">
+                        <input
+                          type="number"
+                          min="0"
+                          max="500"
+                          step="0.1"
+                          value={interestRate === 0 ? '' : interestRate}
+                          placeholder="0.0"
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            if (isNaN(val) || val < 0) {
+                              setInterestRate(0);
+                            } else {
+                              setInterestRate(Math.min(500, Math.round((val + Number.EPSILON) * 100) / 100));
+                            }
+                          }}
+                          className="w-full px-3 py-1.5 rounded-lg border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-sm font-bold text-right pr-7 outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)]/30"
+                        />
+                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 font-mono text-xs font-bold text-[var(--primary)] pointer-events-none">
+                          %
+                        </span>
+                      </div>
                     </div>
-                    <input
-                      type="range"
-                      min="0.5"
-                      max="30"
-                      step="0.5"
-                      value={interestRate}
-                      onChange={(e) => setInterestRate(Number(e.target.value))}
-                      className="w-full accent-[var(--primary)] cursor-pointer"
-                    />
+
+                    <div className="space-y-1">
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        value={Math.min(100, Math.max(0, interestRate))}
+                        onChange={(e) => setInterestRate(Number(e.target.value))}
+                        className="w-full accent-[var(--primary)] cursor-pointer"
+                      />
+                      <div className="flex justify-between font-mono text-[10px] text-[var(--outline)] px-0.5">
+                        <span>0%</span>
+                        <span>25%</span>
+                        <span>50%</span>
+                        <span>75%</span>
+                        <span>100%</span>
+                      </div>
+                    </div>
+
+                    {/* Quick APR Presets */}
+                    <div className="flex flex-wrap items-center gap-1.5 pt-2">
+                      <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--outline)] mr-1">Presets:</span>
+                      {[5, 10, 15, 24, 36, 50, 100].map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => setInterestRate(preset)}
+                          className={`px-2 py-0.5 rounded-md font-mono text-xs transition-all cursor-pointer ${
+                            interestRate === preset
+                              ? 'bg-[var(--primary)] text-[var(--on-primary)] font-bold shadow-xs'
+                              : 'bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-highest)]'
+                          }`}
+                        >
+                          {preset}%
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="text-[11px] font-mono text-[var(--on-surface-variant)]/80 flex items-center gap-1.5 pt-2 border-t border-[var(--outline-variant)]/15 mt-2">
+                      <span className="material-symbols-outlined text-[14px] text-[var(--primary)]">info</span>
+                      <span>Interest accumulates in full 2-decimal currency units (&ge; 0.01).</span>
+                    </div>
                   </div>
 
                   {interestType === 'compound' && (

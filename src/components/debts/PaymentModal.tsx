@@ -5,6 +5,7 @@ import { Modal } from '../ui/Modal';
 import { createClient } from '@/lib/supabase/client';
 import { Debt } from '@/lib/types/database';
 import { formatCurrency } from '@/lib/utils/currency';
+import { round2 } from '@/lib/utils/interest';
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -21,7 +22,7 @@ export function PaymentModal({
   currentBalance,
   onPaymentRecorded,
 }: PaymentModalProps) {
-  const [amount, setAmount] = useState<number>(Math.min(currentBalance, 500));
+  const [amount, setAmount] = useState<number>(round2(Math.min(currentBalance, 500)));
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -49,8 +50,9 @@ export function PaymentModal({
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('User not logged in');
 
-      const paymentAmount = Number(amount);
-      if (paymentAmount <= 0) throw new Error('Payment amount must be greater than 0');
+      const rawNum = Number(amount);
+      if (isNaN(rawNum) || rawNum <= 0) throw new Error('Payment amount must be greater than 0');
+      const paymentAmount = round2(rawNum);
 
       const userIsLender = user.id === debt.lender_id;
       const isVerified = userIsLender;
@@ -69,8 +71,8 @@ export function PaymentModal({
 
       if (paymentError) throw paymentError;
 
-      // If lender recorded payment and it clears the balance, settle immediately
-      if (isVerified && paymentAmount >= currentBalance) {
+      // If lender recorded payment and it clears the balance (within 0.005 threshold), settle immediately
+      if (isVerified && paymentAmount >= currentBalance - 0.005) {
         await supabase
           .from('debts')
           .update({
@@ -90,7 +92,7 @@ export function PaymentModal({
           currency: debt.currency || 'inr',
           note: note.trim(),
           is_verified: isVerified,
-          remaining: isVerified ? Math.max(0, currentBalance - paymentAmount) : currentBalance,
+          remaining: isVerified ? Math.max(0, round2(currentBalance - paymentAmount)) : round2(currentBalance),
         },
       });
 
@@ -109,7 +111,7 @@ export function PaymentModal({
       isOpen={isOpen}
       onClose={onClose}
       title={isLender ? 'Record Received Payment' : 'Report Repayment'}
-      subtitle={`Remaining outstanding balance: ${formatCurrency(currentBalance, debt.currency || 'inr', { showDecimals: true })}`}
+      subtitle={`Remaining outstanding balance: ${formatCurrency(round2(currentBalance), debt.currency || 'inr', { showDecimals: true })}`}
       maxWidth="max-w-md"
     >
       <form onSubmit={handlePayment} className="space-y-4">
@@ -137,16 +139,16 @@ export function PaymentModal({
             </label>
             <button
               type="button"
-              onClick={() => setAmount(currentBalance)}
+              onClick={() => setAmount(round2(currentBalance))}
               className="font-mono text-xs text-[var(--primary)] font-bold hover:underline"
             >
-              Pay Full ({formatCurrency(currentBalance, debt.currency || 'inr')})
+              Pay Full ({formatCurrency(round2(currentBalance), debt.currency || 'inr', { showDecimals: true })})
             </button>
           </div>
           <input
             type="number"
-            min="1"
-            step="any"
+            min="0.01"
+            step="0.01"
             required
             value={amount}
             onChange={(e) => setAmount(Number(e.target.value))}

@@ -1,16 +1,26 @@
 import { Debt, Payment } from '../types/database';
 
+/**
+ * Standard financial rounding to 2 decimal places (cents / paise).
+ */
+export function round2(value: number): number {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
 export interface DebtBalanceCalculation {
   principal: number;
-  totalAccruedInterest: number;
+  totalAccruedInterest: number; // 2-decimal rounded for actual ledger calculations; 0 if < 0.01
+  rawAccruedInterest: number;   // High-precision float for live continuous compounding ticker animations
   totalPaid: number;
   pendingVerificationPaid?: number;
-  currentBalance: number;
+  currentBalance: number;       // 2-decimal rounded; strictly 0 if settled or balance cleared
   isOverdue?: boolean;
 }
 
 /**
  * Calculates current outstanding balance including simple or compound interest.
+ * Financial Rule: Only interest accrued at or above 2 decimal places (>= 0.01) is added to actual calculations.
+ *
  * @param debt The debt record
  * @param payments List of payments made against this debt
  * @param asOfDate Date up to which to compute interest (default: now)
@@ -20,31 +30,49 @@ export function calculateDebtBalance(
   payments: Payment[] = [],
   asOfDate: Date = new Date()
 ): DebtBalanceCalculation {
-  const principal = Number(debt.principal) || 0;
+  const principal = round2(Number(debt.principal) || 0);
   
   // Only verified payments clear the active balance; unverified payments are pending verification
   const verifiedPayments = payments.filter((p) => (p as any).is_verified !== false);
   const pendingPayments = payments.filter((p) => (p as any).is_verified === false);
   
-  const totalPaid = verifiedPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-  const pendingVerificationPaid = pendingPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const totalPaid = round2(verifiedPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0));
+  const pendingVerificationPaid = round2(pendingPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0));
 
   // Declined agreements are void: balance is 0 and no interest accrues
   if (debt.status === 'declined') {
     return {
       principal,
       totalAccruedInterest: 0,
+      rawAccruedInterest: 0,
       totalPaid,
       pendingVerificationPaid,
       currentBalance: 0,
     };
   }
 
+  // Settled agreements are completed: balance is 0 and interest is frozen at settled amount
+  if (debt.status === 'settled') {
+    const interestPaid = Math.max(0, round2(totalPaid - principal));
+    return {
+      principal,
+      totalAccruedInterest: interestPaid,
+      rawAccruedInterest: interestPaid,
+      totalPaid,
+      pendingVerificationPaid,
+      currentBalance: 0,
+    };
+  }
+
+  // Interest-free agreements
   if (debt.interest_type === 'none' || !debt.interest_rate || debt.interest_rate <= 0) {
-    const currentBalance = Math.max(0, principal - totalPaid);
+    let currentBalance = Math.max(0, round2(principal - totalPaid));
+    if (currentBalance < 0.01) currentBalance = 0;
+
     return {
       principal,
       totalAccruedInterest: 0,
+      rawAccruedInterest: 0,
       totalPaid,
       pendingVerificationPaid,
       currentBalance,
@@ -76,12 +104,24 @@ export function calculateDebtBalance(
     totalWithInterest = principal * Math.pow(1 + annualRate / n, n * timeInYears);
   }
 
-  const totalAccruedInterest = Math.max(0, totalWithInterest - principal);
-  const currentBalance = Math.max(0, totalWithInterest - totalPaid);
+  const rawAccruedInterest = Math.max(0, totalWithInterest - principal);
+  const roundedInterest = round2(rawAccruedInterest);
+
+  // 2-DECIMAL PLACES RULE:
+  // If interest is less than 0.01 (sub-cent / sub-paise fractional accrual), it has NOT materialized
+  // into actual currency and is 0 in actual calculations. Only when >= 0.01 is it added to balances.
+  const effectiveInterest = roundedInterest >= 0.01 ? roundedInterest : 0;
+
+  let currentBalance = Math.max(0, round2(principal + effectiveInterest - totalPaid));
+  // Any residual under 0.01 is treated as settled / cleared
+  if (currentBalance < 0.01) {
+    currentBalance = 0;
+  }
 
   return {
     principal,
-    totalAccruedInterest,
+    totalAccruedInterest: effectiveInterest,
+    rawAccruedInterest,
     totalPaid,
     pendingVerificationPaid,
     currentBalance,
@@ -174,22 +214,23 @@ export function allocateBulkPayment(
   const allocations = [];
 
   for (const item of sorted) {
-    if (remainingPayment <= 0 || item.currentBalance <= 0) {
+    const itemBalance = round2(item.currentBalance);
+    if (remainingPayment <= 0 || itemBalance <= 0) {
       allocations.push({
         debtId: item.debt.id,
         amountToPay: 0,
-        remainingBalance: item.currentBalance,
+        remainingBalance: itemBalance,
       });
       continue;
     }
 
-    const payForThisDebt = Math.min(remainingPayment, item.currentBalance);
-    remainingPayment -= payForThisDebt;
+    const payForThisDebt = round2(Math.min(remainingPayment, itemBalance));
+    remainingPayment = round2(remainingPayment - payForThisDebt);
 
     allocations.push({
       debtId: item.debt.id,
       amountToPay: payForThisDebt,
-      remainingBalance: item.currentBalance - payForThisDebt,
+      remainingBalance: round2(Math.max(0, itemBalance - payForThisDebt)),
     });
   }
 
