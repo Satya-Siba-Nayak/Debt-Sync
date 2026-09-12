@@ -2,9 +2,12 @@
 
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { SUPPORTED_CURRENCIES } from '@/lib/utils/currency';
+import { formatCurrency, SUPPORTED_CURRENCIES } from '@/lib/utils/currency';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { PhoneInput } from '@/components/ui/PhoneInput';
+import { Modal } from '@/components/ui/Modal';
+import { calculateDebtBalance, round2 } from '@/lib/utils/interest';
+import { exportUserDataToCSV } from '@/lib/utils/export-csv';
 import { COUNTRY_CODES, CountryCode } from '@/lib/constants/country-codes';
 import { checkIdentifierConflict } from '@/lib/utils/profile-lookup';
 import { isSameEmail } from '@/lib/utils/email-normalize';
@@ -47,6 +50,18 @@ export default function SettingsPage() {
   const [isCropModalOpen, setIsCropModalOpen] = useState(false);
   const [showAllPresets, setShowAllPresets] = useState(false);
   const [showAdvancedApp, setShowAdvancedApp] = useState(false);
+
+  // Account deletion & CSV export states
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const [debtObligations, setDebtObligations] = useState<{
+    activeCount: number;
+    pendingCount: number;
+    totalBalance: number;
+    canDelete: boolean;
+  }>({ activeCount: 0, pendingCount: 0, totalBalance: 0, canDelete: false });
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -136,6 +151,46 @@ export default function SettingsPage() {
           setDefaultCountryCode(localCode);
         }
 
+        // Load user debts to evaluate account deletion eligibility
+        const { data: userDebts } = await supabase
+          .from('debts')
+          .select('*')
+          .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`);
+
+        const debtIds = (userDebts || []).map((d: any) => d.id);
+        let userPayments: any[] = [];
+        if (debtIds.length > 0) {
+          const { data: pData } = await supabase
+            .from('payments')
+            .select('*')
+            .in('debt_id', debtIds);
+          userPayments = pData || [];
+        }
+
+        let activeDebtCount = 0;
+        let pendingDebtCount = 0;
+        let totalOutstanding = 0;
+
+        for (const d of (userDebts || [])) {
+          if (d.status === 'pending') {
+            pendingDebtCount++;
+          } else if (d.status === 'active' || d.status === 'disputed') {
+            const paymentsForDebt = userPayments.filter((p: any) => p.debt_id === d.id);
+            const calc = calculateDebtBalance(d, paymentsForDebt);
+            if (calc.currentBalance > 0.01) {
+              activeDebtCount++;
+              totalOutstanding += calc.currentBalance;
+            }
+          }
+        }
+
+        setDebtObligations({
+          activeCount: activeDebtCount,
+          pendingCount: pendingDebtCount,
+          totalBalance: round2(totalOutstanding),
+          canDelete: activeDebtCount === 0 && pendingDebtCount === 0 && totalOutstanding <= 0.01,
+        });
+
       } catch (err) {
         console.error('Error loading settings:', err);
       } finally {
@@ -181,12 +236,16 @@ export default function SettingsPage() {
       const user = await getCurrentUserFast(supabase);
       if (!user) throw new Error('Not authenticated');
 
+      const cleanPhone = phone.trim();
+      const phoneDigits = cleanPhone.replace(/[^\d]/g, '');
+      if (!cleanPhone || phoneDigits.length < 7) {
+        throw new Error('Primary phone number is compulsory. Please enter your phone number.');
+      }
+
       // Check phone uniqueness before saving
-      if (phone.trim()) {
-        const phoneConflict = await checkIdentifierConflict(undefined, phone.trim(), user.id);
-        if (phoneConflict.hasConflict) {
-          throw new Error(phoneConflict.message || 'This phone number is already registered to another account.');
-        }
+      const phoneConflict = await checkIdentifierConflict(undefined, cleanPhone, user.id);
+      if (phoneConflict.hasConflict) {
+        throw new Error(phoneConflict.message || 'This phone number is already registered to another account.');
       }
 
       // Update profile
@@ -282,6 +341,76 @@ export default function SettingsPage() {
       setError(err.message || 'Failed to update settings');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleExportCSV = async () => {
+    if (!userId) return;
+    setExportingCsv(true);
+    setMessage('');
+    setError('');
+    try {
+      const res = await exportUserDataToCSV(supabase, userId);
+      if (!res.success) {
+        setError(res.error || 'Failed to export CSV archive');
+      } else {
+        setMessage('Financial archive CSV downloaded successfully!');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Export error');
+    } finally {
+      setExportingCsv(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmationText.trim() !== 'DELETE MY ACCOUNT') {
+      setError('Please type "DELETE MY ACCOUNT" exactly to confirm.');
+      return;
+    }
+
+    setDeletingAccount(true);
+    setError('');
+    setMessage('');
+
+    try {
+      // 1. Try secure RPC delete_user_account
+      let rpcSucceeded = false;
+      try {
+        const { data: rpcRes, error: rpcErr } = await supabase.rpc('delete_user_account');
+        if (!rpcErr && rpcRes && rpcRes.success) {
+          rpcSucceeded = true;
+        } else if (rpcRes && rpcRes.error) {
+          throw new Error(rpcRes.error);
+        }
+      } catch (rpcEx: any) {
+        if (rpcEx.message?.includes('Account deletion blocked')) {
+          throw rpcEx;
+        }
+      }
+
+      // 2. Client fallback cleanup if RPC not deployed or partial
+      if (!rpcSucceeded && userId) {
+        await supabase.from('user_settings').delete().eq('user_id', userId);
+        await supabase.from('contacts').delete().or(`owner_id.eq.${userId},contact_id.eq.${userId}`);
+        await supabase.from('profiles').delete().eq('id', userId);
+      }
+
+      // 3. Clear all client storage & session
+      await supabase.auth.signOut();
+      if (typeof window !== 'undefined') {
+        localStorage.clear();
+        sessionStorage.clear();
+        document.cookie = 'debtsync_theme=; path=/; max-age=0';
+        document.cookie = 'sb-access-token=; path=/; max-age=0';
+        document.cookie = 'sb-refresh-token=; path=/; max-age=0';
+      }
+
+      // 4. Redirect to login with deleted flag
+      window.location.href = '/login?deleted=true';
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete account');
+      setDeletingAccount(false);
     }
   };
 
@@ -624,13 +753,14 @@ export default function SettingsPage() {
           </div>
 
           <div>
-            <label className="font-mono text-xs text-[var(--on-surface-variant)] block mb-1">
-              Phone Number <span className="normal-case text-[var(--outline)]">(for peer directory contact)</span>
+            <label className="font-mono text-xs text-[var(--on-surface-variant)] block mb-1 font-semibold">
+              Phone Number <span className="normal-case text-[var(--primary)] text-[11px] font-semibold">(compulsory primary contact)</span>
             </label>
             <PhoneInput
               value={phone}
               onChange={setPhone}
               defaultCountryCode={defaultCountryCode}
+              required
             />
           </div>
         </div>
@@ -833,6 +963,178 @@ export default function SettingsPage() {
           </button>
         </div>
       </form>
+
+      {/* Financial Data Export */}
+      <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 md:p-8 border border-[var(--outline-variant)]/30 shadow-sm space-y-4">
+        <div>
+          <h3 className="font-mono text-xs uppercase tracking-wider font-semibold text-[var(--on-surface-variant)] flex items-center gap-2">
+            <span className="material-symbols-outlined text-[18px] text-[var(--primary)]">download</span>
+            Financial Data Export
+          </h3>
+          <p className="text-xs text-[var(--on-surface-variant)] mt-1">
+            Download your complete financial archive including all debt agreements, repayment logs, interest calculations, and contacts as an RFC-4180 CSV spreadsheet.
+          </p>
+        </div>
+
+        <div className="pt-2">
+          <button
+            type="button"
+            onClick={handleExportCSV}
+            disabled={exportingCsv || !userId}
+            className="px-4 py-2.5 rounded-xl bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] border border-[var(--outline-variant)]/40 font-mono text-xs font-bold inline-flex items-center gap-2 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+          >
+            <span className="material-symbols-outlined text-[18px]">
+              {exportingCsv ? 'hourglass_top' : 'file_download'}
+            </span>
+            <span>{exportingCsv ? 'Generating Archive...' : 'Export Complete Ledger to CSV'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Danger Zone: Restricted Account Deletion */}
+      <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 md:p-8 border border-[var(--error)]/30 shadow-sm space-y-4">
+        <div className="flex items-center gap-2">
+          <span className="material-symbols-outlined text-[20px] text-[var(--error)]">
+            warning
+          </span>
+          <h3 className="font-mono text-xs uppercase tracking-wider font-bold text-[var(--error)]">
+            Danger Zone &bull; Account Deletion
+          </h3>
+        </div>
+
+        <p className="text-xs text-[var(--on-surface-variant)] leading-relaxed">
+          Permanent account deletion is strictly restricted to protect financial accountability. An account may only be deleted when <strong>all debt obligations are completely settled or cleared to a zero balance</strong>.
+        </p>
+
+        {!debtObligations.canDelete ? (
+          <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 space-y-2">
+            <div className="flex items-center gap-2 font-mono text-xs font-bold uppercase">
+              <span className="material-symbols-outlined text-[18px]">lock</span>
+              <span>Account Deletion Restricted</span>
+            </div>
+            <p className="text-xs leading-relaxed">
+              You currently have outstanding financial obligations that must be resolved first:
+            </p>
+            <ul className="text-xs list-disc list-inside space-y-1 font-mono">
+              {debtObligations.activeCount > 0 && (
+                <li>
+                  {debtObligations.activeCount} active debt obligation(s) with an unsettled balance of{' '}
+                  <span className="font-bold">{formatCurrency(debtObligations.totalBalance, currency)}</span>.
+                </li>
+              )}
+              {debtObligations.pendingCount > 0 && (
+                <li>
+                  {debtObligations.pendingCount} pending agreement request(s) awaiting confirmation or decline.
+                </li>
+              )}
+            </ul>
+            <p className="text-[11px] text-amber-700 dark:text-amber-400 pt-1">
+              Please settle all debts or decline pending agreements to unlock account deletion.
+            </p>
+          </div>
+        ) : (
+          <div className="p-4 rounded-xl bg-green-500/10 border border-green-500/30 text-green-700 dark:text-green-400 space-y-2">
+            <div className="flex items-center gap-2 font-mono text-xs font-bold uppercase">
+              <span className="material-symbols-outlined text-[18px]">check_circle</span>
+              <span>All Obligations Settled</span>
+            </div>
+            <p className="text-xs">
+              Your debt balance is completely zero and all agreements are settled. You are eligible to delete your account.
+            </p>
+          </div>
+        )}
+
+        <div className="pt-2 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            disabled={!debtObligations.canDelete || loading}
+            onClick={() => {
+              setDeleteConfirmationText('');
+              setIsDeleteModalOpen(true);
+            }}
+            className="px-4 py-2.5 rounded-xl bg-[var(--error)]/10 text-[var(--error)] hover:bg-[var(--error)] hover:text-white border border-[var(--error)]/40 font-mono text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer inline-flex items-center gap-2 shadow-xs"
+          >
+            <span className="material-symbols-outlined text-[18px]">delete_forever</span>
+            <span>Delete Account</span>
+          </button>
+          {!debtObligations.canDelete && (
+            <span className="text-[11px] font-mono text-[var(--outline)]">
+              Locked until all active &amp; pending debts are resolved
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Account Deletion Confirmation Modal */}
+      <Modal
+        isOpen={isDeleteModalOpen}
+        onClose={() => {
+          if (!deletingAccount) setIsDeleteModalOpen(false);
+        }}
+        title="Delete DebtSync Account"
+        subtitle="Irreversible action: This will permanently wipe your account"
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4">
+          <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-[var(--error)] space-y-1.5">
+            <div className="flex items-center gap-2 font-mono text-xs font-bold uppercase">
+              <span className="material-symbols-outlined text-[18px]">warning</span>
+              <span>Irreversible Data Deletion</span>
+            </div>
+            <p className="text-xs leading-relaxed">
+              This action cannot be undone. All your profile data, contact directory, settings, and settlement records will be permanently erased.
+            </p>
+          </div>
+
+          <div className="p-3 rounded-xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/20 space-y-2">
+            <p className="text-xs font-mono font-semibold text-[var(--on-surface)]">
+              Before you delete:
+            </p>
+            <button
+              type="button"
+              onClick={handleExportCSV}
+              disabled={exportingCsv}
+              className="w-full py-2 px-3 rounded-lg bg-[var(--surface-container-high)] hover:bg-[var(--surface-container-highest)] text-xs font-mono font-bold text-[var(--primary)] border border-[var(--primary)]/30 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[16px]">download</span>
+              <span>{exportingCsv ? 'Downloading...' : 'Export Financial Ledger to CSV First'}</span>
+            </button>
+          </div>
+
+          <div className="space-y-1.5 pt-2">
+            <label className="font-mono text-xs text-[var(--on-surface-variant)] block">
+              Type <strong className="text-[var(--error)] select-all">DELETE MY ACCOUNT</strong> to confirm:
+            </label>
+            <input
+              type="text"
+              value={deleteConfirmationText}
+              onChange={(e) => setDeleteConfirmationText(e.target.value)}
+              placeholder="DELETE MY ACCOUNT"
+              disabled={deletingAccount}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--error)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-sm font-mono outline-none focus:border-[var(--error)] focus:ring-2 focus:ring-[var(--error)]/20"
+            />
+          </div>
+
+          <div className="pt-3 border-t border-[var(--outline-variant)]/20 flex gap-3">
+            <button
+              type="button"
+              disabled={deletingAccount}
+              onClick={() => setIsDeleteModalOpen(false)}
+              className="flex-1 py-2.5 px-4 rounded-xl border border-[var(--outline-variant)]/40 font-mono text-xs font-semibold text-[var(--on-surface)] hover:bg-[var(--surface-container)] cursor-pointer disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={deleteConfirmationText.trim() !== 'DELETE MY ACCOUNT' || deletingAccount}
+              onClick={handleDeleteAccount}
+              className="flex-1 py-2.5 px-4 rounded-xl bg-[var(--error)] text-white font-mono text-xs font-bold hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer shadow-sm"
+            >
+              {deletingAccount ? 'Deleting...' : 'Permanently Delete'}
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {userId && (
         <AvatarCropModal

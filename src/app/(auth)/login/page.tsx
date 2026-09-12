@@ -16,16 +16,19 @@ function LoginContent() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextUrl = searchParams.get('next') || '/';
+  const isDeleted = searchParams.get('deleted') === 'true';
+  const [message, setMessage] = useState(
+    isDeleted ? 'Your DebtSync account and personal records have been permanently deleted.' : ''
+  );
   const [error, setError] = useState('');
   const [emailError, setEmailError] = useState('');
   const [emailRecommendation, setEmailRecommendation] = useState<{
     type: 'secondary' | 'not_found' | 'shadow';
     primaryEmail?: string;
   } | null>(null);
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const nextUrl = searchParams.get('next') || '/';
   const supabase = createClient();
 
   const handlePasswordLogin = async (e: React.FormEvent) => {

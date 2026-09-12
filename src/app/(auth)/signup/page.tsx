@@ -44,9 +44,22 @@ function SignupContent() {
     }
 
     const cleanEmail = email.trim().toLowerCase();
+    const cleanPhone = phone.trim();
+    const phoneDigits = cleanPhone.replace(/[^\d]/g, '');
+
+    if (!cleanPhone || phoneDigits.length < 7) {
+      setError(
+        formatErrorWithCode(
+          'Primary phone number is compulsory. Please enter your phone number.',
+          ERROR_CODES.AUTH_INVALID_PHONE
+        )
+      );
+      setLoading(false);
+      return;
+    }
 
     // Check for duplicate accounts (taking Gmail aliases and phone into account)
-    const conflict = await checkIdentifierConflict(cleanEmail, phone.trim() || undefined);
+    const conflict = await checkIdentifierConflict(cleanEmail, cleanPhone);
     if (conflict.hasConflict) {
       const code = conflict.message?.toLowerCase().includes('phone')
         ? ERROR_CODES.AUTH_PHONE_EXISTS
@@ -186,12 +199,13 @@ function SignupContent() {
 
             <div>
               <label className="font-mono text-xs tracking-wider uppercase text-on-surface-variant block mb-1.5 font-semibold">
-                Phone Number <span className="normal-case text-outline text-[11px]">(optional, for directory)</span>
+                Phone Number <span className="normal-case text-primary text-[11px] font-semibold">(compulsory primary contact)</span>
               </label>
               <PhoneInput
                 value={phone}
                 onChange={setPhone}
                 defaultCountryCode="+91"
+                required
               />
             </div>
 

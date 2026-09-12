@@ -5,7 +5,7 @@ import { Modal } from '../ui/Modal';
 import { createClient } from '@/lib/supabase/client';
 import { Contact, Profile } from '@/lib/types/database';
 import { formatCurrency, SUPPORTED_CURRENCIES } from '@/lib/utils/currency';
-import { projectDebtGrowth, round2 } from '@/lib/utils/interest';
+import { projectDebtGrowth, round2, calculateDebtBalance } from '@/lib/utils/interest';
 import { findProfileByIdentifier } from '@/lib/utils/profile-lookup';
 import { checkDebtRequestCooldown, type CooldownCheckResult } from '@/lib/utils/debt-cooldown';
 import { PhoneInput } from '../ui/PhoneInput';
@@ -52,6 +52,7 @@ export function RecordDebtModal({
   const [interestType, setInterestType] = useState<'none' | 'simple' | 'compound'>('simple');
   const [interestRate, setInterestRate] = useState<number>(5.0);
   const [compoundFreq, setCompoundFreq] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('monthly');
+  const [transactionDate, setTransactionDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [dueDate, setDueDate] = useState('');
   const [notes, setNotes] = useState('');
 
@@ -194,6 +195,25 @@ export function RecordDebtModal({
   );
   const finalProjection = projection[projection.length - 1] || { total: principal, interest: 0 };
 
+  // Calculate elapsed days & backdated accrued interest from origination date to today
+  const now = new Date();
+  const originationDate = transactionDate ? new Date(transactionDate + 'T12:00:00Z') : now;
+  const daysElapsed = Math.max(
+    0,
+    Math.floor((now.getTime() - originationDate.getTime()) / (1000 * 60 * 60 * 24))
+  );
+
+  const backdatedDebtMock: any = {
+    principal: round2(Number(principal) || 0),
+    currency,
+    interest_type: interestType,
+    interest_rate: interestType === 'none' ? null : round2(Number(interestRate)),
+    compound_freq: interestType === 'compound' ? compoundFreq : null,
+    status: 'active',
+    created_at: originationDate.toISOString(),
+  };
+  const backdatedCalc = calculateDebtBalance(backdatedDebtMock, [], now);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -207,17 +227,19 @@ export function RecordDebtModal({
 
       // If user wants to add a new person inline
       if (isAddingNewPerson) {
-        if (!newPersonEmail.trim() && !newPersonPhone.trim()) {
-          throw new Error('Please provide an email or phone number for the other party');
+        const cleanPhone = newPersonPhone.trim();
+        const phoneDigits = cleanPhone.replace(/[^\d]/g, '');
+        if (!cleanPhone || phoneDigits.length < 7) {
+          throw new Error('Primary phone number is compulsory when creating a new counterparty.');
         }
 
         const targetEmail = newPersonEmail.trim().toLowerCase();
-        const targetPhone = newPersonPhone.trim();
+        const targetPhone = cleanPhone;
 
         // Check if profile exists across primary email, secondary emails, or phone
         const existingProfile = targetEmail
           ? await findProfileByIdentifier(targetEmail)
-          : (targetPhone ? await findProfileByIdentifier(targetPhone) : null);
+          : await findProfileByIdentifier(targetPhone);
 
         if (existingProfile) {
           targetUserId = existingProfile.id;
@@ -269,6 +291,7 @@ export function RecordDebtModal({
           compound_freq: interestType === 'compound' ? compoundFreq : null,
           status: 'pending', // pending approval from other party
           due_date: dueDate ? new Date(dueDate).toISOString() : null,
+          created_at: originationDate.toISOString(),
           notes: notes.trim() || null,
         })
         .select()
@@ -417,7 +440,8 @@ export function RecordDebtModal({
                     value={newPersonPhone}
                     onChange={setNewPersonPhone}
                     defaultCountryCode={defaultCountryCode}
-                    placeholder="Phone Number (optional)"
+                    placeholder="Phone Number (compulsory primary contact)"
+                    required
                   />
                 </div>
               )}
@@ -646,6 +670,33 @@ export function RecordDebtModal({
               )}
             </div>
 
+            {/* Origination / Transaction Date (Supports Backdating) */}
+            <div>
+              <div className="flex justify-between items-center mb-1.5">
+                <label className="font-mono text-xs tracking-wider uppercase text-[var(--on-surface-variant)] block font-semibold">
+                  Origination / Transaction Date
+                </label>
+                {daysElapsed > 0 && (
+                  <span className="font-mono text-[10px] font-bold text-[var(--secondary)] px-2 py-0.5 rounded-md bg-[var(--secondary)]/10 border border-[var(--secondary)]/20">
+                    Backdated: {daysElapsed} day{daysElapsed > 1 ? 's' : ''} ago
+                  </span>
+                )}
+              </div>
+              <input
+                type="date"
+                value={transactionDate}
+                max={new Date().toISOString().split('T')[0]}
+                onChange={(e) => setTransactionDate(e.target.value)}
+                required
+                className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-sm outline-none focus:border-[var(--primary)] font-mono"
+              />
+              <p className="text-[11px] font-mono text-[var(--on-surface-variant)] mt-1">
+                {daysElapsed > 0
+                  ? `Interest will automatically calculate for the ${daysElapsed} elapsed day(s) since this transaction occurred.`
+                  : 'Lending or borrowing today. Interest starts accruing from today.'}
+              </p>
+            </div>
+
             {/* Expected Due Date */}
             <div>
               <label className="font-mono text-xs tracking-wider uppercase text-[var(--on-surface-variant)] block mb-1.5">
@@ -683,6 +734,28 @@ export function RecordDebtModal({
               <div className="font-numeric-ticker text-2xl font-bold text-[var(--primary)] mt-1">
                 {formatCurrency(finalProjection.total, currency, { showDecimals: true })}
               </div>
+
+              {/* Backdated Accrual Callout */}
+              {daysElapsed > 0 && (
+                <div className="my-3 p-3.5 rounded-xl bg-[var(--surface-container-high)]/90 border border-[var(--secondary)]/30 space-y-2">
+                  <div className="flex justify-between items-center text-xs font-mono">
+                    <span className="text-[var(--on-surface-variant)]">Backdated Elapsed:</span>
+                    <span className="font-bold text-[var(--secondary)]">{daysElapsed} day{daysElapsed > 1 ? 's' : ''}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs font-mono">
+                    <span className="text-[var(--on-surface-variant)]">Already Accrued Interest:</span>
+                    <span className="font-bold text-[var(--on-surface)]">
+                      {formatCurrency(backdatedCalc.totalAccruedInterest, currency, { showDecimals: true })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs font-mono pt-1.5 border-t border-[var(--outline-variant)]/20">
+                    <span className="font-bold text-[var(--on-surface)]">Current Effective Balance:</span>
+                    <span className="font-bold font-numeric-ticker text-sm text-[var(--primary)]">
+                      {formatCurrency(backdatedCalc.currentBalance, currency, { showDecimals: true })}
+                    </span>
+                  </div>
+                </div>
+              )}
 
               {/* Mini Sparkline Chart Preview */}
               <div className="h-28 w-full my-4 flex items-end gap-1.5 pt-4 pb-1 border-b border-[var(--outline-variant)]/20">

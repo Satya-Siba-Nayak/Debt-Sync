@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Debt } from '@/lib/types/database';
 import { formatCurrency } from '@/lib/utils/currency';
+import { calculateDebtBalance } from '@/lib/utils/interest';
 import { Avatar } from '@/components/ui/Avatar';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
 import Link from 'next/link';
@@ -277,12 +278,36 @@ function AcceptDebtContent() {
               </div>
             )}
 
-            <div className="flex justify-between">
+            <div className="flex justify-between items-center">
               <span className="text-on-surface-variant">Origination Date</span>
-              <span className="text-on-surface">
-                {new Date(debt.created_at).toLocaleDateString()}
+              <span className="text-on-surface flex items-center gap-1.5 font-bold">
+                <span>{new Date(debt.created_at).toLocaleDateString()}</span>
+                {Math.max(0, Math.floor((new Date().getTime() - new Date(debt.created_at).getTime()) / (1000 * 60 * 60 * 24))) > 0 && (
+                  <span className="text-[10px] font-bold text-secondary px-1.5 py-0.5 rounded bg-secondary/10 border border-secondary/20">
+                    {Math.max(0, Math.floor((new Date().getTime() - new Date(debt.created_at).getTime()) / (1000 * 60 * 60 * 24)))} day{Math.max(0, Math.floor((new Date().getTime() - new Date(debt.created_at).getTime()) / (1000 * 60 * 60 * 24))) > 1 ? 's' : ''} ago
+                  </span>
+                )}
               </span>
             </div>
+
+            {(() => {
+              const daysAgo = Math.max(0, Math.floor((new Date().getTime() - new Date(debt.created_at).getTime()) / (1000 * 60 * 60 * 24)));
+              if (daysAgo <= 0 || debt.interest_type === 'none') return null;
+              const calc = calculateDebtBalance(debt, []);
+              if (calc.totalAccruedInterest <= 0) return null;
+              return (
+                <>
+                  <div className="flex justify-between text-secondary font-bold">
+                    <span>Accrued Interest to Date ({daysAgo}d)</span>
+                    <span>+{formatCurrency(calc.totalAccruedInterest, debt.currency || 'inr')}</span>
+                  </div>
+                  <div className="flex justify-between text-primary font-bold pt-1.5 border-t border-outline-variant/10">
+                    <span>Current Effective Balance</span>
+                    <span>{formatCurrency(calc.currentBalance, debt.currency || 'inr')}</span>
+                  </div>
+                </>
+              );
+            })()}
 
             {debt.notes && (
               <div className="pt-2 border-t border-outline-variant/10">

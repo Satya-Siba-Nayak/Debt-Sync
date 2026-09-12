@@ -48,12 +48,18 @@ export function AddPersonModal({
       const targetEmail = email.trim().toLowerCase();
       if (!targetEmail) throw new Error('Email is required');
 
+      const cleanPhone = phone.trim();
+      const phoneDigits = cleanPhone.replace(/[^\d]/g, '');
+      if (!cleanPhone || phoneDigits.length < 7) {
+        throw new Error('Primary phone number is compulsory for every person/counterparty.');
+      }
+
       if (targetEmail === user.email?.toLowerCase()) {
         throw new Error('You cannot add your own account as a contact');
       }
 
       // Check if user already exists across primary email, secondary emails, or phone
-      const existingProfile = await findProfileByIdentifier(targetEmail) || (phone.trim() ? await findProfileByIdentifier(phone.trim()) : null);
+      const existingProfile = await findProfileByIdentifier(targetEmail) || await findProfileByIdentifier(cleanPhone);
 
       // If user is already on the platform, send a contact connection request nudge
       if (existingProfile && !existingProfile.is_shadow && existingProfile.id !== user.id) {
@@ -188,13 +194,14 @@ export function AddPersonModal({
         </div>
 
         <div>
-          <label className="font-mono text-xs tracking-wider uppercase text-[var(--on-surface-variant)] block mb-1.5">
-            Phone Number <span className="normal-case text-[var(--outline)]">(optional, for record)</span>
+          <label className="font-mono text-xs tracking-wider uppercase text-[var(--on-surface-variant)] block mb-1.5 font-semibold">
+            Phone Number <span className="normal-case text-[var(--primary)] font-semibold">(compulsory primary contact)</span>
           </label>
           <PhoneInput
             value={phone}
             onChange={setPhone}
             defaultCountryCode={defaultCountryCode}
+            required
           />
         </div>
 
