@@ -49,27 +49,22 @@ export default function RootLayout({
               (function() {
                 try {
                   var theme = null;
-                  // 1. Try reading debtsync_theme_v2 from localStorage safely
+                  // 1. Try reading from localStorage safely
                   try {
-                    theme = localStorage.getItem('debtsync_theme_v2');
-                    if (!theme) {
-                      var legacy = localStorage.getItem('debtsync_theme');
-                      if (legacy === 'dark' || legacy === 'light') {
-                        theme = legacy;
-                      }
-                    }
+                    theme = localStorage.getItem('debtsync_theme_v2') || localStorage.getItem('debtsync_theme');
                   } catch (e) {}
 
-                  // 2. Fallback to reading from document.cookie
+                  // 2. Fallback to reading from document.cookie safely
                   if (!theme) {
                     try {
-                      var match = document.cookie.match(/(?:^|;\s*)debtsync_theme_v2=([^;]+)/);
-                      if (match) theme = decodeURIComponent(match[1]);
-                      if (!theme) {
-                        var legacyMatch = document.cookie.match(/(?:^|;\s*)debtsync_theme=([^;]+)/);
-                        if (legacyMatch) {
-                          var legVal = decodeURIComponent(legacyMatch[1]);
-                          if (legVal === 'dark' || legVal === 'light') theme = legVal;
+                      var cookies = document.cookie.split(';');
+                      for (var i = 0; i < cookies.length; i++) {
+                        var c = cookies[i].trim();
+                        if (c.indexOf('debtsync_theme_v2=') === 0) {
+                          theme = decodeURIComponent(c.substring(18));
+                          break;
+                        } else if (c.indexOf('debtsync_theme=') === 0 && !theme) {
+                          theme = decodeURIComponent(c.substring(15));
                         }
                       }
                     } catch (e) {}
@@ -79,15 +74,15 @@ export default function RootLayout({
                   var isDark = false;
                   if (theme === 'dark') {
                     isDark = true;
-                  } else if (theme === 'system') {
+                  } else if (theme === 'light') {
+                    isDark = false;
+                  } else {
+                    // 'system' or default / no preference: ALWAYS scan system OS theme
                     try {
                       isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
                     } catch (e) {
                       isDark = false;
                     }
-                  } else {
-                    // 'light' or default / missing: Default to Light mode
-                    isDark = false;
                   }
 
                   if (isDark) {

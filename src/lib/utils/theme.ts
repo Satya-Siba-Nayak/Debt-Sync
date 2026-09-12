@@ -24,7 +24,7 @@ function setCookie(name: string, value: string, days: number = 365): void {
 }
 
 export function getStoredTheme(): Theme {
-  if (typeof window === 'undefined') return 'light';
+  if (typeof window === 'undefined') return 'system';
 
   // 1. Check debtsync_theme_v2 in localStorage first
   try {
@@ -42,18 +42,18 @@ export function getStoredTheme(): Theme {
     }
   } catch (_) {}
 
-  // 3. Migrate from legacy debtsync_theme if it was explicitly 'dark'
+  // 3. Migrate from legacy debtsync_theme if set
   try {
     const legacy = localStorage.getItem(LEGACY_STORAGE) || getCookie(LEGACY_COOKIE);
-    if (legacy === 'dark') {
-      localStorage.setItem(STORAGE_KEY, 'dark');
-      setCookie(COOKIE_NAME, 'dark');
-      return 'dark';
+    if (legacy === 'dark' || legacy === 'light' || legacy === 'system') {
+      localStorage.setItem(STORAGE_KEY, legacy);
+      setCookie(COOKIE_NAME, legacy);
+      return legacy as Theme;
     }
   } catch (_) {}
 
-  // Default is strictly 'light' mode
-  return 'light';
+  // Default is 'system' (device default)
+  return 'system';
 }
 
 export function applyTheme(theme: Theme) {
