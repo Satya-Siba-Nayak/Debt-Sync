@@ -159,8 +159,8 @@ export default function TransactionsPage() {
         creatorNote.includes(q) ||
         counterpartyNote.includes(q) ||
         principalStr.includes(q) ||
-        d.status.toLowerCase().includes(q) ||
-        d.interest_type.toLowerCase().includes(q)
+        (d.status ? d.status.toLowerCase().includes(q) : false) ||
+        (d.interest_type ? d.interest_type.toLowerCase().includes(q) : false)
       );
     });
 

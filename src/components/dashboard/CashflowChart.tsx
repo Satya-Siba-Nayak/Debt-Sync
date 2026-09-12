@@ -31,6 +31,14 @@ export function CashflowChart({
   const activeDebts = debts.filter((d) => d.status !== 'declined');
 
   // Compute real data
+  const [themeKey, setThemeKey] = useState(0);
+
+  useEffect(() => {
+    const handleThemeChange = () => setThemeKey((k) => k + 1);
+    window.addEventListener('debtsync:theme_change', handleThemeChange);
+    return () => window.removeEventListener('debtsync:theme_change', handleThemeChange);
+  }, []);
+
   const growthData = generatePortfolioGrowthData(
     activeDebts,
     payments,
@@ -250,7 +258,7 @@ export function CashflowChart({
         chartInstanceRef.current = null;
       }
     };
-  }, [viewMode, projDays, cashflowPeriod, growthData, cashflowData, currency]);
+  }, [viewMode, projDays, cashflowPeriod, growthData, cashflowData, currency, themeKey]);
 
   return (
     <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 md:p-8 border border-[var(--outline-variant)]/30 flex flex-col h-[400px] shadow-sm">

@@ -52,7 +52,25 @@ export default function AnalyticsPage() {
 
   useEffect(() => {
     fetchAnalyticsData();
-  }, [fetchAnalyticsData]);
+
+    const handleRefresh = () => fetchAnalyticsData();
+    window.addEventListener('debtsync:refresh', handleRefresh);
+
+    const channel = supabase
+      .channel('analytics-realtime-updates')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'debts' }, () => {
+        fetchAnalyticsData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, () => {
+        fetchAnalyticsData();
+      })
+      .subscribe();
+
+    return () => {
+      window.removeEventListener('debtsync:refresh', handleRefresh);
+      supabase.removeChannel(channel);
+    };
+  }, [fetchAnalyticsData, supabase]);
 
   // Aggregate metrics
   let totalLent = 0;

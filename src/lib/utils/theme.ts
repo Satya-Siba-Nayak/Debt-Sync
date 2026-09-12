@@ -1,7 +1,9 @@
 export type Theme = 'light' | 'dark' | 'system';
 
-const COOKIE_NAME = 'debtsync_theme';
-const STORAGE_KEY = 'debtsync_theme';
+const COOKIE_NAME = 'debtsync_theme_v2';
+const STORAGE_KEY = 'debtsync_theme_v2';
+const LEGACY_COOKIE = 'debtsync_theme';
+const LEGACY_STORAGE = 'debtsync_theme';
 
 function getCookie(name: string): string | null {
   if (typeof document === 'undefined') return null;
@@ -17,14 +19,14 @@ function setCookie(name: string, value: string, days: number = 365): void {
   if (typeof document === 'undefined') return;
   try {
     const expires = new Date(Date.now() + days * 864e5).toUTCString();
-    document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/; SameSite=Lax`;
+    document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expires}; max-age=${days * 86400}; path=/; SameSite=Lax`;
   } catch (_) {}
 }
 
 export function getStoredTheme(): Theme {
   if (typeof window === 'undefined') return 'light';
 
-  // 1. Check debtsync_theme in localStorage first
+  // 1. Check debtsync_theme_v2 in localStorage first
   try {
     const theme = localStorage.getItem(STORAGE_KEY) as Theme;
     if (theme === 'light' || theme === 'dark' || theme === 'system') {
@@ -32,7 +34,7 @@ export function getStoredTheme(): Theme {
     }
   } catch (_) {}
 
-  // 2. Fall back to persistent cookie
+  // 2. Fall back to persistent cookie v2
   try {
     const cookieTheme = getCookie(COOKIE_NAME) as Theme;
     if (cookieTheme === 'light' || cookieTheme === 'dark' || cookieTheme === 'system') {
@@ -40,6 +42,17 @@ export function getStoredTheme(): Theme {
     }
   } catch (_) {}
 
+  // 3. Migrate from legacy debtsync_theme if it was explicitly 'dark'
+  try {
+    const legacy = localStorage.getItem(LEGACY_STORAGE) || getCookie(LEGACY_COOKIE);
+    if (legacy === 'dark') {
+      localStorage.setItem(STORAGE_KEY, 'dark');
+      setCookie(COOKIE_NAME, 'dark');
+      return 'dark';
+    }
+  } catch (_) {}
+
+  // Default is strictly 'light' mode
   return 'light';
 }
 
@@ -51,13 +64,14 @@ export function applyTheme(theme: Theme) {
   // 1. Persist to localStorage safely
   try {
     localStorage.setItem(STORAGE_KEY, theme);
-    // Remove stale generic key if present
+    localStorage.setItem(LEGACY_STORAGE, theme);
     localStorage.removeItem('theme');
   } catch (_) {}
 
   // 2. Persist to cookie (for SSR / head script on reload)
   try {
     setCookie(COOKIE_NAME, theme, 365);
+    setCookie(LEGACY_COOKIE, theme, 365);
   } catch (_) {}
 
   // 3. Determine if dark mode should be applied
@@ -81,7 +95,7 @@ export function applyTheme(theme: Theme) {
     root.classList.remove('dark');
   }
 
-  // 4. Broadcast to all ThemeToggle instances across the UI
+  // 4. Broadcast to all ThemeToggle instances and charts across the UI
   try {
     window.dispatchEvent(
       new CustomEvent('debtsync:theme_change', {

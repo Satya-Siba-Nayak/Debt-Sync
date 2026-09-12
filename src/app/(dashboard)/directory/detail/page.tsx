@@ -64,19 +64,42 @@ function PersonDebtDetailContent() {
       if (settings?.default_currency) setCurrency(settings.default_currency);
 
       // Fetch counterparty profile
+      let resolvedPersonId = personId;
       const { data: profile } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', personId)
-        .single();
-      setPerson(profile);
+        .maybeSingle();
+
+      let targetProfile = profile;
+
+      if (!targetProfile) {
+        // Fallback: check if personId is actually a debt ID
+        const { data: debtRec } = await supabase
+          .from('debts')
+          .select(`
+            id, lender_id, borrower_id,
+            lender:profiles!debts_lender_id_fkey(*),
+            borrower:profiles!debts_borrower_id_fkey(*)
+          `)
+          .eq('id', personId)
+          .maybeSingle();
+
+        if (debtRec) {
+          const isLender = debtRec.lender_id === user.id;
+          targetProfile = (isLender ? debtRec.borrower : debtRec.lender) as any;
+          resolvedPersonId = targetProfile?.id || (isLender ? debtRec.borrower_id : debtRec.lender_id);
+        }
+      }
+
+      setPerson(targetProfile);
 
       // Fetch all debts between user and this person
       const { data: debtRows } = await supabase
         .from('debts')
         .select('*')
         .or(
-          `and(lender_id.eq.${user.id},borrower_id.eq.${personId}),and(lender_id.eq.${personId},borrower_id.eq.${user.id})`
+          `and(lender_id.eq.${user.id},borrower_id.eq.${resolvedPersonId}),and(lender_id.eq.${resolvedPersonId},borrower_id.eq.${user.id})`
         )
         .order('created_at', { ascending: false });
 
@@ -142,11 +165,12 @@ function PersonDebtDetailContent() {
   const handleVerifyRepayment = async (paymentId: string, decision: 'verified' | 'disputed') => {
     setVerifyingPaymentId(paymentId);
     try {
+      const rpcDecision = decision === 'verified' ? 'accepted' : 'declined';
       let handled = false;
       try {
         const { data, error } = await supabase.rpc('verify_repayment', {
           p_payment_id: paymentId,
-          p_decision: decision,
+          p_decision: rpcDecision,
         });
         if (!error && data?.success) handled = true;
       } catch (_) {}
@@ -161,13 +185,42 @@ function PersonDebtDetailContent() {
               verified_by: currentUserId,
             })
             .eq('id', paymentId);
+
+          // Find the payment and check if the debt is now fully cleared
+          const paymentItem = payments.find((p) => p.id === paymentId);
+          if (paymentItem) {
+            const targetDebt = debts.find((d) => d.id === paymentItem.debt_id);
+            if (targetDebt) {
+              const updatedPayments = payments.map((p) =>
+                p.id === paymentId ? { ...p, is_verified: true } : p
+              );
+              const targetDebtPayments = updatedPayments.filter((p) => p.debt_id === targetDebt.id);
+              const calc = calculateDebtBalance(targetDebt, targetDebtPayments);
+              if (calc.currentBalance <= 0.01) {
+                await supabase
+                  .from('debts')
+                  .update({
+                    status: 'settled',
+                    settled_at: new Date().toISOString(),
+                  })
+                  .eq('id', targetDebt.id);
+              }
+            }
+          }
         } else {
-          await supabase.from('payments').delete().eq('id', paymentId);
+          await supabase
+            .from('payments')
+            .update({
+              is_verified: false,
+              verified_at: new Date().toISOString(),
+              verified_by: currentUserId,
+            })
+            .eq('id', paymentId);
         }
       }
 
       window.dispatchEvent(new CustomEvent('debtsync:refresh'));
-      fetchDetails();
+      await fetchDetails();
     } catch (err: any) {
       console.error('Error verifying repayment:', err);
       alert(err.message || 'Failed to process repayment verification');
@@ -271,8 +324,8 @@ function PersonDebtDetailContent() {
         (d.notes && d.notes.toLowerCase().includes(q)) ||
         (d.counterparty_notes && d.counterparty_notes.toLowerCase().includes(q)) ||
         String(d.principal).includes(q) ||
-        d.interest_type.toLowerCase().includes(q) ||
-        d.status.toLowerCase().includes(q)
+        (d.interest_type ? d.interest_type.toLowerCase().includes(q) : false) ||
+        (d.status ? d.status.toLowerCase().includes(q) : false)
       );
     });
 

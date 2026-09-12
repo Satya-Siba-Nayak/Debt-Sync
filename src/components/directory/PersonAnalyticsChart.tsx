@@ -26,6 +26,13 @@ export function PersonAnalyticsChart({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const chartInstanceRef = useRef<Chart | null>(null);
   const [projDays, setProjDays] = useState<30 | 90 | 365>(30);
+  const [themeKey, setThemeKey] = useState(0);
+
+  useEffect(() => {
+    const handleThemeChange = () => setThemeKey((k) => k + 1);
+    window.addEventListener('debtsync:theme_change', handleThemeChange);
+    return () => window.removeEventListener('debtsync:theme_change', handleThemeChange);
+  }, []);
 
   const chartData = generatePersonGrowthData(debts, payments, currentUserId, projDays);
 
@@ -145,7 +152,7 @@ export function PersonAnalyticsChart({
         chartInstanceRef.current = null;
       }
     };
-  }, [chartData, currency, projDays]);
+  }, [chartData, currency, projDays, themeKey]);
 
   return (
     <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 md:p-8 border border-[var(--outline-variant)]/30 shadow-sm flex flex-col h-[380px]">

@@ -49,16 +49,29 @@ export default function RootLayout({
               (function() {
                 try {
                   var theme = null;
-                  // 1. Try reading from localStorage safely
+                  // 1. Try reading debtsync_theme_v2 from localStorage safely
                   try {
-                    theme = localStorage.getItem('debtsync_theme');
+                    theme = localStorage.getItem('debtsync_theme_v2');
+                    if (!theme) {
+                      var legacy = localStorage.getItem('debtsync_theme');
+                      if (legacy === 'dark' || legacy === 'light') {
+                        theme = legacy;
+                      }
+                    }
                   } catch (e) {}
 
                   // 2. Fallback to reading from document.cookie
                   if (!theme) {
                     try {
-                      var match = document.cookie.match(/(?:^|;\\s*)debtsync_theme=([^;]+)/);
+                      var match = document.cookie.match(/(?:^|;\s*)debtsync_theme_v2=([^;]+)/);
                       if (match) theme = decodeURIComponent(match[1]);
+                      if (!theme) {
+                        var legacyMatch = document.cookie.match(/(?:^|;\s*)debtsync_theme=([^;]+)/);
+                        if (legacyMatch) {
+                          var legVal = decodeURIComponent(legacyMatch[1]);
+                          if (legVal === 'dark' || legVal === 'light') theme = legVal;
+                        }
+                      }
                     } catch (e) {}
                   }
 
@@ -73,7 +86,7 @@ export default function RootLayout({
                       isDark = false;
                     }
                   } else {
-                    // 'light' or default / not set: Default to Light mode
+                    // 'light' or default / missing: Default to Light mode
                     isDark = false;
                   }
 

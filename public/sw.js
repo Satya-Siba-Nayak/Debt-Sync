@@ -1,4 +1,4 @@
-const CACHE_NAME = 'debtsync-cache-v3';
+const CACHE_NAME = 'debtsync-cache-v4';
 const PRECACHE_ASSETS = [
   '/',
   '/manifest.json',
@@ -41,50 +41,30 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Network-first strategy for navigation requests (HTML pages)
-  if (event.request.mode === 'navigate') {
-    event.respondWith(
-      fetch(event.request)
-        .then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            const responseClone = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, responseClone);
-            });
-          }
-          return networkResponse;
-        })
-        .catch(async () => {
-          const matched = await caches.match(event.request);
-          if (matched) return matched;
+  // Network-first strategy for navigation requests (HTML pages) and code chunks
+  event.respondWith(
+    fetch(event.request)
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const responseClone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseClone);
+          });
+        }
+        return networkResponse;
+      })
+      .catch(async () => {
+        const matched = await caches.match(event.request);
+        if (matched) return matched;
+        if (event.request.mode === 'navigate') {
           const root = await caches.match('/');
           if (root) return root;
-          return new Response('Network offline. Please reload when reconnected.', {
-            status: 503,
-            statusText: 'Service Unavailable',
-            headers: { 'Content-Type': 'text/plain' },
-          });
-        })
-    );
-    return;
-  }
-
-  // Stale-while-revalidate for static assets
-  event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      const fetchPromise = fetch(event.request)
-        .then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            const responseClone = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, responseClone);
-            });
-          }
-          return networkResponse;
-        })
-        .catch(() => cachedResponse || new Response(null, { status: 404, statusText: 'Not Found' }));
-
-      return cachedResponse || fetchPromise;
-    })
+        }
+        return new Response('Offline mode — page unavailable', {
+          status: 503,
+          statusText: 'Service Unavailable',
+          headers: { 'Content-Type': 'text/plain' },
+        });
+      })
   );
 });

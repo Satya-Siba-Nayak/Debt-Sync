@@ -221,19 +221,19 @@ export default function PeopleDirectoryPage() {
       );
 
       const emailMatches = Boolean(
-        p.email.toLowerCase().includes(q) ||
-        (q.includes('@') && isSameEmail(p.email, q))
+        (p.email && p.email.toLowerCase().includes(q)) ||
+        (q.includes('@') && p.email && isSameEmail(p.email, q))
       );
       const secondaryMatches = Boolean(
         p.secondaryEmails && p.secondaryEmails.some((sec) =>
-          sec.toLowerCase().includes(q) || (q.includes('@') && isSameEmail(sec, q))
+          (sec && sec.toLowerCase().includes(q)) || (q.includes('@') && sec && isSameEmail(sec, q))
         )
       );
 
       const noteMatches = Boolean(p.matchingNote);
 
       return (
-        p.name.toLowerCase().includes(q) ||
+        (p.name || '').toLowerCase().includes(q) ||
         emailMatches ||
         secondaryMatches ||
         phoneMatches ||

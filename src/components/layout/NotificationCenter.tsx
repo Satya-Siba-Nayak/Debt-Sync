@@ -305,6 +305,19 @@ export function NotificationCenter() {
             verified_at: new Date().toISOString(),
           })
           .eq('id', paymentId);
+
+        if (decision === 'accepted') {
+          // Check if debt balance is cleared
+          const { data: pRec } = await supabase.from('payments').select('debt_id').eq('id', paymentId).single();
+          if (pRec?.debt_id) {
+            const { data: allP } = await supabase.from('payments').select('amount').eq('debt_id', pRec.debt_id).eq('is_verified', true);
+            const { data: dRec } = await supabase.from('debts').select('principal').eq('id', pRec.debt_id).single();
+            const totalPaid = (allP || []).reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
+            if (dRec && totalPaid >= Number(dRec.principal)) {
+              await supabase.from('debts').update({ status: 'settled', settled_at: new Date().toISOString() }).eq('id', pRec.debt_id);
+            }
+          }
+        }
       }
 
       window.dispatchEvent(new CustomEvent('debtsync:refresh'));
