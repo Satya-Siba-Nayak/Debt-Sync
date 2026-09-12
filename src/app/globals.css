@@ -40,6 +40,10 @@
   --on-background: #131c28;
 }
 
+:root.dark,
+:root[data-theme="dark"],
+html.dark,
+html[data-theme="dark"],
 .dark {
   /* Eye-Friendly Dark Theme Palette (Calming Slate-Teal) */
   --primary: #38d9d9;
@@ -74,6 +78,8 @@
   --background: #0d1117;
   --on-background: #e6edf3;
 }
+
+@custom-variant dark (&:where(.dark, .dark *, [data-theme="dark"], [data-theme="dark"] *));
 
 @theme {
   --color-primary: var(--primary);
@@ -129,6 +135,8 @@ body {
   border: 1px solid rgba(0, 67, 73, 0.08);
 }
 
+:root.dark .glass-card,
+[data-theme="dark"] .glass-card,
 .dark .glass-card {
   background: rgba(22, 27, 34, 0.75);
   backdrop-filter: blur(12px);

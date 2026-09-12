@@ -59,6 +59,14 @@ export function getStoredTheme(): Theme {
 export function applyTheme(theme: Theme) {
   if (typeof window === 'undefined') return;
 
+  // Disconnect temporary hydration observer if active
+  if ((window as any).__debtsync_theme_observer) {
+    try {
+      (window as any).__debtsync_theme_observer.disconnect();
+      (window as any).__debtsync_theme_observer = null;
+    } catch (_) {}
+  }
+
   const root = document.documentElement;
 
   // 1. Persist to localStorage safely
@@ -85,14 +93,18 @@ export function applyTheme(theme: Theme) {
       isDark = false;
     }
   } else {
-    // 'light' or default fallback
+    // 'light'
     isDark = false;
   }
 
   if (isDark) {
     root.classList.add('dark');
+    root.setAttribute('data-theme', 'dark');
+    root.style.colorScheme = 'dark';
   } else {
     root.classList.remove('dark');
+    root.setAttribute('data-theme', 'light');
+    root.style.colorScheme = 'light';
   }
 
   // 4. Broadcast to all ThemeToggle instances and charts across the UI

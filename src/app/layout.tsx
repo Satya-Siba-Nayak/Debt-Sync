@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { ThemeInitializer } from "@/components/ui/ThemeInitializer";
 
 export const viewport: Viewport = {
   themeColor: "#006a67",
@@ -85,10 +86,36 @@ export default function RootLayout({
                     }
                   }
 
+                  var root = document.documentElement;
                   if (isDark) {
-                    document.documentElement.classList.add('dark');
+                    root.classList.add('dark');
+                    root.setAttribute('data-theme', 'dark');
+                    root.style.colorScheme = 'dark';
                   } else {
-                    document.documentElement.classList.remove('dark');
+                    root.classList.remove('dark');
+                    root.setAttribute('data-theme', 'light');
+                    root.style.colorScheme = 'light';
+                  }
+
+                  // Protect against React 19 hydration attribute stripping
+                  if (window.MutationObserver) {
+                    var observer = new MutationObserver(function() {
+                      if (isDark) {
+                        if (!root.classList.contains('dark')) root.classList.add('dark');
+                        if (root.getAttribute('data-theme') !== 'dark') root.setAttribute('data-theme', 'dark');
+                      } else {
+                        if (root.classList.contains('dark')) root.classList.remove('dark');
+                        if (root.getAttribute('data-theme') !== 'light') root.setAttribute('data-theme', 'light');
+                      }
+                    });
+                    observer.observe(root, { attributes: true, attributeFilter: ['class', 'data-theme'] });
+                    window.__debtsync_theme_observer = observer;
+                    setTimeout(function() {
+                      observer.disconnect();
+                      if (window.__debtsync_theme_observer === observer) {
+                        window.__debtsync_theme_observer = null;
+                      }
+                    }, 3500);
                   }
                 } catch (_) {}
 
@@ -116,6 +143,7 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-screen bg-[var(--surface)] text-[var(--on-surface)] antialiased">
+        <ThemeInitializer />
         {children}
       </body>
     </html>

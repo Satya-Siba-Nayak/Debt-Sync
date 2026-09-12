@@ -4,6 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { ThemeToggle } from '../ui/ThemeToggle';
 
 import { clearAuthSessionData } from '@/lib/utils/auth-session';
 
@@ -98,6 +99,11 @@ export function Sidebar({ onNewTransaction }: SidebarProps) {
 
       {/* Bottom Footer Area */}
       <div className="mt-auto flex flex-col gap-2 border-t border-[var(--outline-variant)]/20 pt-4">
+        <div className="flex items-center justify-between px-1 mb-1">
+          <span className="font-mono text-xs text-[var(--on-surface-variant)]">Theme</span>
+          <ThemeToggle />
+        </div>
+
         <button
           onClick={handleSignOut}
           className="flex items-center gap-3 px-3 py-2 rounded-xl font-mono text-xs text-[var(--on-surface-variant)] hover:bg-red-500/10 hover:text-[var(--error)] transition-colors text-left w-full cursor-pointer"

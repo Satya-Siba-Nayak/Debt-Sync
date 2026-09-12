@@ -137,7 +137,6 @@ export function TopBar({
 
         <div className="flex items-center gap-3">
           <NotificationCenter />
-          <ThemeToggle />
 
           <Link
             href="/settings"

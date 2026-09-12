@@ -7,7 +7,9 @@ export function ThemeToggle() {
   const [currentTheme, setCurrentTheme] = useState<Theme>(() => getStoredTheme());
 
   useEffect(() => {
-    setCurrentTheme(getStoredTheme());
+    const stored = getStoredTheme();
+    setCurrentTheme(stored);
+    applyTheme(stored);
 
     // Listen for theme updates triggered from other ThemeToggle instances or settings
     const handleThemeChange = (e: any) => {
