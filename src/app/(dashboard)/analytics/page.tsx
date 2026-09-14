@@ -6,6 +6,7 @@ import { Debt, Payment } from '@/lib/types/database';
 import { calculateDebtBalance, round2 } from '@/lib/utils/interest';
 import { formatCurrency } from '@/lib/utils/currency';
 import { CashflowChart } from '@/components/dashboard/CashflowChart';
+import { getCurrentUserFast } from '@/lib/utils/auth-session';
 
 export default function AnalyticsPage() {
   const supabase = createClient();
@@ -19,30 +20,42 @@ export default function AnalyticsPage() {
   const fetchAnalyticsData = useCallback(async () => {
     setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await getCurrentUserFast(supabase);
       if (!user) return;
       setCurrentUserId(user.id);
 
-      const { data: settings } = await supabase
-        .from('user_settings')
-        .select('default_currency')
-        .eq('user_id', user.id)
-        .single();
-      if (settings?.default_currency) setCurrency(settings.default_currency);
+      const [settingsRes, debtRowsRes] = await Promise.all([
+        supabase
+          .from('user_settings')
+          .select('default_currency')
+          .eq('user_id', user.id)
+          .single(),
+        supabase
+          .from('debts')
+          .select(`
+            *,
+            lender:profiles!debts_lender_id_fkey(id, email, full_name),
+            borrower:profiles!debts_borrower_id_fkey(id, email, full_name)
+          `)
+          .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`),
+      ]);
 
-      const { data: debtRows } = await supabase
-        .from('debts')
-        .select(`
-          *,
-          lender:profiles!debts_lender_id_fkey(id, email, full_name),
-          borrower:profiles!debts_borrower_id_fkey(id, email, full_name)
-        `)
-        .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`);
+      if (settingsRes.data?.default_currency) setCurrency(settingsRes.data.default_currency);
 
-      const { data: paymentRows } = await supabase.from('payments').select('*');
+      const allDebts: Debt[] = (debtRowsRes.data as any) || [];
+      const debtIds = allDebts.map((d) => d.id);
+      let allPayments: Payment[] = [];
 
-      setDebts((debtRows as any) || []);
-      setPayments((paymentRows as any) || []);
+      if (debtIds.length > 0) {
+        const { data: paymentRows } = await supabase
+          .from('payments')
+          .select('*')
+          .in('debt_id', debtIds);
+        allPayments = (paymentRows as any) || [];
+      }
+
+      setDebts(allDebts);
+      setPayments(allPayments);
     } catch (err) {
       console.error('Error loading analytics:', err);
     } finally {

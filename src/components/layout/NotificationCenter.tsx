@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Avatar } from '../ui/Avatar';
 import { formatCurrency } from '@/lib/utils/currency';
+import { getCurrentUserFast } from '@/lib/utils/auth-session';
 
 interface IncomingDebtRequest {
   id: string;
@@ -66,10 +67,9 @@ export function NotificationCenter() {
   const supabase = createClient();
 
   const fetchNotifications = useCallback(async () => {
-    if (isFetchingRef.current) return;
-    isFetchingRef.current = true;
+    setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await getCurrentUserFast(supabase);
       if (!user) return;
 
       // 1. Fetch incoming debt agreements awaiting approval
@@ -141,12 +141,13 @@ export function NotificationCenter() {
         // Table may be migrating
       }
 
-      // 3. Fetch repayments awaiting lender verification
+      // 3. Fetch repayments awaiting lender verification (active debts only)
       try {
         const { data: myLentDebts } = await supabase
           .from('debts')
           .select('id')
-          .eq('lender_id', user.id);
+          .eq('lender_id', user.id)
+          .eq('status', 'active');
 
         const debtIds = ((myLentDebts as any[]) || []).map((d: any) => d.id);
 
@@ -154,7 +155,7 @@ export function NotificationCenter() {
           const { data: unverifiedPayments } = await supabase
             .from('payments')
             .select(`
-              id, debt_id, amount, currency, note, created_at, paid_by,
+              id, debt_id, amount, currency, note, created_at, paid_by, verified_at,
               payer:profiles!payments_paid_by_fkey(id, full_name, email, avatar_url)
             `)
             .in('debt_id', debtIds)
@@ -162,22 +163,32 @@ export function NotificationCenter() {
             .order('created_at', { ascending: false });
 
           if (unverifiedPayments) {
-            const formattedPayments: PendingRepayment[] = unverifiedPayments.map((p: any) => ({
-              id: p.id,
-              debt_id: p.debt_id,
-              amount: Number(p.amount) || 0,
-              currency: p.currency || 'inr',
-              note: p.note,
-              created_at: p.created_at,
-              payer: {
-                id: p.payer?.id || '',
-                full_name: p.payer?.full_name || p.payer?.email || 'Borrower',
-                email: p.payer?.email || '',
-                avatar_url: p.payer?.avatar_url || null,
-              },
-            }));
+            const formattedPayments: PendingRepayment[] = unverifiedPayments
+              .filter((p: any) => {
+                const isDisputed =
+                  p.status === 'disputed' ||
+                  p.verified_at != null ||
+                  (typeof p.note === 'string' && p.note.includes('[DISPUTED]'));
+                return !isDisputed;
+              })
+              .map((p: any) => ({
+                id: p.id,
+                debt_id: p.debt_id,
+                amount: Number(p.amount) || 0,
+                currency: p.currency || 'inr',
+                note: p.note,
+                created_at: p.created_at,
+                payer: {
+                  id: p.payer?.id || '',
+                  full_name: p.payer?.full_name || p.payer?.email || 'Borrower',
+                  email: p.payer?.email || '',
+                  avatar_url: p.payer?.avatar_url || null,
+                },
+              }));
             setPendingRepayments(formattedPayments);
           }
+        } else {
+          setPendingRepayments([]);
         }
       } catch (_) {}
     } catch (err) {
@@ -298,24 +309,56 @@ export function NotificationCenter() {
       } catch (_) {}
 
       if (!success) {
-        await supabase
-          .from('payments')
-          .update({
-            is_verified: decision === 'accepted',
-            verified_at: new Date().toISOString(),
-          })
-          .eq('id', paymentId);
+        const { data: pRec } = await supabase.from('payments').select('debt_id, amount, note').eq('id', paymentId).single();
 
         if (decision === 'accepted') {
+          await supabase
+            .from('payments')
+            .update({
+              is_verified: true,
+              verified_at: new Date().toISOString(),
+            })
+            .eq('id', paymentId);
+
           // Check if debt balance is cleared
-          const { data: pRec } = await supabase.from('payments').select('debt_id').eq('id', paymentId).single();
           if (pRec?.debt_id) {
             const { data: allP } = await supabase.from('payments').select('amount').eq('debt_id', pRec.debt_id).eq('is_verified', true);
             const { data: dRec } = await supabase.from('debts').select('principal').eq('id', pRec.debt_id).single();
             const totalPaid = (allP || []).reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
-            if (dRec && totalPaid >= Number(dRec.principal)) {
+            if (dRec && totalPaid >= Number(dRec.principal) - 0.01) {
               await supabase.from('debts').update({ status: 'settled', settled_at: new Date().toISOString() }).eq('id', pRec.debt_id);
+              // Auto-purge other lingering unverified payments for this settled debt
+              await supabase.from('payments').delete().eq('debt_id', pRec.debt_id).eq('is_verified', false);
             }
+          }
+        } else {
+          // Lender declined / disputed payment
+          const existingNote = pRec?.note || '';
+          const disputedNote = existingNote.includes('[DISPUTED]')
+            ? existingNote
+            : (existingNote ? `${existingNote} [DISPUTED]` : 'Disputed by lender [DISPUTED]');
+
+          await supabase
+            .from('payments')
+            .update({
+              is_verified: false,
+              verified_at: new Date().toISOString(),
+              note: disputedNote,
+            })
+            .eq('id', paymentId);
+
+          const user = await getCurrentUserFast(supabase);
+          if (pRec?.debt_id && user?.id) {
+            await supabase.from('activity_log').insert({
+              user_id: user.id,
+              debt_id: pRec.debt_id,
+              action: 'payment_disputed',
+              details: {
+                amount: pRec.amount,
+                note: disputedNote,
+                disputed_by: user.id,
+              },
+            });
           }
         }
       }

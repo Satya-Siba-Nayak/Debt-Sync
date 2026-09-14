@@ -44,37 +44,48 @@ export default function GlobalDashboardPage() {
       if (!user) return;
       setCurrentUserId(user.id);
 
-      // Claim any pending debts associated with user's email
+      // Claim any pending debts associated with user's email (cached)
       await claimUserProfile(user);
 
-      // Fetch user settings for default currency
-      const { data: settings } = await supabase
-        .from('user_settings')
-        .select('default_currency')
-        .eq('user_id', user.id)
-        .single();
-      if (settings?.default_currency) {
-        setCurrency(settings.default_currency);
+      // Fetch user settings and debts in parallel
+      const [settingsRes, debtRecordsRes] = await Promise.all([
+        supabase
+          .from('user_settings')
+          .select('default_currency')
+          .eq('user_id', user.id)
+          .single(),
+        supabase
+          .from('debts')
+          .select(`
+            *,
+            lender:profiles!debts_lender_id_fkey(id, email, full_name, avatar_url),
+            borrower:profiles!debts_borrower_id_fkey(id, email, full_name, avatar_url)
+          `)
+          .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`)
+          .order('created_at', { ascending: false }),
+      ]);
+
+      if (settingsRes.data?.default_currency) {
+        setCurrency(settingsRes.data.default_currency);
       }
 
-      // Fetch all debts where current user is lender OR borrower
-      const { data: debtRecords } = await supabase
-        .from('debts')
-        .select(`
-          *,
-          lender:profiles!debts_lender_id_fkey(id, email, full_name, avatar_url),
-          borrower:profiles!debts_borrower_id_fkey(id, email, full_name, avatar_url)
-        `)
-        .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`)
-        .order('created_at', { ascending: false });
+      const allDebts: Debt[] = (debtRecordsRes.data as any) || [];
+      const debtIds = allDebts.map((d) => d.id);
+      let allPayments: Payment[] = [];
 
-      // Fetch all payments related to user's debts
-      const { data: paymentRecords } = await supabase
-        .from('payments')
-        .select('*');
+      if (debtIds.length > 0) {
+        const { data: paymentRecords } = await supabase
+          .from('payments')
+          .select('*')
+          .in('debt_id', debtIds);
+        allPayments = (paymentRecords as any) || [];
 
-      const allDebts: Debt[] = (debtRecords as any) || [];
-      const allPayments: Payment[] = (paymentRecords as any) || [];
+        // Auto-purge any historical unverified payments on settled debts
+        const settledDebtIds = allDebts.filter((d) => d.status === 'settled').map((d) => d.id);
+        if (settledDebtIds.length > 0) {
+          supabase.from('payments').delete().in('debt_id', settledDebtIds).eq('is_verified', false);
+        }
+      }
 
       setDebts(allDebts);
       setPayments(allPayments);

@@ -4,7 +4,7 @@ import React, { useState, useMemo } from 'react';
 import { Modal } from '../ui/Modal';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment } from '@/lib/types/database';
-import { calculateDebtBalance } from '@/lib/utils/interest';
+import { calculateDebtBalance, round2 } from '@/lib/utils/interest';
 import { formatCurrency } from '@/lib/utils/currency';
 import { getDueDateInfo } from '@/lib/utils/due-date';
 
@@ -54,18 +54,22 @@ export function BulkPaymentModal({
       .map((d) => {
         const debtPayments = payments.filter((p) => p.debt_id === d.id);
         const calc = calculateDebtBalance(d, debtPayments);
+        const pendingAmount = direction === 'you_paid' ? (calc.pendingVerificationPaid || 0) : 0;
+        const allowableBalance = Math.max(0, round2(calc.currentBalance - pendingAmount));
         return {
           debt: d,
           currentBalance: calc.currentBalance,
+          allowableBalance,
+          pendingAmount,
           accruedInterest: calc.totalAccruedInterest,
           rate: Number(d.interest_rate) || 0,
         };
       })
-      .filter((item) => item.currentBalance > 0);
+      .filter((item) => (direction === 'you_paid' ? item.allowableBalance > 0 : item.currentBalance > 0));
   }, [debts, payments, currentUserId, direction]);
 
   const totalOutstandingInDirection = eligibleDebts.reduce(
-    (sum, item) => sum + item.currentBalance,
+    (sum, item) => sum + (direction === 'you_paid' ? item.allowableBalance : item.currentBalance),
     0
   );
 
@@ -93,28 +97,32 @@ export function BulkPaymentModal({
     let remainingFund = paymentSum;
 
     return sorted.map((item) => {
+      const allocatableLimit = direction === 'you_paid' ? item.allowableBalance : item.currentBalance;
+
       if (remainingFund <= 0) {
         return {
           debt: item.debt,
           currentBalance: item.currentBalance,
+          allowableBalance: item.allowableBalance,
           allocated: 0,
           newBalance: item.currentBalance,
           rate: item.rate,
         };
       }
 
-      const allocated = Math.min(remainingFund, item.currentBalance);
+      const allocated = Math.min(remainingFund, allocatableLimit);
       remainingFund -= allocated;
 
       return {
         debt: item.debt,
         currentBalance: item.currentBalance,
+        allowableBalance: item.allowableBalance,
         allocated,
         newBalance: Math.max(0, item.currentBalance - allocated),
         rate: item.rate,
       };
     });
-  }, [eligibleDebts, totalAmount, strategy]);
+  }, [eligibleDebts, totalAmount, strategy, direction]);
 
   const totalAllocated = allocations.reduce((sum, a) => sum + a.allocated, 0);
   const excessAmount = typeof totalAmount === 'number' ? Math.max(0, totalAmount - totalAllocated) : 0;
@@ -159,7 +167,7 @@ export function BulkPaymentModal({
 
         if (pErr) throw pErr;
 
-        // 2. Settle debt if cleared and verified
+        // 2. Settle debt if cleared and verified, and purge lingering unverified payments
         if (isVerified && item.newBalance <= 0.01) {
           await supabase
             .from('debts')
@@ -168,6 +176,12 @@ export function BulkPaymentModal({
               settled_at: new Date().toISOString(),
             })
             .eq('id', item.debt.id);
+
+          await supabase
+            .from('payments')
+            .delete()
+            .eq('debt_id', item.debt.id)
+            .eq('is_verified', false);
         }
 
         // 3. Activity log

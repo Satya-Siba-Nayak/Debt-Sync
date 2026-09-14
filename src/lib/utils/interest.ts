@@ -13,6 +13,7 @@ export interface DebtBalanceCalculation {
   rawAccruedInterest: number;   // High-precision float for live continuous compounding ticker animations
   totalPaid: number;
   pendingVerificationPaid?: number;
+  disputedPaid?: number;
   currentBalance: number;       // 2-decimal rounded; strictly 0 if settled or balance cleared
   isOverdue?: boolean;
 }
@@ -32,12 +33,22 @@ export function calculateDebtBalance(
 ): DebtBalanceCalculation {
   const principal = round2(Number(debt.principal) || 0);
   
-  // Only verified payments clear the active balance; unverified payments are pending verification
-  const verifiedPayments = payments.filter((p) => (p as any).is_verified !== false);
-  const pendingPayments = payments.filter((p) => (p as any).is_verified === false);
+  // Helper to identify disputed/rejected repayments
+  const isPaymentDisputed = (p: any) =>
+    p.status === 'disputed' ||
+    (p.is_verified === false && p.verified_at != null) ||
+    (typeof p.note === 'string' && p.note.includes('[DISPUTED]'));
+
+  // Only verified payments clear the active balance; unverified, non-disputed payments are pending verification
+  const verifiedPayments = payments.filter((p) => (p as any).is_verified === true);
+  const pendingPayments = payments.filter(
+    (p) => (p as any).is_verified === false && !isPaymentDisputed(p)
+  );
+  const disputedPayments = payments.filter(isPaymentDisputed);
   
   const totalPaid = round2(verifiedPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0));
   const pendingVerificationPaid = round2(pendingPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0));
+  const disputedPaid = round2(disputedPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0));
 
   // Declined agreements are void: balance is 0 and no interest accrues
   if (debt.status === 'declined') {
@@ -47,6 +58,7 @@ export function calculateDebtBalance(
       rawAccruedInterest: 0,
       totalPaid,
       pendingVerificationPaid,
+      disputedPaid,
       currentBalance: 0,
     };
   }
@@ -60,6 +72,7 @@ export function calculateDebtBalance(
       rawAccruedInterest: interestPaid,
       totalPaid,
       pendingVerificationPaid,
+      disputedPaid,
       currentBalance: 0,
     };
   }
@@ -75,6 +88,7 @@ export function calculateDebtBalance(
       rawAccruedInterest: 0,
       totalPaid,
       pendingVerificationPaid,
+      disputedPaid,
       currentBalance,
     };
   }
@@ -124,6 +138,7 @@ export function calculateDebtBalance(
     rawAccruedInterest,
     totalPaid,
     pendingVerificationPaid,
+    disputedPaid,
     currentBalance,
   };
 }

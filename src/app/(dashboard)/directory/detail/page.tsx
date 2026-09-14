@@ -14,6 +14,7 @@ import { BulkPaymentModal } from '@/components/debts/BulkPaymentModal';
 import { CounterpartyNoteModal } from '@/components/debts/CounterpartyNoteModal';
 import { getDueDateInfo } from '@/lib/utils/due-date';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
+import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { PersonAnalyticsChart } from '@/components/directory/PersonAnalyticsChart';
 import Link from 'next/link';
 
@@ -48,30 +49,23 @@ function PersonDebtDetailContent() {
 
     setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await getCurrentUserFast(supabase);
       if (!user) return;
       setCurrentUserId(user.id);
 
-      // Claim any pending debts associated with user
+      // Claim any pending debts associated with user (cached)
       await claimUserProfile(user);
 
-      // Currency setting
-      const { data: settings } = await supabase
-        .from('user_settings')
-        .select('default_currency')
-        .eq('user_id', user.id)
-        .single();
-      if (settings?.default_currency) setCurrency(settings.default_currency);
-
-      // Fetch counterparty profile
+      // Currency setting & counterparty profile
       let resolvedPersonId = personId;
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', personId)
-        .maybeSingle();
+      const [settingsRes, profileRes] = await Promise.all([
+        supabase.from('user_settings').select('default_currency').eq('user_id', user.id).single(),
+        supabase.from('profiles').select('*').eq('id', personId).maybeSingle(),
+      ]);
 
-      let targetProfile = profile;
+      if (settingsRes.data?.default_currency) setCurrency(settingsRes.data.default_currency);
+
+      let targetProfile = profileRes.data;
 
       if (!targetProfile) {
         // Fallback: check if personId is actually a debt ID
@@ -106,24 +100,28 @@ function PersonDebtDetailContent() {
       const allDebts: Debt[] = debtRows || [];
       setDebts(allDebts);
 
+      // Auto-purge any historical unverified payments for settled debts
+      const settledDebtIds = allDebts.filter((d) => d.status === 'settled').map((d) => d.id);
+      if (settledDebtIds.length > 0) {
+        await supabase
+          .from('payments')
+          .delete()
+          .in('debt_id', settledDebtIds)
+          .eq('is_verified', false);
+      }
+
       const debtIds = allDebts.map((d) => d.id);
 
       if (debtIds.length > 0) {
-        // Fetch payments for these debts
-        const { data: paymentRows } = await supabase
-          .from('payments')
-          .select('*')
-          .in('debt_id', debtIds)
-          .order('created_at', { ascending: false });
-        setPayments(paymentRows || []);
-
-        // Fetch activity logs for these debts
-        const { data: logRows } = await supabase
-          .from('activity_log')
-          .select('*')
-          .in('debt_id', debtIds)
-          .order('created_at', { ascending: false });
-        setActivityLogs(logRows || []);
+        const [paymentRes, logRes] = await Promise.all([
+          supabase.from('payments').select('*').in('debt_id', debtIds).order('created_at', { ascending: false }),
+          supabase.from('activity_log').select('*').in('debt_id', debtIds).order('created_at', { ascending: false }),
+        ]);
+        setPayments(paymentRes.data || []);
+        setActivityLogs(logRes.data || []);
+      } else {
+        setPayments([]);
+        setActivityLogs([]);
       }
     } catch (err) {
       console.error('Error fetching debt details:', err);
@@ -176,6 +174,8 @@ function PersonDebtDetailContent() {
       } catch (_) {}
 
       if (!handled) {
+        const paymentItem = payments.find((p) => p.id === paymentId);
+
         if (decision === 'verified') {
           await supabase
             .from('payments')
@@ -186,8 +186,6 @@ function PersonDebtDetailContent() {
             })
             .eq('id', paymentId);
 
-          // Find the payment and check if the debt is now fully cleared
-          const paymentItem = payments.find((p) => p.id === paymentId);
           if (paymentItem) {
             const targetDebt = debts.find((d) => d.id === paymentItem.debt_id);
             if (targetDebt) {
@@ -204,18 +202,45 @@ function PersonDebtDetailContent() {
                     settled_at: new Date().toISOString(),
                   })
                   .eq('id', targetDebt.id);
+
+                // Auto-purge any remaining unverified payments for this now-settled debt
+                await supabase
+                  .from('payments')
+                  .delete()
+                  .eq('debt_id', targetDebt.id)
+                  .eq('is_verified', false);
               }
             }
           }
         } else {
+          // Lender disputes repayment
+          const existingNote = paymentItem?.note || '';
+          const disputedNote = existingNote.includes('[DISPUTED]')
+            ? existingNote
+            : (existingNote ? `${existingNote} [DISPUTED]` : 'Disputed by lender [DISPUTED]');
+
           await supabase
             .from('payments')
             .update({
               is_verified: false,
               verified_at: new Date().toISOString(),
               verified_by: currentUserId,
+              note: disputedNote,
             })
             .eq('id', paymentId);
+
+          if (paymentItem && currentUserId) {
+            await supabase.from('activity_log').insert({
+              user_id: currentUserId,
+              debt_id: paymentItem.debt_id,
+              action: 'payment_disputed',
+              details: {
+                amount: paymentItem.amount,
+                note: disputedNote,
+                disputed_by: currentUserId,
+              },
+            });
+          }
         }
       }
 
@@ -883,7 +908,12 @@ function PersonDebtDetailContent() {
             {payments.map((p) => {
               const matchedDebt = debts.find((d) => d.id === p.debt_id);
               const isLenderOfDebt = matchedDebt?.lender_id === currentUserId;
-              const isPending = (p as any).is_verified === false;
+              const isDisputed =
+                (p as any).status === 'disputed' ||
+                ((p as any).is_verified === false && (p as any).verified_at != null) ||
+                (typeof p.note === 'string' && p.note.includes('[DISPUTED]'));
+              const isPending = (p as any).is_verified === false && !isDisputed;
+              const isVerified = (p as any).is_verified === true;
 
               return (
                 <div
@@ -891,6 +921,8 @@ function PersonDebtDetailContent() {
                   className={`p-3.5 rounded-xl border ${
                     isPending
                       ? 'border-amber-500/30 bg-amber-500/5'
+                      : isDisputed
+                      ? 'border-red-500/20 bg-red-500/5'
                       : 'border-outline-variant/20 bg-surface-container-low'
                   } flex flex-col sm:flex-row sm:items-center justify-between gap-3`}
                 >
@@ -899,12 +931,19 @@ function PersonDebtDetailContent() {
                       <span className="font-mono text-sm font-bold text-on-surface">
                         {formatCurrency(Number(p.amount), p.currency || currency, { showDecimals: true })}
                       </span>
-                      {isPending ? (
+                      {isPending && (
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
                           <span className="material-symbols-outlined text-[12px]">schedule</span>
                           Pending Lender Verification
                         </span>
-                      ) : (
+                      )}
+                      {isDisputed && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30 flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[12px]">error</span>
+                          Receipt Disputed by Lender
+                        </span>
+                      )}
+                      {isVerified && (
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
                           <span className="material-symbols-outlined text-[12px]">verified</span>
                           Verified Receipt
@@ -912,7 +951,7 @@ function PersonDebtDetailContent() {
                       )}
                     </div>
 
-                    <div className="text-xs text-on-surface-variant mt-1 flex items-center gap-3">
+                    <div className="text-xs text-on-surface-variant mt-1 flex items-center gap-3 flex-wrap">
                       <span>{new Date(p.created_at).toLocaleString()}</span>
                       {p.note && <span className="font-mono text-[11px] italic">"{p.note}"</span>}
                     </div>
@@ -985,6 +1024,12 @@ function PersonDebtDetailContent() {
               } else if (log.action === 'debt_accepted') {
                 dotColor = 'bg-success';
                 title = 'Agreement Accepted by Counterparty';
+              } else if (log.action === 'payment_disputed') {
+                dotColor = 'bg-red-500';
+                title = `Repayment Disputed by Lender (${formatCurrency(Number((log.details as any)?.amount || 0), currency)})`;
+              } else if (log.action === 'debt_settled') {
+                dotColor = 'bg-emerald-500';
+                title = 'Debt Agreement Fully Settled';
               }
 
               return (

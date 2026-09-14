@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { Debt } from '@/lib/types/database';
 import { formatCurrency } from '@/lib/utils/currency';
 import { round2 } from '@/lib/utils/interest';
+import { getCurrentUserFast } from '@/lib/utils/auth-session';
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -25,21 +26,65 @@ export function PaymentModal({
   const [amount, setAmount] = useState<number>(round2(Math.min(currentBalance, 500)));
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(false);
+  const [checkingLimits, setCheckingLimits] = useState(false);
   const [error, setError] = useState('');
+  const [isLender, setIsLender] = useState(false);
+  const [pendingAmount, setPendingAmount] = useState(0);
 
   const supabase = createClient();
 
-  const [isLender, setIsLender] = useState(false);
-
   useEffect(() => {
-    async function checkRole() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        setIsLender(user.id === debt.lender_id);
+    if (!isOpen) return;
+
+    async function loadRoleAndLimits() {
+      setCheckingLimits(true);
+      setError('');
+      try {
+        const user = await getCurrentUserFast(supabase);
+        if (!user) return;
+
+        const userIsLender = user.id === debt.lender_id;
+        setIsLender(userIsLender);
+
+        if (!userIsLender) {
+          // Calculate existing pending unverified payments for this debt
+          const { data: debtPayments } = await supabase
+            .from('payments')
+            .select('*')
+            .eq('debt_id', debt.id)
+            .eq('is_verified', false);
+
+          const isDisputed = (p: any) =>
+            p.status === 'disputed' ||
+            (p.is_verified === false && p.verified_at != null) ||
+            (typeof p.note === 'string' && p.note.includes('[DISPUTED]'));
+
+          const activePending = (debtPayments || []).filter((p: any) => !isDisputed(p));
+          const totalPending = round2(
+            activePending.reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0)
+          );
+          setPendingAmount(totalPending);
+
+          const allowable = Math.max(0, round2(currentBalance - totalPending));
+          setAmount(round2(Math.min(allowable, 500)));
+        } else {
+          setPendingAmount(0);
+          setAmount(round2(Math.min(currentBalance, 500)));
+        }
+      } catch (err) {
+        console.error('Error loading payment limits:', err);
+      } finally {
+        setCheckingLimits(false);
       }
     }
-    checkRole();
-  }, [debt.lender_id, supabase]);
+
+    loadRoleAndLimits();
+  }, [isOpen, debt.id, debt.lender_id, currentBalance, supabase]);
+
+  const maxAllowable = isLender
+    ? round2(currentBalance)
+    : Math.max(0, round2(currentBalance - pendingAmount));
+  const isBlockedByPending = !isLender && maxAllowable <= 0.009;
 
   const handlePayment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,7 +92,7 @@ export function PaymentModal({
     setError('');
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await getCurrentUserFast(supabase);
       if (!user) throw new Error('User not logged in');
 
       const rawNum = Number(amount);
@@ -57,13 +102,22 @@ export function PaymentModal({
       const userIsLender = user.id === debt.lender_id;
       const isVerified = userIsLender;
 
+      // Cap validation for borrower: Cannot request more than remaining balance minus pending unverified requests
+      if (!userIsLender) {
+        if (paymentAmount > maxAllowable + 0.005) {
+          throw new Error(
+            `Payment request of ${formatCurrency(paymentAmount, debt.currency || 'inr', { showDecimals: true })} exceeds allowable limit (${formatCurrency(maxAllowable, debt.currency || 'inr', { showDecimals: true })}). An existing request of ${formatCurrency(pendingAmount, debt.currency || 'inr', { showDecimals: true })} is already awaiting verification.`
+          );
+        }
+      }
+
       // Record payment
       const { error: paymentError } = await supabase.from('payments').insert({
         debt_id: debt.id,
         paid_by: user.id,
         amount: paymentAmount,
         currency: debt.currency || 'inr',
-        note: note.trim() || 'Settlement payment',
+        note: note.trim() || (isVerified ? 'Settlement payment' : 'Repayment reported'),
         is_verified: isVerified,
         verified_at: isVerified ? new Date().toISOString() : null,
         verified_by: isVerified ? user.id : null,
@@ -71,7 +125,7 @@ export function PaymentModal({
 
       if (paymentError) throw paymentError;
 
-      // If lender recorded payment and it clears the balance (within 0.005 threshold), settle immediately
+      // If lender recorded payment and it clears the balance (within 0.005 threshold), settle immediately and purge orphaned unverified payments
       if (isVerified && paymentAmount >= currentBalance - 0.005) {
         await supabase
           .from('debts')
@@ -80,6 +134,13 @@ export function PaymentModal({
             settled_at: new Date().toISOString(),
           })
           .eq('id', debt.id);
+
+        // Auto-purge any lingering unverified payments for this settled debt
+        await supabase
+          .from('payments')
+          .delete()
+          .eq('debt_id', debt.id)
+          .eq('is_verified', false);
       }
 
       // Add activity log
@@ -121,7 +182,40 @@ export function PaymentModal({
           </div>
         )}
 
-        {!isLender && (
+        {!isLender && pendingAmount > 0 && isBlockedByPending && (
+          <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2.5">
+            <span className="material-symbols-outlined text-[20px] text-amber-500 shrink-0 mt-0.5">
+              pending_actions
+            </span>
+            <div>
+              <strong className="block font-semibold mb-0.5">Verification Pending Review:</strong>
+              Repayment request(s) totaling{' '}
+              <span className="font-mono font-bold">
+                {formatCurrency(pendingAmount, debt.currency || 'inr', { showDecimals: true })}
+              </span>{' '}
+              are already awaiting confirmation from the lender. You cannot submit additional requests until the lender reviews or disputes the pending receipt.
+            </div>
+          </div>
+        )}
+
+        {!isLender && pendingAmount > 0 && !isBlockedByPending && (
+          <div className="p-3 rounded-xl bg-[var(--primary)]/10 border border-[var(--primary)]/20 text-xs text-[var(--on-surface)] flex items-start gap-2">
+            <span className="material-symbols-outlined text-[18px] text-[var(--primary)] shrink-0 mt-0.5">
+              info
+            </span>
+            <div>
+              <span className="font-mono font-semibold">
+                {formatCurrency(pendingAmount, debt.currency || 'inr', { showDecimals: true })}
+              </span>{' '}
+              is currently awaiting lender verification. Maximum additional payment request allowed:{' '}
+              <span className="font-mono font-bold text-[var(--primary)]">
+                {formatCurrency(maxAllowable, debt.currency || 'inr', { showDecimals: true })}
+              </span>.
+            </div>
+          </div>
+        )}
+
+        {!isLender && pendingAmount === 0 && (
           <div className="p-3 rounded-xl bg-[var(--primary)]/10 border border-[var(--primary)]/20 text-xs text-[var(--on-surface)] flex items-start gap-2">
             <span className="material-symbols-outlined text-[18px] text-[var(--primary)] shrink-0 mt-0.5">
               verified_user
@@ -137,22 +231,26 @@ export function PaymentModal({
             <label className="font-mono text-xs tracking-wider uppercase text-[var(--on-surface-variant)]">
               Payment Amount
             </label>
-            <button
-              type="button"
-              onClick={() => setAmount(round2(currentBalance))}
-              className="font-mono text-xs text-[var(--primary)] font-bold hover:underline"
-            >
-              Pay Full ({formatCurrency(round2(currentBalance), debt.currency || 'inr', { showDecimals: true })})
-            </button>
+            {maxAllowable > 0 && (
+              <button
+                type="button"
+                onClick={() => setAmount(round2(maxAllowable))}
+                className="font-mono text-xs text-[var(--primary)] font-bold hover:underline"
+              >
+                Pay Full ({formatCurrency(round2(maxAllowable), debt.currency || 'inr', { showDecimals: true })})
+              </button>
+            )}
           </div>
           <input
             type="number"
             min="0.01"
+            max={maxAllowable > 0 ? maxAllowable : undefined}
             step="0.01"
             required
+            disabled={isBlockedByPending || loading || checkingLimits}
             value={amount}
             onChange={(e) => setAmount(Number(e.target.value))}
-            className="w-full px-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-lg font-bold outline-none focus:border-[var(--primary)]"
+            className="w-full px-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-lg font-bold outline-none focus:border-[var(--primary)] disabled:opacity-50 disabled:bg-[var(--surface-container-low)]"
           />
         </div>
 
@@ -162,10 +260,11 @@ export function PaymentModal({
           </label>
           <input
             type="text"
+            disabled={isBlockedByPending || loading || checkingLimits}
             value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder="e.g. UPI transfer, Cash, GPay ref #84912"
-            className="w-full px-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-sm outline-none focus:border-[var(--primary)]"
+            className="w-full px-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-sm outline-none focus:border-[var(--primary)] disabled:opacity-50"
           />
         </div>
 
@@ -179,10 +278,18 @@ export function PaymentModal({
           </button>
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || checkingLimits || isBlockedByPending}
             className="flex-1 py-2.5 px-4 rounded-xl bg-[var(--secondary)] text-[var(--on-secondary)] font-mono text-xs font-bold hover:opacity-95 disabled:opacity-50"
           >
-            {loading ? 'Submitting...' : isLender ? 'Record Payment' : 'Submit for Verification'}
+            {loading
+              ? 'Submitting...'
+              : checkingLimits
+              ? 'Checking...'
+              : isLender
+              ? 'Record Payment'
+              : isBlockedByPending
+              ? 'Verification Pending'
+              : 'Submit for Verification'}
           </button>
         </div>
       </form>

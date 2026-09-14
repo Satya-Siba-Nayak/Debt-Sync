@@ -3,6 +3,16 @@ import { isSameEmail, isSamePhone } from './email-normalize';
 
 export async function claimUserProfile(user: any) {
   if (!user) return;
+
+  const sessionKey = `debtsync_claimed_${user.id}`;
+  if (typeof window !== 'undefined') {
+    try {
+      if (sessionStorage.getItem(sessionKey) === '1') {
+        return;
+      }
+    } catch (_) {}
+  }
+
   const supabase = createClient();
 
   try {
@@ -80,6 +90,12 @@ export async function claimUserProfile(user: any) {
           await supabase.from('profiles').delete().eq('id', s.id);
         }
       }
+    }
+
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem(sessionKey, '1');
+      } catch (_) {}
     }
   } catch (err) {
     console.error('Error claiming user profile:', err);

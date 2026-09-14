@@ -10,6 +10,7 @@ import { AddPersonModal } from '@/components/directory/AddPersonModal';
 import { RecordDebtModal } from '@/components/debts/RecordDebtModal';
 import { isSameEmail } from '@/lib/utils/email-normalize';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
+import { getCurrentUserFast } from '@/lib/utils/auth-session';
 
 export default function PeopleDirectoryPage() {
   const supabase = createClient();
@@ -27,45 +28,49 @@ export default function PeopleDirectoryPage() {
   const fetchDirectoryData = useCallback(async () => {
     setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await getCurrentUserFast(supabase);
       if (!user) return;
 
       await claimUserProfile(user);
 
-      // Settings
-      const { data: settings } = await supabase
-        .from('user_settings')
-        .select('default_currency')
-        .eq('user_id', user.id)
-        .single();
-      if (settings?.default_currency) setCurrency(settings.default_currency);
+      // Fetch settings, contacts, and debts concurrently
+      const [settingsRes, contactRowsRes, debtRowsRes] = await Promise.all([
+        supabase
+          .from('user_settings')
+          .select('default_currency')
+          .eq('user_id', user.id)
+          .single(),
+        supabase
+          .from('contacts')
+          .select(`
+            contact_id, nickname,
+            profile:profiles!contacts_contact_id_fkey(id, email, full_name, phone, is_shadow, secondary_emails, avatar_url)
+          `)
+          .eq('owner_id', user.id),
+        supabase
+          .from('debts')
+          .select(`
+            *,
+            lender:profiles!debts_lender_id_fkey(id, email, full_name, phone, is_shadow, secondary_emails, avatar_url),
+            borrower:profiles!debts_borrower_id_fkey(id, email, full_name, phone, is_shadow, secondary_emails, avatar_url)
+          `)
+          .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`),
+      ]);
 
-      // Contacts
-      const { data: contactRows } = await supabase
-        .from('contacts')
-        .select(`
-          contact_id, nickname,
-          profile:profiles!contacts_contact_id_fkey(id, email, full_name, phone, is_shadow, secondary_emails, avatar_url)
-        `)
-        .eq('owner_id', user.id);
+      if (settingsRes.data?.default_currency) setCurrency(settingsRes.data.default_currency);
 
-      // Debts involving user
-      const { data: debtRows } = await supabase
-        .from('debts')
-        .select(`
-          *,
-          lender:profiles!debts_lender_id_fkey(id, email, full_name, phone, is_shadow, secondary_emails, avatar_url),
-          borrower:profiles!debts_borrower_id_fkey(id, email, full_name, phone, is_shadow, secondary_emails, avatar_url)
-        `)
-        .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`);
+      const contactRows = contactRowsRes.data;
+      const allDebts: Debt[] = (debtRowsRes.data as any) || [];
+      const debtIds = allDebts.map((d) => d.id);
+      let allPayments: Payment[] = [];
 
-      // Payments
-      const { data: paymentRows } = await supabase
-        .from('payments')
-        .select('*');
-
-      const allDebts: Debt[] = (debtRows as any) || [];
-      const allPayments: Payment[] = (paymentRows as any) || [];
+      if (debtIds.length > 0) {
+        const { data: paymentRows } = await supabase
+          .from('payments')
+          .select('*')
+          .in('debt_id', debtIds);
+        allPayments = (paymentRows as any) || [];
+      }
 
       // Collect all counterparties (from contacts + from debts)
       const peopleMap = new Map<string, PersonSummary>();

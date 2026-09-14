@@ -8,8 +8,10 @@ import { formatCurrency } from '@/lib/utils/currency';
 import { Chip } from '@/components/ui/Chip';
 import { Avatar } from '@/components/ui/Avatar';
 import { CounterpartyNoteModal } from '@/components/debts/CounterpartyNoteModal';
+import { DebtDetailModal } from '@/components/debts/DebtDetailModal';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { getDueDateInfo } from '@/lib/utils/due-date';
+import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import Link from 'next/link';
 
 export default function TransactionsPage() {
@@ -23,37 +25,49 @@ export default function TransactionsPage() {
   const [filter, setFilter] = useState<'all' | 'lent' | 'borrowed' | 'settled' | 'declined'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDebtForNote, setSelectedDebtForNote] = useState<Debt | null>(null);
+  const [selectedDebtForDetail, setSelectedDebtForDetail] = useState<Debt | null>(null);
 
   const fetchTransactions = useCallback(async () => {
     setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await getCurrentUserFast(supabase);
       if (!user) return;
       setCurrentUserId(user.id);
 
       await claimUserProfile(user);
 
-      const { data: settings } = await supabase
-        .from('user_settings')
-        .select('default_currency')
-        .eq('user_id', user.id)
-        .single();
-      if (settings?.default_currency) setCurrency(settings.default_currency);
+      const [settingsRes, debtRowsRes] = await Promise.all([
+        supabase
+          .from('user_settings')
+          .select('default_currency')
+          .eq('user_id', user.id)
+          .single(),
+        supabase
+          .from('debts')
+          .select(`
+            *,
+            lender:profiles!debts_lender_id_fkey(id, email, full_name, avatar_url),
+            borrower:profiles!debts_borrower_id_fkey(id, email, full_name, avatar_url)
+          `)
+          .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`)
+          .order('created_at', { ascending: false }),
+      ]);
 
-      const { data: debtRows } = await supabase
-        .from('debts')
-        .select(`
-          *,
-          lender:profiles!debts_lender_id_fkey(id, email, full_name, avatar_url),
-          borrower:profiles!debts_borrower_id_fkey(id, email, full_name, avatar_url)
-        `)
-        .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`)
-        .order('created_at', { ascending: false });
+      if (settingsRes.data?.default_currency) setCurrency(settingsRes.data.default_currency);
 
-      const { data: paymentRows } = await supabase.from('payments').select('*');
+      const allDebts: Debt[] = (debtRowsRes.data as any) || [];
+      setDebts(allDebts);
 
-      setDebts((debtRows as any) || []);
-      setPayments((paymentRows as any) || []);
+      const debtIds = allDebts.map((d) => d.id);
+      if (debtIds.length > 0) {
+        const { data: paymentRows } = await supabase
+          .from('payments')
+          .select('*')
+          .in('debt_id', debtIds);
+        setPayments((paymentRows as any) || []);
+      } else {
+        setPayments([]);
+      }
     } catch (err) {
       console.error('Error fetching transactions:', err);
     } finally {
@@ -231,10 +245,10 @@ export default function TransactionsPage() {
                 const dueDateInfo = getDueDateInfo(d.due_date, d.status);
 
                 return (
-                  <Link
+                  <div
                     key={d.id}
-                    href={`/directory/detail?id=${otherPerson?.id || d.id}`}
-                    className={`block p-4 rounded-xl border transition-all shadow-xs ${
+                    onClick={() => setSelectedDebtForDetail(d)}
+                    className={`block p-4 rounded-xl border transition-all shadow-xs cursor-pointer ${
                       d.status === 'declined'
                         ? 'bg-[var(--surface-container-low)]/40 border-red-500/20 opacity-85'
                         : 'bg-[var(--surface-container-low)]/70 hover:bg-[var(--surface-container-high)]/70 border-[var(--outline-variant)]/20'
@@ -345,20 +359,35 @@ export default function TransactionsPage() {
                     )}
 
                     <div className="mt-3 pt-2.5 border-t border-[var(--outline-variant)]/15 flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setSelectedDebtForNote(d);
-                        }}
-                        className="py-1 px-2.5 rounded-lg border border-[var(--outline-variant)]/30 text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] font-mono text-xs flex items-center gap-1"
-                      >
-                        <span className="material-symbols-outlined text-[14px]">
-                          {d.notes || d.counterparty_notes ? 'note' : 'add_comment'}
-                        </span>
-                        <span>{d.notes || d.counterparty_notes ? 'Notes' : '+ Note'}</span>
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setSelectedDebtForNote(d);
+                          }}
+                          className="py-1 px-2.5 rounded-lg border border-[var(--outline-variant)]/30 text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] font-mono text-xs flex items-center gap-1"
+                        >
+                          <span className="material-symbols-outlined text-[14px]">
+                            {d.notes || d.counterparty_notes ? 'note' : 'add_comment'}
+                          </span>
+                          <span>{d.notes || d.counterparty_notes ? 'Notes' : '+ Note'}</span>
+                        </button>
+
+                        <Link
+                          href={`/directory/detail?id=${otherPerson?.id || d.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="py-1 px-2.5 rounded-lg border border-[var(--outline-variant)]/30 text-[var(--on-surface-variant)] hover:text-[var(--primary)] font-mono text-xs flex items-center gap-1"
+                        >
+                          <span>Ledger</span>
+                        </Link>
+                      </div>
+
+                      <span className="font-mono text-xs text-[var(--primary)] font-bold flex items-center gap-0.5">
+                        <span>Details</span>
+                        <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+                      </span>
 
                       {d.status === 'declined' && (
                         <button
@@ -406,7 +435,7 @@ export default function TransactionsPage() {
                         </div>
                       </div>
                     )}
-                  </Link>
+                  </div>
                 );
               })}
             </div>
@@ -438,10 +467,11 @@ export default function TransactionsPage() {
                     return (
                       <tr
                         key={d.id}
-                        className={`transition-colors ${
+                        onClick={() => setSelectedDebtForDetail(d)}
+                        className={`transition-colors cursor-pointer ${
                           d.status === 'declined'
                             ? 'bg-red-500/5 hover:bg-red-500/10 opacity-80'
-                            : 'hover:bg-[var(--surface-container-low)]/50'
+                            : 'hover:bg-[var(--surface-container-low)]/80'
                         }`}
                       >
                         <td className="py-4 font-mono text-xs text-[var(--on-surface-variant)]">
@@ -551,13 +581,24 @@ export default function TransactionsPage() {
                           </div>
                         </td>
 
-                        <td className="py-4 text-right">
+                        <td className="py-4 text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-end gap-1.5">
+                            {/* View Details Button */}
+                            <button
+                              type="button"
+                              onClick={() => setSelectedDebtForDetail(d)}
+                              className="px-2.5 py-1.5 rounded-lg bg-[var(--primary)]/10 hover:bg-[var(--primary)]/20 text-[var(--primary)] font-mono text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                              title="View full debt logs, receipts and audit trail"
+                            >
+                              <span className="material-symbols-outlined text-[14px]">receipt_long</span>
+                              <span>Details</span>
+                            </button>
+
                             {/* Two-sided Note Button */}
                             <button
                               type="button"
                               onClick={() => setSelectedDebtForNote(d)}
-                              className="p-1.5 rounded-lg border border-[var(--outline-variant)]/30 text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors"
+                              className="p-1.5 rounded-lg border border-[var(--outline-variant)]/30 text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors cursor-pointer"
                               title="View or edit 2-sided notes"
                             >
                               <span className="material-symbols-outlined text-[15px]">
@@ -570,7 +611,7 @@ export default function TransactionsPage() {
                               <button
                                 type="button"
                                 onClick={() => handleDismissDeclinedDebt(d.id, d.hidden_by || [])}
-                                className="p-1.5 rounded-lg border border-[var(--outline-variant)]/30 text-[var(--on-surface-variant)] hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                                className="p-1.5 rounded-lg border border-[var(--outline-variant)]/30 text-[var(--on-surface-variant)] hover:text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
                                 title="Dismiss from your view (persists in activity log audit trail)"
                               >
                                 <span className="material-symbols-outlined text-[15px]">visibility_off</span>
@@ -581,7 +622,7 @@ export default function TransactionsPage() {
                               <div className="flex items-center justify-end gap-1.5">
                                 <button
                                   onClick={() => handleAcceptDebt(d.id, 'active')}
-                                  className="px-2.5 py-1 bg-[var(--primary)] text-[var(--on-primary)] rounded-md font-mono text-xs font-bold hover:opacity-90 transition-opacity shadow-xs"
+                                  className="px-2.5 py-1 bg-[var(--primary)] text-[var(--on-primary)] rounded-md font-mono text-xs font-bold hover:opacity-90 transition-opacity shadow-xs cursor-pointer"
                                 >
                                   Accept
                                 </button>
@@ -589,7 +630,7 @@ export default function TransactionsPage() {
                                   onClick={() => {
                                     if (confirm('Decline this agreement?')) handleAcceptDebt(d.id, 'declined');
                                   }}
-                                  className="px-2 py-1 border border-[var(--error)]/30 text-[var(--error)] rounded-md font-mono text-xs font-bold hover:bg-[var(--error)]/10"
+                                  className="px-2 py-1 border border-[var(--error)]/30 text-[var(--error)] rounded-md font-mono text-xs font-bold hover:bg-[var(--error)]/10 cursor-pointer"
                                 >
                                   Decline
                                 </button>
@@ -597,7 +638,7 @@ export default function TransactionsPage() {
                             ) : (
                               <Link
                                 href={`/directory/detail?id=${otherPerson?.id || d.id}`}
-                                className="font-mono text-xs text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] font-bold hover:underline ml-1"
+                                className="font-mono text-xs text-[var(--on-surface-variant)] hover:text-[var(--primary)] hover:underline ml-1"
                               >
                                 Ledger
                               </Link>
@@ -622,6 +663,18 @@ export default function TransactionsPage() {
           currentUserId={currentUserId || ''}
           onClose={() => setSelectedDebtForNote(null)}
           onNoteUpdated={fetchTransactions}
+        />
+      )}
+
+      {/* Detailed Debt History & Audit Trail Modal */}
+      {selectedDebtForDetail && (
+        <DebtDetailModal
+          isOpen={Boolean(selectedDebtForDetail)}
+          debt={selectedDebtForDetail}
+          currentUserId={currentUserId || ''}
+          currency={currency}
+          onClose={() => setSelectedDebtForDetail(null)}
+          onDebtUpdated={fetchTransactions}
         />
       )}
     </div>
