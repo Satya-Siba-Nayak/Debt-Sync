@@ -11,13 +11,16 @@ import { RecordDebtModal } from '@/components/debts/RecordDebtModal';
 import { isSameEmail } from '@/lib/utils/email-normalize';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
+import { getLedgerCache, setLedgerCache } from '@/lib/stores/ledger-store';
+import { SkeletonDirectoryGrid } from '@/components/ui/Skeleton';
 
 export default function PeopleDirectoryPage() {
   const supabase = createClient();
 
-  const [loading, setLoading] = useState(true);
-  const [currency, setCurrency] = useState('inr');
-  const [people, setPeople] = useState<PersonSummary[]>([]);
+  const initialCache = getLedgerCache();
+  const [loading, setLoading] = useState(!initialCache?.people);
+  const [currency, setCurrency] = useState(initialCache?.currency || 'inr');
+  const [people, setPeople] = useState<PersonSummary[]>(initialCache?.people || []);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterTab, setFilterTab] = useState<'all' | 'active' | 'settled'>('all');
 
@@ -26,7 +29,6 @@ export default function PeopleDirectoryPage() {
   const [selectedPersonForDebt, setSelectedPersonForDebt] = useState<string | null>(null);
 
   const fetchDirectoryData = useCallback(async () => {
-    setLoading(true);
     try {
       const user = await getCurrentUserFast(supabase);
       if (!user) return;
@@ -154,13 +156,24 @@ export default function PeopleDirectoryPage() {
         }
       }
 
-      setPeople(Array.from(peopleMap.values()));
+      const updatedPeople = Array.from(peopleMap.values());
+      setPeople(updatedPeople);
+
+      const activeCurrency = settingsRes.data?.default_currency || currency;
+      setLedgerCache({
+        userId: user.id,
+        debts: allDebts,
+        payments: allPayments,
+        people: updatedPeople,
+        currency: activeCurrency,
+        timestamp: Date.now(),
+      });
     } catch (err) {
       console.error('Error loading directory:', err);
     } finally {
       setLoading(false);
     }
-  }, [supabase]);
+  }, [supabase, currency]);
 
   useEffect(() => {
     fetchDirectoryData();
@@ -248,7 +261,7 @@ export default function PeopleDirectoryPage() {
     .sort((a, b) => Math.abs(b.netBalance) - Math.abs(a.netBalance));
 
   return (
-    <div className="space-y-6 md:space-y-8">
+    <div className="page-enter space-y-6 md:space-y-8">
       {/* Page Title */}
       <div>
         <h1 className="font-heading text-2xl md:text-3xl font-bold text-[var(--on-surface)]">
@@ -333,10 +346,8 @@ export default function PeopleDirectoryPage() {
       </section>
 
       {/* Cards Grid */}
-      {loading ? (
-        <div className="py-20 text-center font-mono text-xs text-[var(--on-surface-variant)]">
-          Loading contacts directory...
-        </div>
+      {loading && people.length === 0 ? (
+        <SkeletonDirectoryGrid cards={6} />
       ) : (
         <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredPeople.map((person) => (

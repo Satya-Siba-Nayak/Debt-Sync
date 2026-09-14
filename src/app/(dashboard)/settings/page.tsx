@@ -415,7 +415,7 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6 md:space-y-8">
+    <div className="page-enter max-w-2xl mx-auto space-y-6 md:space-y-8">
       <div>
         <h1 className="font-heading text-2xl md:text-3xl font-bold text-[var(--on-surface)]">
           Account Settings

@@ -20,41 +20,67 @@ export function LiveTicker({
 }: LiveTickerProps) {
   // Financial rule: Sub-cent fractional interest (< 0.01) is strictly 0 in base ledger calculation
   const sanitizedBase = totalInterestAccrued < 0.01 ? 0 : totalInterestAccrued;
-  const [liveVal, setLiveVal] = useState(sanitizedBase);
-  const startTimeRef = useRef<number>(Date.now());
+  const wholeRef = useRef<HTMLSpanElement | null>(null);
+  const fracRef = useRef<HTMLSpanElement | null>(null);
+  const animFrameRef = useRef<number | null>(null);
   const initialBaseRef = useRef<number>(sanitizedBase);
+  const startTimeRef = useRef<number>(Date.now());
 
-  // Sync when initial prop changes from fetch
   useEffect(() => {
     const base = totalInterestAccrued < 0.01 ? 0 : totalInterestAccrued;
     initialBaseRef.current = base;
     startTimeRef.current = Date.now();
-    setLiveVal(base);
-  }, [totalInterestAccrued]);
 
-  // Real-time continuous micro-accrual tick effect based on genuine dailyRate
+    const whole = Math.floor(base);
+    const frac = (base - whole).toFixed(4).substring(2);
+
+    if (wholeRef.current) {
+      wholeRef.current.textContent = whole.toLocaleString(currency === 'inr' ? 'en-IN' : 'en-US');
+    }
+    if (fracRef.current) {
+      fracRef.current.textContent = frac;
+    }
+  }, [totalInterestAccrued, currency]);
+
+  // High-performance continuous micro-accrual ticker without triggering React re-renders
   useEffect(() => {
     if (dailyRate <= 0) {
-      setLiveVal(initialBaseRef.current);
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       return;
     }
 
-    // Rate per millisecond: (dailyRate / 86,400,000)
     const ratePerMs = dailyRate / 86400000;
+    let lastRenderMs = 0;
 
-    const interval = setInterval(() => {
-      const elapsedMs = Date.now() - startTimeRef.current;
-      const computed = initialBaseRef.current + ratePerMs * elapsedMs;
-      setLiveVal(computed);
-    }, 50); // 20 updates per second for butter-smooth ticking
+    const tick = () => {
+      const now = Date.now();
+      // Throttle DOM text updates to ~15-20fps max for optimal CPU/battery efficiency
+      if (now - lastRenderMs >= 50) {
+        lastRenderMs = now;
+        const elapsedMs = now - startTimeRef.current;
+        const currentVal = initialBaseRef.current + ratePerMs * elapsedMs;
+        const whole = Math.floor(currentVal);
+        const frac = (currentVal - whole).toFixed(4).substring(2);
 
-    return () => clearInterval(interval);
-  }, [dailyRate]);
+        if (wholeRef.current) {
+          wholeRef.current.textContent = whole.toLocaleString(currency === 'inr' ? 'en-IN' : 'en-US');
+        }
+        if (fracRef.current) {
+          fracRef.current.textContent = frac;
+        }
+      }
+      animFrameRef.current = requestAnimationFrame(tick);
+    };
 
-  const wholePart = Math.floor(liveVal);
-  // Extract 4 decimal places for high-precision live compounding feedback (UI fun visualizer)
-  const fractional = (liveVal - wholePart).toFixed(4).substring(2);
+    animFrameRef.current = requestAnimationFrame(tick);
 
+    return () => {
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    };
+  }, [dailyRate, currency]);
+
+  const initialWhole = Math.floor(sanitizedBase).toLocaleString(currency === 'inr' ? 'en-IN' : 'en-US');
+  const initialFrac = (sanitizedBase - Math.floor(sanitizedBase)).toFixed(4).substring(2);
   const monthlyRate = dailyRate * 30.4375;
 
   return (
@@ -99,12 +125,12 @@ export function LiveTicker({
           <span className="mr-1 text-[var(--on-primary-container)] text-3xl">
             {currency === 'inr' ? '₹' : currency.toUpperCase() + ' '}
           </span>
-          <span className="tabular-nums">
-            {wholePart.toLocaleString(currency === 'inr' ? 'en-IN' : 'en-US')}
+          <span ref={wholeRef} className="tabular-nums">
+            {initialWhole}
           </span>
           <span className="text-2xl text-[var(--on-primary-container)]/80">.</span>
-          <span className="text-2xl text-[var(--on-primary-container)]/80 font-semibold tabular-nums w-[48px] text-left">
-            {fractional}
+          <span ref={fracRef} className="text-2xl text-[var(--on-primary-container)]/80 font-semibold tabular-nums w-[48px] text-left">
+            {initialFrac}
           </span>
         </div>
 

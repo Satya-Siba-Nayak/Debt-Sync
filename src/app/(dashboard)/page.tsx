@@ -13,32 +13,38 @@ import { Avatar } from '@/components/ui/Avatar';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { getDueDateInfo } from '@/lib/utils/due-date';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
+import { getLedgerCache, setLedgerCache, computeDashboardStats } from '@/lib/stores/ledger-store';
+import { SkeletonBalanceCards, SkeletonTableRows } from '@/components/ui/Skeleton';
 import Link from 'next/link';
 
 export default function GlobalDashboardPage() {
   const supabase = createClient();
 
-  const [loading, setLoading] = useState(true);
-  const [currency, setCurrency] = useState('inr');
-  const [debts, setDebts] = useState<Debt[]>([]);
-  const [payments, setPayments] = useState<Payment[]>([]);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const initialCache = getLedgerCache();
+  const [loading, setLoading] = useState(!initialCache);
+  const [currency, setCurrency] = useState(initialCache?.currency || 'inr');
+  const [debts, setDebts] = useState<Debt[]>(initialCache?.debts || []);
+  const [payments, setPayments] = useState<Payment[]>(initialCache?.payments || []);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(initialCache?.userId || null);
+
+  const initialStats = initialCache && initialCache.userId
+    ? computeDashboardStats(initialCache.debts, initialCache.payments, initialCache.userId)
+    : null;
 
   // Portfolio Totals
-  const [netPosition, setNetPosition] = useState(0);
-  const [totalLent, setTotalLent] = useState(0);
-  const [totalOwed, setTotalOwed] = useState(0);
-  const [activeLentCount, setActiveLentCount] = useState(0);
-  const [activeOwedCount, setActiveOwedCount] = useState(0);
-  const [totalInterestAccrued, setTotalInterestAccrued] = useState(0);
-  const [borrowingInterestAccrued, setBorrowingInterestAccrued] = useState(0);
-  const [dailyAccrualRate, setDailyAccrualRate] = useState(0);
+  const [netPosition, setNetPosition] = useState(initialStats?.netPosition ?? 0);
+  const [totalLent, setTotalLent] = useState(initialStats?.totalLent ?? 0);
+  const [totalOwed, setTotalOwed] = useState(initialStats?.totalOwed ?? 0);
+  const [activeLentCount, setActiveLentCount] = useState(initialStats?.activeLentCount ?? 0);
+  const [activeOwedCount, setActiveOwedCount] = useState(initialStats?.activeOwedCount ?? 0);
+  const [totalInterestAccrued, setTotalInterestAccrued] = useState(initialStats?.totalInterestAccrued ?? 0);
+  const [borrowingInterestAccrued, setBorrowingInterestAccrued] = useState(initialStats?.borrowingInterestAccrued ?? 0);
+  const [dailyAccrualRate, setDailyAccrualRate] = useState(initialStats?.dailyAccrualRate ?? 0);
   const isFetchingDashboardRef = useRef(false);
 
   const fetchDashboardData = useCallback(async () => {
     if (isFetchingDashboardRef.current) return;
     isFetchingDashboardRef.current = true;
-    setLoading(true);
     try {
       const user = await getCurrentUserFast(supabase);
       if (!user) return;
@@ -65,6 +71,7 @@ export default function GlobalDashboardPage() {
           .order('created_at', { ascending: false }),
       ]);
 
+      const activeCurrency = settingsRes.data?.default_currency || 'inr';
       if (settingsRes.data?.default_currency) {
         setCurrency(settingsRes.data.default_currency);
       }
@@ -90,45 +97,25 @@ export default function GlobalDashboardPage() {
       setDebts(allDebts);
       setPayments(allPayments);
 
-      // Compute calculations
-      let lentSum = 0;
-      let owedSum = 0;
-      let lentCount = 0;
-      let owedCount = 0;
-      let lenderInterestSum = 0;
-      let borrowerInterestSum = 0;
+      // Compute calculations instantly via shared utility
+      const stats = computeDashboardStats(allDebts, allPayments, user.id);
+      setTotalLent(stats.totalLent);
+      setTotalOwed(stats.totalOwed);
+      setNetPosition(stats.netPosition);
+      setActiveLentCount(stats.activeLentCount);
+      setActiveOwedCount(stats.activeOwedCount);
+      setTotalInterestAccrued(stats.totalInterestAccrued);
+      setBorrowingInterestAccrued(stats.borrowingInterestAccrued);
+      setDailyAccrualRate(stats.dailyAccrualRate);
 
-      for (const d of allDebts) {
-        if (d.status === 'settled' || d.status === 'declined') continue;
-
-        const debtPayments = allPayments.filter((p) => p.debt_id === d.id);
-        const calc = calculateDebtBalance(d, debtPayments);
-
-        if (d.lender_id === user.id) {
-          // User is lender: money owed TO user
-          lentSum += calc.currentBalance;
-          lentCount++;
-          lenderInterestSum += calc.totalAccruedInterest;
-        } else {
-          // User is borrower: money user OWES
-          owedSum += calc.currentBalance;
-          owedCount++;
-          borrowerInterestSum += calc.totalAccruedInterest;
-        }
-      }
-
-      setTotalLent(round2(lentSum));
-      setTotalOwed(round2(owedSum));
-      setNetPosition(round2(lentSum - owedSum));
-      setActiveLentCount(lentCount);
-      setActiveOwedCount(owedCount);
-      setTotalInterestAccrued(round2(lenderInterestSum));
-      setBorrowingInterestAccrued(round2(borrowerInterestSum));
-
-      const rates = calculatePortfolioAccrualRates(
-        allDebts.filter((d) => d.lender_id === user.id)
-      );
-      setDailyAccrualRate(rates.dailyInterestGrowth);
+      // Update hot client cache
+      setLedgerCache({
+        userId: user.id,
+        debts: allDebts,
+        payments: allPayments,
+        currency: activeCurrency,
+        timestamp: Date.now(),
+      });
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
     } finally {
@@ -197,7 +184,7 @@ export default function GlobalDashboardPage() {
   );
 
   return (
-    <div className="flex flex-col gap-6 md:gap-8">
+    <div className="page-enter flex flex-col gap-6 md:gap-8">
       {/* Incoming Agreements Awaiting Acceptance Alert */}
       {incomingPendingDebts.length > 0 && (
         <section className="bg-amber-500/10 border border-amber-500/30 dark:bg-amber-950/20 rounded-2xl p-5 md:p-6 space-y-4 animate-in fade-in duration-300">
@@ -260,15 +247,19 @@ export default function GlobalDashboardPage() {
       )}
 
       {/* 1. Top Bento Summary Grid */}
-      <BalanceCards
-        netPosition={netPosition}
-        totalLent={totalLent}
-        totalOwed={totalOwed}
-        activeLentCount={activeLentCount}
-        activeOwedCount={activeOwedCount}
-        currency={currency}
-        monthlyGrowth={dailyAccrualRate * 30}
-      />
+      {loading && debts.length === 0 ? (
+        <SkeletonBalanceCards />
+      ) : (
+        <BalanceCards
+          netPosition={netPosition}
+          totalLent={totalLent}
+          totalOwed={totalOwed}
+          activeLentCount={activeLentCount}
+          activeOwedCount={activeOwedCount}
+          currency={currency}
+          monthlyGrowth={dailyAccrualRate * 30}
+        />
+      )}
 
       {/* 2. Middle Row: Cashflow Trend Chart & Live Accrual Ticker */}
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -313,10 +304,8 @@ export default function GlobalDashboardPage() {
           </Link>
         </div>
 
-        {loading ? (
-          <div className="py-12 text-center font-mono text-xs text-[var(--on-surface-variant)]">
-            Loading ledger data...
-          </div>
+        {loading && debts.length === 0 ? (
+          <SkeletonTableRows rows={5} />
         ) : debts.length === 0 ? (
           <div className="py-12 text-center">
             <div className="w-12 h-12 rounded-full bg-[var(--surface-container)] flex items-center justify-center mx-auto mb-3 text-[var(--on-surface-variant)]">

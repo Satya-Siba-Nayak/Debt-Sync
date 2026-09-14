@@ -12,23 +12,25 @@ import { DebtDetailModal } from '@/components/debts/DebtDetailModal';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { getDueDateInfo } from '@/lib/utils/due-date';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
+import { getLedgerCache, setLedgerCache } from '@/lib/stores/ledger-store';
+import { SkeletonTableRows } from '@/components/ui/Skeleton';
 import Link from 'next/link';
 
 export default function TransactionsPage() {
   const supabase = createClient();
 
-  const [loading, setLoading] = useState(true);
-  const [debts, setDebts] = useState<Debt[]>([]);
-  const [payments, setPayments] = useState<Payment[]>([]);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [currency, setCurrency] = useState('inr');
+  const initialCache = getLedgerCache();
+  const [loading, setLoading] = useState(!initialCache);
+  const [debts, setDebts] = useState<Debt[]>(initialCache?.debts || []);
+  const [payments, setPayments] = useState<Payment[]>(initialCache?.payments || []);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(initialCache?.userId || null);
+  const [currency, setCurrency] = useState(initialCache?.currency || 'inr');
   const [filter, setFilter] = useState<'all' | 'lent' | 'borrowed' | 'settled' | 'declined'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDebtForNote, setSelectedDebtForNote] = useState<Debt | null>(null);
   const [selectedDebtForDetail, setSelectedDebtForDetail] = useState<Debt | null>(null);
 
   const fetchTransactions = useCallback(async () => {
-    setLoading(true);
     try {
       const user = await getCurrentUserFast(supabase);
       if (!user) return;
@@ -53,27 +55,36 @@ export default function TransactionsPage() {
           .order('created_at', { ascending: false }),
       ]);
 
+      const activeCurrency = settingsRes.data?.default_currency || currency;
       if (settingsRes.data?.default_currency) setCurrency(settingsRes.data.default_currency);
 
       const allDebts: Debt[] = (debtRowsRes.data as any) || [];
       setDebts(allDebts);
 
       const debtIds = allDebts.map((d) => d.id);
+      let allPayments: Payment[] = [];
       if (debtIds.length > 0) {
         const { data: paymentRows } = await supabase
           .from('payments')
           .select('*')
           .in('debt_id', debtIds);
-        setPayments((paymentRows as any) || []);
-      } else {
-        setPayments([]);
+        allPayments = (paymentRows as any) || [];
       }
+      setPayments(allPayments);
+
+      setLedgerCache({
+        userId: user.id,
+        debts: allDebts,
+        payments: allPayments,
+        currency: activeCurrency,
+        timestamp: Date.now(),
+      });
     } catch (err) {
       console.error('Error fetching transactions:', err);
     } finally {
       setLoading(false);
     }
-  }, [supabase]);
+  }, [supabase, currency]);
 
   const handleAcceptDebt = async (debtId: string, decision: 'active' | 'declined') => {
     try {
@@ -179,7 +190,7 @@ export default function TransactionsPage() {
     });
 
   return (
-    <div className="space-y-6 md:space-y-8">
+    <div className="page-enter space-y-6 md:space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="font-heading text-2xl md:text-3xl font-bold text-[var(--on-surface)]">
@@ -224,10 +235,8 @@ export default function TransactionsPage() {
       </div>
 
       <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 border border-[var(--outline-variant)]/30 shadow-sm overflow-x-auto">
-        {loading ? (
-          <div className="py-12 text-center font-mono text-xs text-[var(--on-surface-variant)]">
-            Loading transaction history...
-          </div>
+        {loading && debts.length === 0 ? (
+          <SkeletonTableRows rows={8} />
         ) : filteredDebts.length === 0 ? (
           <div className="py-12 text-center font-mono text-xs text-[var(--on-surface-variant)]">
             No transactions found for this filter.

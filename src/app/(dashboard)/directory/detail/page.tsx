@@ -16,6 +16,7 @@ import { getDueDateInfo } from '@/lib/utils/due-date';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { PersonAnalyticsChart } from '@/components/directory/PersonAnalyticsChart';
+import { SkeletonBalanceCards, SkeletonTableRows } from '@/components/ui/Skeleton';
 import Link from 'next/link';
 
 function PersonDebtDetailContent() {
@@ -376,9 +377,11 @@ function PersonDebtDetailContent() {
 
   if (loading) {
     return (
-      <div className="py-20 text-center font-mono text-xs text-on-surface-variant flex items-center justify-center gap-2">
-        <div className="w-4 h-4 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-        <span>Loading ledger details...</span>
+      <div className="page-enter space-y-6 md:space-y-8">
+        <div className="h-4 w-32 rounded-lg bg-[var(--surface-container-high)]/60 animate-pulse" />
+        <div className="h-24 rounded-2xl bg-[var(--surface-container-high)]/40 animate-pulse" />
+        <SkeletonBalanceCards />
+        <SkeletonTableRows rows={6} />
       </div>
     );
   }
@@ -395,7 +398,7 @@ function PersonDebtDetailContent() {
   }
 
   return (
-    <div className="space-y-6 md:space-y-8">
+    <div className="page-enter space-y-6 md:space-y-8">
       {/* Back Link */}
       <Link
         href="/directory"

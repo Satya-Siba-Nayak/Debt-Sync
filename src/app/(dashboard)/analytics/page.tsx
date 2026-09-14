@@ -7,18 +7,20 @@ import { calculateDebtBalance, round2 } from '@/lib/utils/interest';
 import { formatCurrency } from '@/lib/utils/currency';
 import { CashflowChart } from '@/components/dashboard/CashflowChart';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
+import { getLedgerCache, setLedgerCache } from '@/lib/stores/ledger-store';
+import { SkeletonBalanceCards } from '@/components/ui/Skeleton';
 
 export default function AnalyticsPage() {
   const supabase = createClient();
 
-  const [loading, setLoading] = useState(true);
-  const [currency, setCurrency] = useState('inr');
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [debts, setDebts] = useState<Debt[]>([]);
-  const [payments, setPayments] = useState<Payment[]>([]);
+  const initialCache = getLedgerCache();
+  const [loading, setLoading] = useState(!initialCache);
+  const [currency, setCurrency] = useState(initialCache?.currency || 'inr');
+  const [currentUserId, setCurrentUserId] = useState<string | null>(initialCache?.userId || null);
+  const [debts, setDebts] = useState<Debt[]>(initialCache?.debts || []);
+  const [payments, setPayments] = useState<Payment[]>(initialCache?.payments || []);
 
   const fetchAnalyticsData = useCallback(async () => {
-    setLoading(true);
     try {
       const user = await getCurrentUserFast(supabase);
       if (!user) return;
@@ -40,6 +42,7 @@ export default function AnalyticsPage() {
           .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`),
       ]);
 
+      const activeCurrency = settingsRes.data?.default_currency || currency;
       if (settingsRes.data?.default_currency) setCurrency(settingsRes.data.default_currency);
 
       const allDebts: Debt[] = (debtRowsRes.data as any) || [];
@@ -56,12 +59,20 @@ export default function AnalyticsPage() {
 
       setDebts(allDebts);
       setPayments(allPayments);
+
+      setLedgerCache({
+        userId: user.id,
+        debts: allDebts,
+        payments: allPayments,
+        currency: activeCurrency,
+        timestamp: Date.now(),
+      });
     } catch (err) {
       console.error('Error loading analytics:', err);
     } finally {
       setLoading(false);
     }
-  }, [supabase]);
+  }, [supabase, currency]);
 
   useEffect(() => {
     fetchAnalyticsData();
@@ -170,7 +181,7 @@ export default function AnalyticsPage() {
   });
 
   return (
-    <div className="space-y-6 md:space-y-8">
+    <div className="page-enter space-y-6 md:space-y-8">
       {/* Title */}
       <div>
         <h1 className="font-heading text-2xl md:text-3xl font-bold text-[var(--on-surface)]">
@@ -182,43 +193,47 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Top 4 Summary Cards */}
-      <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-[var(--surface-container-lowest)] p-5 rounded-2xl border border-[var(--outline-variant)]/30 shadow-sm">
-          <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider font-semibold">
-            Total Lent
-          </span>
-          <div className="font-heading text-2xl font-bold text-[var(--on-surface)] mt-2">
-            {formatCurrency(totalLent, currency)}
+      {loading && debts.length === 0 ? (
+        <SkeletonBalanceCards />
+      ) : (
+        <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-[var(--surface-container-lowest)] p-5 rounded-2xl border border-[var(--outline-variant)]/30 shadow-sm">
+            <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider font-semibold">
+              Total Lent
+            </span>
+            <div className="font-heading text-2xl font-bold text-[var(--on-surface)] mt-2">
+              {formatCurrency(totalLent, currency)}
+            </div>
           </div>
-        </div>
 
-        <div className="bg-[var(--surface-container-lowest)] p-5 rounded-2xl border border-[var(--outline-variant)]/30 shadow-sm">
-          <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider font-semibold">
-            Total Owed
-          </span>
-          <div className="font-heading text-2xl font-bold text-[var(--error)] mt-2">
-            {formatCurrency(totalOwed, currency)}
+          <div className="bg-[var(--surface-container-lowest)] p-5 rounded-2xl border border-[var(--outline-variant)]/30 shadow-sm">
+            <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider font-semibold">
+              Total Owed
+            </span>
+            <div className="font-heading text-2xl font-bold text-[var(--error)] mt-2">
+              {formatCurrency(totalOwed, currency)}
+            </div>
           </div>
-        </div>
 
-        <div className="bg-[var(--primary)] text-[var(--on-primary)] p-5 rounded-2xl shadow-md">
-          <span className="font-mono text-xs uppercase tracking-wider font-semibold text-[var(--on-primary-container)]">
-            Net Position
-          </span>
-          <div className="font-heading text-2xl font-bold mt-2">
-            {formatCurrency(netPosition, currency)}
+          <div className="bg-[var(--primary)] text-[var(--on-primary)] p-5 rounded-2xl shadow-md">
+            <span className="font-mono text-xs uppercase tracking-wider font-semibold text-[var(--on-primary-container)]">
+              Net Position
+            </span>
+            <div className="font-heading text-2xl font-bold mt-2">
+              {formatCurrency(netPosition, currency)}
+            </div>
           </div>
-        </div>
 
-        <div className="bg-[var(--surface-container-lowest)] p-5 rounded-2xl border border-[var(--outline-variant)]/30 shadow-sm">
-          <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider font-semibold">
-            Interest Accrued
-          </span>
-          <div className="font-heading text-2xl font-bold text-[var(--secondary)] mt-2">
-            +{formatCurrency(interestAccrued, currency, { showDecimals: true })}
+          <div className="bg-[var(--surface-container-lowest)] p-5 rounded-2xl border border-[var(--outline-variant)]/30 shadow-sm">
+            <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider font-semibold">
+              Interest Accrued
+            </span>
+            <div className="font-heading text-2xl font-bold text-[var(--secondary)] mt-2">
+              +{formatCurrency(interestAccrued, currency, { showDecimals: true })}
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* Interactive Financial Growth & Cashflow Chart */}
       <CashflowChart
