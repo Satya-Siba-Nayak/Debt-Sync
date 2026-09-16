@@ -5,6 +5,11 @@ import { createClient } from '@/lib/supabase/client';
 import { Avatar } from '../ui/Avatar';
 import { formatCurrency } from '@/lib/utils/currency';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
+import {
+  getNotificationPermission,
+  requestNotificationPermission,
+  sendWebNotification,
+} from '@/lib/utils/web-notifications';
 
 interface IncomingDebtRequest {
   id: string;
@@ -59,12 +64,27 @@ export function NotificationCenter() {
   const [pendingRepayments, setPendingRepayments] = useState<PendingRepayment[]>([]);
   const [loading, setLoading] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [webPermission, setWebPermission] = useState<'default' | 'granted' | 'denied' | 'unsupported'>('default');
 
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const isFetchingRef = useRef(false);
   const channelNameRef = useRef(`notification-center-${Math.random().toString(36).substring(2, 8)}`);
   const supabase = createClient();
+
+  useEffect(() => {
+    setWebPermission(getNotificationPermission());
+  }, []);
+
+  const handleEnableWebNotifications = async () => {
+    const granted = await requestNotificationPermission();
+    setWebPermission(granted ? 'granted' : 'denied');
+    if (granted) {
+      sendWebNotification('Notifications Enabled!', {
+        body: 'You will now receive instant desktop alerts for repayment requests and debt syncs.',
+      });
+    }
+  };
 
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
@@ -206,9 +226,33 @@ export function NotificationCenter() {
 
     const channel = supabase
       .channel(channelNameRef.current)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'debts' }, () => fetchNotifications())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, () => fetchNotifications())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'contact_requests' }, () => fetchNotifications())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'debts' }, (payload: any) => {
+        fetchNotifications();
+        if (payload.eventType === 'INSERT') {
+          sendWebNotification('New Debt Request', {
+            body: 'A counterparty has logged a debt request awaiting your review.',
+            tag: `debt-${payload.new?.id}`,
+          });
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, (payload: any) => {
+        fetchNotifications();
+        if (payload.eventType === 'INSERT') {
+          sendWebNotification('Repayment Reported', {
+            body: 'A borrower reported a repayment awaiting your verification.',
+            tag: `payment-${payload.new?.id}`,
+          });
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contact_requests' }, (payload: any) => {
+        fetchNotifications();
+        if (payload.eventType === 'INSERT') {
+          sendWebNotification('New Contact Request', {
+            body: 'You received a new contact connection request.',
+            tag: `contact-${payload.new?.id}`,
+          });
+        }
+      })
       .subscribe();
 
     return () => {
@@ -466,6 +510,27 @@ export function NotificationCenter() {
               Verify ({pendingRepayments.length})
             </button>
           </div>
+
+          {/* Web Desktop Notifications Prompt */}
+          {webPermission === 'default' && (
+            <div className="p-2.5 mx-3 mt-2 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-between text-xs text-on-surface">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="material-symbols-outlined text-primary text-[18px] shrink-0">
+                  notifications_active
+                </span>
+                <span className="truncate text-[11px] leading-tight">
+                  Turn on desktop alerts for new repayment and sync requests
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleEnableWebNotifications}
+                className="px-2.5 py-1 rounded-lg bg-primary text-on-primary text-[11px] font-mono font-bold hover:brightness-110 shrink-0 ml-2 shadow-xs"
+              >
+                Enable
+              </button>
+            </div>
+          )}
 
           {/* List Content */}
           <div className="overflow-y-auto p-3 space-y-3 flex-1 divide-y divide-outline-variant/10">

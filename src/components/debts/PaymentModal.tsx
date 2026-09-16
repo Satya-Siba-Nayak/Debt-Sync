@@ -7,6 +7,7 @@ import { Debt } from '@/lib/types/database';
 import { formatCurrency } from '@/lib/utils/currency';
 import { round2 } from '@/lib/utils/interest';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
+import { sendNotificationEmail } from '@/lib/utils/email-notifier';
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -23,7 +24,9 @@ export function PaymentModal({
   currentBalance,
   onPaymentRecorded,
 }: PaymentModalProps) {
-  const [amount, setAmount] = useState<number>(round2(Math.min(currentBalance, 500)));
+  const initialDefault = round2(Math.min(currentBalance, 500));
+  const [amountStr, setAmountStr] = useState<string>(() => (initialDefault > 0 ? String(initialDefault) : ''));
+  const [amount, setAmount] = useState<number>(initialDefault);
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(false);
   const [checkingLimits, setCheckingLimits] = useState(false);
@@ -32,6 +35,17 @@ export function PaymentModal({
   const [pendingAmount, setPendingAmount] = useState(0);
 
   const supabase = createClient();
+
+  const handleAmountChange = (val: string) => {
+    const sanitized = val.replace(/^0+(?=\d)/, '');
+    setAmountStr(sanitized);
+    setAmount(parseFloat(sanitized) || 0);
+  };
+
+  const setAmountUnified = (val: number) => {
+    setAmount(val);
+    setAmountStr(val > 0 ? String(val) : '');
+  };
 
   useEffect(() => {
     if (!isOpen) return;
@@ -66,10 +80,10 @@ export function PaymentModal({
           setPendingAmount(totalPending);
 
           const allowable = Math.max(0, round2(currentBalance - totalPending));
-          setAmount(round2(Math.min(allowable, 500)));
+          setAmountUnified(round2(Math.min(allowable, 500)));
         } else {
           setPendingAmount(0);
-          setAmount(round2(Math.min(currentBalance, 500)));
+          setAmountUnified(round2(Math.min(currentBalance, 500)));
         }
       } catch (err) {
         console.error('Error loading payment limits:', err);
@@ -157,6 +171,34 @@ export function PaymentModal({
         },
       });
 
+      // Dispatch email notification to lender when borrower reports a repayment
+      if (!userIsLender) {
+        (async () => {
+          try {
+            const { data: lenderProfile } = await supabase
+              .from('profiles')
+              .select('email, full_name')
+              .eq('id', debt.lender_id)
+              .single();
+
+            if (lenderProfile?.email && !lenderProfile.email.endsWith('@phone.debtsync.local')) {
+              sendNotificationEmail({
+                type: 'payment_request',
+                recipientEmail: lenderProfile.email,
+                recipientName: lenderProfile.full_name,
+                senderName: user.user_metadata?.full_name || user.email || 'The borrower',
+                amount: paymentAmount,
+                currency: debt.currency || 'inr',
+                notes: note.trim() || undefined,
+                debtId: debt.id,
+              });
+            }
+          } catch (notifErr) {
+            console.error('Failed to dispatch payment notification email:', notifErr);
+          }
+        })();
+      }
+
       window.dispatchEvent(new CustomEvent('debtsync:refresh'));
       onPaymentRecorded?.();
       onClose();
@@ -234,7 +276,7 @@ export function PaymentModal({
             {maxAllowable > 0 && (
               <button
                 type="button"
-                onClick={() => setAmount(round2(maxAllowable))}
+                onClick={() => setAmountUnified(round2(maxAllowable))}
                 className="font-mono text-xs text-[var(--primary)] font-bold hover:underline"
               >
                 Pay Full ({formatCurrency(round2(maxAllowable), debt.currency || 'inr', { showDecimals: true })})
@@ -248,8 +290,10 @@ export function PaymentModal({
             step="0.01"
             required
             disabled={isBlockedByPending || loading || checkingLimits}
-            value={amount}
-            onChange={(e) => setAmount(Number(e.target.value))}
+            value={amountStr}
+            placeholder="0.00"
+            onChange={(e) => handleAmountChange(e.target.value)}
+            onFocus={(e) => e.target.select()}
             className="w-full px-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-lg font-bold outline-none focus:border-[var(--primary)] disabled:opacity-50 disabled:bg-[var(--surface-container-low)]"
           />
         </div>

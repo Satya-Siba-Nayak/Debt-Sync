@@ -6,9 +6,11 @@ import { createClient } from '@/lib/supabase/client';
 import { Contact, Profile } from '@/lib/types/database';
 import { formatCurrency, SUPPORTED_CURRENCIES } from '@/lib/utils/currency';
 import { projectDebtGrowth, round2, calculateDebtBalance } from '@/lib/utils/interest';
-import { findProfileByIdentifier } from '@/lib/utils/profile-lookup';
+import { findProfileByIdentifier, searchProfiles } from '@/lib/utils/profile-lookup';
 import { checkDebtRequestCooldown, type CooldownCheckResult } from '@/lib/utils/debt-cooldown';
+import { sendNotificationEmail } from '@/lib/utils/email-notifier';
 import { PhoneInput } from '../ui/PhoneInput';
+import { Avatar } from '../ui/Avatar';
 
 interface RecordDebtModalProps {
   isOpen: boolean;
@@ -22,6 +24,8 @@ interface PersonOption {
   name: string;
   email: string;
   phone?: string | null;
+  avatar_url?: string | null;
+  isPlatformUser?: boolean;
 }
 
 export function RecordDebtModal({
@@ -36,6 +40,8 @@ export function RecordDebtModal({
   const [people, setPeople] = useState<PersonOption[]>([]);
   const [selectedPersonId, setSelectedPersonId] = useState(preselectedContactId || '');
   const [personSearch, setPersonSearch] = useState('');
+  const [platformSearchResults, setPlatformSearchResults] = useState<PersonOption[]>([]);
+  const [isSearchingPlatform, setIsSearchingPlatform] = useState(false);
   const [newPersonName, setNewPersonName] = useState('');
   const [newPersonEmail, setNewPersonEmail] = useState('');
   const [newPersonPhone, setNewPersonPhone] = useState('');
@@ -46,10 +52,13 @@ export function RecordDebtModal({
   const [cooldown, setCooldown] = useState<CooldownCheckResult | null>(null);
   const [checkingCooldown, setCheckingCooldown] = useState(false);
 
+  // Numeric states backed by clean strings to avoid leading zero bugs and support 2 decimal places
+  const [principalStr, setPrincipalStr] = useState<string>('1500');
   const [principal, setPrincipal] = useState<number>(1500);
   const [currency, setCurrency] = useState('inr');
   const [direction, setDirection] = useState<'lent' | 'borrowed'>('lent'); // lent = current user is lender
   const [interestType, setInterestType] = useState<'none' | 'simple' | 'compound'>('simple');
+  const [interestRateStr, setInterestRateStr] = useState<string>('5.00');
   const [interestRate, setInterestRate] = useState<number>(5.0);
   const [compoundFreq, setCompoundFreq] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('monthly');
   const [transactionDate, setTransactionDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
@@ -185,6 +194,96 @@ export function RecordDebtModal({
     }
   }, [isOpen, preselectedContactId, supabase]);
 
+  // Live platform profile search with debouncing
+  useEffect(() => {
+    const term = personSearch.trim();
+    if (term.length < 2) {
+      setPlatformSearchResults([]);
+      setIsSearchingPlatform(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsSearchingPlatform(true);
+      try {
+        const found = await searchProfiles(term, 5);
+        const newResults: PersonOption[] = [];
+        for (const p of found) {
+          if (!people.some((existing) => existing.id === p.id)) {
+            newResults.push({
+              id: p.id,
+              name: p.full_name || p.email,
+              email: p.email,
+              phone: p.phone,
+              avatar_url: p.avatar_url,
+              isPlatformUser: true,
+            });
+          }
+        }
+        setPlatformSearchResults(newResults);
+
+        // Auto-select if an exact email or exact phone matches an existing account
+        const cleanTerm = term.toLowerCase();
+        const cleanDigits = term.replace(/[^\d]/g, '');
+        const exactMatch =
+          people.find(
+            (p) =>
+              (p.email && p.email.toLowerCase() === cleanTerm) ||
+              (p.phone && cleanDigits.length >= 10 && p.phone.replace(/[^\d]/g, '').slice(-10) === cleanDigits.slice(-10))
+          ) ||
+          newResults.find(
+            (p) =>
+              (p.email && p.email.toLowerCase() === cleanTerm) ||
+              (p.phone && cleanDigits.length >= 10 && p.phone.replace(/[^\d]/g, '').slice(-10) === cleanDigits.slice(-10))
+          );
+
+        if (exactMatch && !selectedPersonId) {
+          setSelectedPersonId(exactMatch.id);
+          setIsAddingNewPerson(false);
+        }
+      } catch (err) {
+        console.error('Failed to search platform profiles:', err);
+      } finally {
+        setIsSearchingPlatform(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [personSearch, people, selectedPersonId]);
+
+  // Handlers to eliminate leading-zero typing glitches
+  const handlePrincipalChange = (val: string) => {
+    // Strip leading zeros if followed by another digit, e.g. "05" -> "5"
+    const sanitized = val.replace(/^0+(?=\d)/, '');
+    setPrincipalStr(sanitized);
+    setPrincipal(parseFloat(sanitized) || 0);
+  };
+
+  const handleInterestRateChange = (val: string) => {
+    const sanitized = val.replace(/^0+(?=\d)/, '');
+    setInterestRateStr(sanitized);
+    const num = parseFloat(sanitized);
+    if (isNaN(num) || num < 0) {
+      setInterestRate(0);
+    } else {
+      setInterestRate(Math.min(500, Math.round((num + Number.EPSILON) * 100) / 100));
+    }
+  };
+
+  const filteredPeople = people.filter((p) => {
+    if (!personSearch.trim()) return true;
+    const s = personSearch.toLowerCase();
+    return (
+      p.name?.toLowerCase().includes(s) ||
+      p.email?.toLowerCase().includes(s) ||
+      p.phone?.includes(s)
+    );
+  });
+
+  const selectedPerson =
+    people.find((p) => p.id === (selectedPersonId || preselectedContactId)) ||
+    platformSearchResults.find((p) => p.id === (selectedPersonId || preselectedContactId));
+
   // Projected growth preview (12 months)
   const projection = projectDebtGrowth(
     Number(principal) || 0,
@@ -244,18 +343,32 @@ export function RecordDebtModal({
         if (existingProfile) {
           targetUserId = existingProfile.id;
         } else {
-          // Create shadow profile
+          // Create ghost / shadow profile
           const shadowId = crypto.randomUUID();
           const fallbackEmail = targetEmail || `${targetPhone.replace(/[^\d]/g, '')}@phone.debtsync.local`;
+          const finalName = newPersonName.trim() || (targetEmail ? targetEmail.split('@')[0] : targetPhone);
           const { error: shadowError } = await supabase.from('profiles').insert({
             id: shadowId,
             email: fallbackEmail,
-            full_name: newPersonName.trim() || (targetEmail ? targetEmail.split('@')[0] : targetPhone),
+            full_name: finalName,
             phone: targetPhone || null,
             is_shadow: true,
           });
           if (shadowError) throw shadowError;
           targetUserId = shadowId;
+
+          // Dispatch rate-limited invitation email if an actual email was provided
+          if (targetEmail && !targetEmail.endsWith('@phone.debtsync.local')) {
+            sendNotificationEmail({
+              type: 'ghost_account_invite',
+              recipientEmail: targetEmail,
+              recipientName: finalName,
+              senderName: user.user_metadata?.full_name || user.email || 'A DebtSync user',
+              amount: round2(Number(principal)),
+              currency,
+              notes: notes.trim() || undefined,
+            });
+          }
         }
       } else if (!targetUserId && people.length > 0) {
         targetUserId = people[0].id;
@@ -315,6 +428,22 @@ export function RecordDebtModal({
           interest_rate: interestRate,
         },
       });
+      // Send debt_recorded email notification to existing counterparty if they have an email
+      if (!isAddingNewPerson && targetUserId) {
+        const targetPerson = people.find((p) => p.id === targetUserId);
+        if (targetPerson?.email && !targetPerson.email.endsWith('@phone.debtsync.local')) {
+          sendNotificationEmail({
+            type: 'debt_recorded',
+            recipientEmail: targetPerson.email,
+            recipientName: targetPerson.name,
+            senderName: user.user_metadata?.full_name || user.email || 'A DebtSync user',
+            amount: round2(Number(principal)),
+            currency,
+            notes: notes.trim() || undefined,
+            debtId: debt.id,
+          });
+        }
+      }
 
       setNewPersonName('');
       setNewPersonEmail('');
@@ -330,16 +459,6 @@ export function RecordDebtModal({
       setLoading(false);
     }
   };
-
-  const filteredPeople = people.filter((p) => {
-    if (!personSearch.trim()) return true;
-    const q = personSearch.toLowerCase();
-    return (
-      p.name.toLowerCase().includes(q) ||
-      p.email.toLowerCase().includes(q) ||
-      (p.phone && p.phone.includes(q))
-    );
-  });
 
   return (
     <Modal
@@ -377,72 +496,228 @@ export function RecordDebtModal({
             <div>
               <div className="flex justify-between items-center mb-1.5">
                 <label className="font-mono text-xs tracking-wider uppercase text-[var(--on-surface-variant)]">
-                  Select Person
+                  Counterparty
                 </label>
-                <button
-                  type="button"
-                  onClick={() => setIsAddingNewPerson(!isAddingNewPerson)}
-                  className="text-xs text-[var(--primary)] font-bold hover:underline"
-                >
-                  {isAddingNewPerson ? 'Select Existing' : '+ New Person'}
-                </button>
+                {!isAddingNewPerson ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAddingNewPerson(true);
+                      setSelectedPersonId('');
+                      if (personSearch.includes('@')) {
+                        setNewPersonEmail(personSearch);
+                      } else if (/^\+?\d+$/.test(personSearch.trim())) {
+                        setNewPersonPhone(personSearch);
+                      } else if (personSearch.trim()) {
+                        setNewPersonName(personSearch);
+                      }
+                    }}
+                    className="text-xs text-[var(--primary)] font-bold hover:underline flex items-center gap-1"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">person_add</span>
+                    <span>+ New Person (Ghost)</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingNewPerson(false)}
+                    className="text-xs text-[var(--primary)] font-bold hover:underline flex items-center gap-1"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">arrow_back</span>
+                    <span>Select Existing</span>
+                  </button>
+                )}
               </div>
 
-              {!isAddingNewPerson ? (
-                <div className="space-y-2">
-                  {people.length > 3 && (
-                    <div className="relative">
-                      <span className="material-symbols-outlined absolute left-3 top-2.5 text-[16px] text-[var(--on-surface-variant)]">
-                        search
-                      </span>
-                      <input
-                        type="text"
-                        placeholder="Search contact name, email, or phone..."
-                        value={personSearch}
-                        onChange={(e) => setPersonSearch(e.target.value)}
-                        className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-[var(--outline-variant)]/30 bg-[var(--surface-container-lowest)] text-xs text-[var(--on-surface)] outline-none focus:border-[var(--primary)]"
-                      />
-                    </div>
-                  )}
+              {isAddingNewPerson ? (
+                <div className="space-y-3 p-3.5 bg-[var(--surface-container-low)] rounded-xl border border-[var(--outline-variant)]/30">
+                  <div className="flex items-center gap-2 text-xs font-mono text-[var(--on-surface-variant)] pb-1 border-b border-[var(--outline-variant)]/15">
+                    <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">person_pin</span>
+                    <span className="font-bold uppercase tracking-wider">New Person / Ghost Account</span>
+                  </div>
 
-                  <select
-                    value={selectedPersonId || preselectedContactId || (filteredPeople[0]?.id ?? '')}
-                    onChange={(e) => setSelectedPersonId(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--primary)]/10 outline-none text-sm font-medium"
+                  <div>
+                    <label className="block text-[11px] font-mono text-[var(--on-surface-variant)] mb-1">
+                      Full Name <span className="text-[var(--error)]">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Sarah Jenkins"
+                      value={newPersonName}
+                      onChange={(e) => setNewPersonName(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 rounded-lg border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-sm outline-none focus:border-[var(--primary)]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-mono text-[var(--on-surface-variant)] mb-1">
+                      Email Address <span className="text-[var(--outline)]">(Optional - invites them if known)</span>
+                    </label>
+                    <input
+                      type="email"
+                      placeholder="e.g. sarah@example.com (leave blank if unknown)"
+                      value={newPersonEmail}
+                      onChange={(e) => setNewPersonEmail(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-sm outline-none focus:border-[var(--primary)]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-mono text-[var(--on-surface-variant)] mb-1">
+                      Phone Number <span className="text-[var(--error)]">* (Compulsory primary contact)</span>
+                    </label>
+                    <PhoneInput
+                      value={newPersonPhone}
+                      onChange={setNewPersonPhone}
+                      defaultCountryCode={defaultCountryCode}
+                      placeholder="Primary phone number"
+                      required
+                    />
+                  </div>
+
+                  <p className="text-[11px] text-[var(--on-surface-variant)]/80 leading-relaxed bg-[var(--surface)] p-2 rounded-lg border border-[var(--outline-variant)]/20">
+                    <span className="font-bold text-[var(--on-surface)]">Note:</span> If email is unknown, we will track this person by their phone number. A claimable ghost account will be created.
+                  </p>
+                </div>
+              ) : selectedPerson ? (
+                <div className="p-3 bg-[var(--surface-container-low)] rounded-xl border border-[var(--primary)]/30 flex items-center justify-between">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Avatar name={selectedPerson.name} src={selectedPerson.avatar_url} size="md" />
+                    <div className="min-w-0">
+                      <div className="font-semibold text-sm text-[var(--on-surface)] flex items-center gap-1.5 truncate">
+                        <span className="truncate">{selectedPerson.name}</span>
+                        {selectedPerson.isPlatformUser && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)] shrink-0">
+                            Registered
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-[var(--on-surface-variant)] truncate">
+                        {selectedPerson.email || selectedPerson.phone || 'Contact'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedPersonId('');
+                      setPersonSearch('');
+                    }}
+                    className="px-2.5 py-1 text-xs font-mono font-semibold rounded-lg bg-[var(--surface)] text-[var(--primary)] border border-[var(--outline-variant)]/30 hover:bg-[var(--surface-container-high)] shrink-0 ml-2"
                   >
-                    {filteredPeople.length === 0 && (
-                      <option value="">No contacts match your search</option>
-                    )}
-                    {filteredPeople.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} {p.email ? `(${p.email})` : p.phone ? `(${p.phone})` : ''}
-                      </option>
-                    ))}
-                  </select>
+                    Change
+                  </button>
                 </div>
               ) : (
-                <div className="space-y-2.5 p-3 bg-[var(--surface)] rounded-xl border border-[var(--outline-variant)]/30">
-                  <input
-                    type="text"
-                    placeholder="Full Name (e.g. Sarah Jenkins)"
-                    value={newPersonName}
-                    onChange={(e) => setNewPersonName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-[var(--outline-variant)]/40 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] text-sm outline-none focus:border-[var(--primary)]"
-                  />
-                  <input
-                    type="email"
-                    placeholder="Email Address (e.g. sarah@example.com)"
-                    value={newPersonEmail}
-                    onChange={(e) => setNewPersonEmail(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-[var(--outline-variant)]/40 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] text-sm outline-none focus:border-[var(--primary)]"
-                  />
-                  <PhoneInput
-                    value={newPersonPhone}
-                    onChange={setNewPersonPhone}
-                    defaultCountryCode={defaultCountryCode}
-                    placeholder="Phone Number (compulsory primary contact)"
-                    required
-                  />
+                <div className="space-y-2">
+                  <div className="relative">
+                    <span className="material-symbols-outlined absolute left-3 top-2.5 text-[16px] text-[var(--on-surface-variant)]">
+                      search
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="Search by name, email, or phone..."
+                      value={personSearch}
+                      onChange={(e) => setPersonSearch(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-sm text-[var(--on-surface)] outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)]/30"
+                      autoFocus
+                    />
+                    {isSearchingPlatform && (
+                      <span className="material-symbols-outlined absolute right-3 top-2.5 text-[16px] text-[var(--primary)] animate-spin">
+                        progress_activity
+                      </span>
+                    )}
+                  </div>
+
+                  {/* List of matching contacts and platform users */}
+                  <div className="max-h-48 overflow-y-auto space-y-1 rounded-xl border border-[var(--outline-variant)]/20 p-1.5 bg-[var(--surface-container-low)]">
+                    {filteredPeople.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedPersonId(p.id);
+                          setPersonSearch('');
+                        }}
+                        className="w-full text-left p-2 rounded-lg hover:bg-[var(--surface)] transition-colors flex items-center justify-between group"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <Avatar name={p.name} src={p.avatar_url} size="sm" />
+                          <div className="min-w-0">
+                            <div className="text-xs font-semibold text-[var(--on-surface)] truncate">
+                              {p.name}
+                            </div>
+                            <div className="text-[11px] text-[var(--on-surface-variant)] truncate">
+                              {p.email || p.phone}
+                            </div>
+                          </div>
+                        </div>
+                        <span className="text-[11px] font-mono text-[var(--outline)] group-hover:text-[var(--primary)]">
+                          Select
+                        </span>
+                      </button>
+                    ))}
+
+                    {platformSearchResults.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => {
+                          setPeople((prev) => [...prev, p]);
+                          setSelectedPersonId(p.id);
+                          setPersonSearch('');
+                        }}
+                        className="w-full text-left p-2 rounded-lg hover:bg-[var(--surface)] transition-colors flex items-center justify-between group"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <Avatar name={p.name} src={p.avatar_url} size="sm" />
+                          <div className="min-w-0">
+                            <div className="text-xs font-semibold text-[var(--on-surface)] flex items-center gap-1 truncate">
+                              <span className="truncate">{p.name}</span>
+                              <span className="px-1 py-0.2 rounded text-[9px] font-mono bg-[var(--primary)]/10 text-[var(--primary)]">
+                                DebtSync
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-[var(--on-surface-variant)] truncate">
+                              {p.email || p.phone}
+                            </div>
+                          </div>
+                        </div>
+                        <span className="text-[11px] font-mono text-[var(--primary)]">
+                          Connect
+                        </span>
+                      </button>
+                    ))}
+
+                    {filteredPeople.length === 0 && platformSearchResults.length === 0 && (
+                      <div className="p-3 text-center space-y-2">
+                        <p className="text-xs text-[var(--on-surface-variant)]">
+                          {personSearch.trim().length >= 2
+                            ? `No account found for "${personSearch}".`
+                            : 'No contacts found.'}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsAddingNewPerson(true);
+                            if (personSearch.includes('@')) {
+                              setNewPersonEmail(personSearch);
+                            } else if (/^\+?\d+$/.test(personSearch.trim())) {
+                              setNewPersonPhone(personSearch);
+                            } else if (personSearch.trim()) {
+                              setNewPersonName(personSearch);
+                            }
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--primary)] text-[var(--on-primary)] text-xs font-mono font-bold hover:brightness-110 shadow-xs"
+                        >
+                          <span className="material-symbols-outlined text-[14px]">person_add</span>
+                          <span>Create Ghost Account</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -458,8 +733,10 @@ export function RecordDebtModal({
                     type="number"
                     min="0.01"
                     step="0.01"
-                    value={principal}
-                    onChange={(e) => setPrincipal(Number(e.target.value))}
+                    value={principalStr}
+                    placeholder="0.00"
+                    onChange={(e) => handlePrincipalChange(e.target.value)}
+                    onFocus={(e) => e.target.select()}
                     required
                     className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-lg font-bold outline-none focus:border-[var(--primary)]"
                   />
@@ -586,17 +863,11 @@ export function RecordDebtModal({
                           type="number"
                           min="0"
                           max="500"
-                          step="0.1"
-                          value={interestRate === 0 ? '' : interestRate}
-                          placeholder="0.0"
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            if (isNaN(val) || val < 0) {
-                              setInterestRate(0);
-                            } else {
-                              setInterestRate(Math.min(500, Math.round((val + Number.EPSILON) * 100) / 100));
-                            }
-                          }}
+                          step="0.01"
+                          value={interestRateStr}
+                          placeholder="0.00"
+                          onChange={(e) => handleInterestRateChange(e.target.value)}
+                          onFocus={(e) => e.target.select()}
                           className="w-full px-3 py-1.5 rounded-lg border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-sm font-bold text-right pr-7 outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)]/30"
                         />
                         <span className="absolute right-2.5 top-1/2 -translate-y-1/2 font-mono text-xs font-bold text-[var(--primary)] pointer-events-none">
@@ -610,9 +881,13 @@ export function RecordDebtModal({
                         type="range"
                         min="0"
                         max="100"
-                        step="0.5"
+                        step="0.05"
                         value={Math.min(100, Math.max(0, interestRate))}
-                        onChange={(e) => setInterestRate(Number(e.target.value))}
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          setInterestRate(val);
+                          setInterestRateStr(val.toFixed(2));
+                        }}
                         className="w-full accent-[var(--primary)] cursor-pointer"
                       />
                       <div className="flex justify-between font-mono text-[10px] text-[var(--outline)] px-0.5">
@@ -631,7 +906,10 @@ export function RecordDebtModal({
                         <button
                           key={preset}
                           type="button"
-                          onClick={() => setInterestRate(preset)}
+                          onClick={() => {
+                            setInterestRate(preset);
+                            setInterestRateStr(preset.toFixed(2));
+                          }}
                           className={`px-2 py-0.5 rounded-md font-mono text-xs transition-all cursor-pointer ${
                             interestRate === preset
                               ? 'bg-[var(--primary)] text-[var(--on-primary)] font-bold shadow-xs'

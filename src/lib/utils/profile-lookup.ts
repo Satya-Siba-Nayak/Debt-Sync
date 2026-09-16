@@ -183,3 +183,26 @@ export async function checkIdentifierConflict(
 
   return { hasConflict: false };
 }
+
+/**
+ * Searches profiles by name, email, or phone prefix/substring.
+ */
+export async function searchProfiles(searchTerm: string, limit = 5): Promise<Profile[]> {
+  const clean = searchTerm.trim();
+  if (!clean || clean.length < 2) return [];
+
+  const supabase = createClient();
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, full_name, email, phone, avatar_url, is_shadow')
+      .or(`full_name.ilike.%${clean}%,email.ilike.%${clean}%,phone.ilike.%${clean}%`)
+      .limit(limit);
+
+    if (error || !data) return [];
+    return data as Profile[];
+  } catch (err) {
+    console.error('Error searching profiles:', err);
+    return [];
+  }
+}
