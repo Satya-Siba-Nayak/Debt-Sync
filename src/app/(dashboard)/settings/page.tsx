@@ -55,7 +55,6 @@ export default function SettingsPage() {
   const [showAdvancedApp, setShowAdvancedApp] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [viewMode, setViewMode] = useState<'admin' | 'user'>('admin');
-  const [promotingAdmin, setPromotingAdmin] = useState(false);
 
   // Account deletion & CSV export states
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -370,29 +369,6 @@ export default function SettingsPage() {
       window.dispatchEvent(new CustomEvent('debtsync:view_mode_changed', { detail: { mode } }));
     }
     setMessage(`Switched to ${mode === 'admin' ? 'Administrator' : 'Normal User'} display view.`);
-  };
-
-  const handlePromoteToAdmin = async () => {
-    setPromotingAdmin(true);
-    setMessage('');
-    setError('');
-    try {
-      const user = await getCurrentUserFast(supabase);
-      if (!user) return;
-      const { error: rpcErr } = await supabase.rpc('promote_user_to_admin');
-      if (rpcErr) {
-        await supabase.from('profiles').update({ is_admin: true }).eq('id', user.id);
-      }
-      setIsAdmin(true);
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('debtsync:user_updated', { detail: { isAdmin: true } }));
-      }
-      setMessage('Your account has been granted Administrator privileges.');
-    } catch (err: any) {
-      setError(err.message || 'Failed to promote account to admin.');
-    } finally {
-      setPromotingAdmin(false);
-    }
   };
 
   const handleExportCSV = async () => {
@@ -939,86 +915,71 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Administrator Privileges & View Controls */}
-        <div className="pt-6 border-t border-[var(--outline-variant)]/20 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="font-mono text-xs uppercase tracking-wider font-semibold text-[var(--on-surface-variant)] flex items-center gap-1.5">
-              <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">admin_panel_settings</span>
-              <span>Administrator Privileges &amp; View Controls</span>
-            </h3>
-            <span
-              className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
-                isAdmin
-                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                  : 'bg-[var(--surface-container-high)] text-[var(--outline)]'
-              }`}
-            >
-              {isAdmin ? 'ADMIN ACCOUNT' : 'STANDARD USER'}
-            </span>
-          </div>
-
-          <p className="text-xs text-[var(--on-surface-variant)]">
-            Control platform monitoring, inspect global ledgers, and toggle between Administrator and Normal User viewing modes.
-          </p>
-
-          <div className="p-4 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <span className="font-mono text-xs font-bold text-[var(--on-surface)] block">
-                  Active Display Mode
-                </span>
-                <span className="text-[11px] font-mono text-[var(--on-surface-variant)]">
-                  Switching to Normal User View simulates the standard client experience.
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleToggleViewMode('user')}
-                  className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold transition-all cursor-pointer ${
-                    viewMode === 'user'
-                      ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-sm'
-                      : 'bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
-                  }`}
-                >
-                  👤 Normal View
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleToggleViewMode('admin')}
-                  className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold transition-all cursor-pointer ${
-                    viewMode === 'admin'
-                      ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-sm'
-                      : 'bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
-                  }`}
-                >
-                  ⚡ Admin View
-                </button>
-              </div>
+        {/* Administrator Privileges & View Controls (Visible strictly to authenticated Admins) */}
+        {isAdmin && (
+          <div className="pt-6 border-t border-[var(--outline-variant)]/20 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-mono text-xs uppercase tracking-wider font-semibold text-[var(--on-surface-variant)] flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">admin_panel_settings</span>
+                <span>Administrator Privileges &amp; View Controls</span>
+              </h3>
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                ADMIN ACCOUNT
+              </span>
             </div>
 
-            <div className="pt-2 border-t border-[var(--outline-variant)]/15 flex flex-wrap items-center justify-between gap-2">
-              <Link
-                href="/admin"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:brightness-110 shadow-xs"
-              >
-                <span className="material-symbols-outlined text-[15px]">dashboard</span>
-                <span>Open Admin Observatory</span>
-              </Link>
+            <p className="text-xs text-[var(--on-surface-variant)]">
+              Control platform monitoring, inspect global ledgers, and toggle between Administrator and Normal User viewing modes.
+            </p>
 
-              {!isAdmin && (
-                <button
-                  type="button"
-                  disabled={promotingAdmin}
-                  onClick={handlePromoteToAdmin}
-                  className="px-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container-high)] text-[var(--primary)] font-mono text-xs font-bold transition-colors cursor-pointer"
+            <div className="p-4 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <span className="font-mono text-xs font-bold text-[var(--on-surface)] block">
+                    Active Display Mode
+                  </span>
+                  <span className="text-[11px] font-mono text-[var(--on-surface-variant)]">
+                    Switching to Normal User View simulates the standard client experience.
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleViewMode('user')}
+                    className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold transition-all cursor-pointer ${
+                      viewMode === 'user'
+                        ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-sm'
+                        : 'bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                    }`}
+                  >
+                    👤 Normal View
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleViewMode('admin')}
+                    className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold transition-all cursor-pointer ${
+                      viewMode === 'admin'
+                        ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-sm'
+                        : 'bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                    }`}
+                  >
+                    ⚡ Admin View
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-[var(--outline-variant)]/15 flex flex-wrap items-center justify-between gap-2">
+                <Link
+                  href="/admin"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:brightness-110 shadow-xs"
                 >
-                  {promotingAdmin ? 'Promoting...' : 'Make My Account an Admin'}
-                </button>
-              )}
+                  <span className="material-symbols-outlined text-[15px]">dashboard</span>
+                  <span>Open Admin Observatory</span>
+                </Link>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Advanced App & System Options (Discreet & Collapsible) */}
         <div className="pt-6 border-t border-[var(--outline-variant)]/20">

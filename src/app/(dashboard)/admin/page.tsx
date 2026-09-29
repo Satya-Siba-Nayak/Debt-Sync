@@ -27,7 +27,6 @@ export default function AdminDashboardPage() {
   const [activeTab, setActiveTab] = useState<AdminTab>('overview');
   const [currency, setCurrency] = useState('inr');
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [promotingSelf, setPromotingSelf] = useState(false);
 
   // Raw platform records
   const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
@@ -311,25 +310,42 @@ export default function AdminDashboardPage() {
 
   const isCurrentUserAdmin = allProfiles.find((p) => p.id === currentUserId)?.is_admin ?? false;
 
-  const handlePromoteSelf = async () => {
-    setPromotingSelf(true);
-    try {
-      const user = await getCurrentUserFast(supabase);
-      if (!user) return;
-      const { error: rpcErr } = await supabase.rpc('promote_user_to_admin');
-      if (rpcErr) {
-        await supabase.from('profiles').update({ is_admin: true }).eq('id', user.id);
-      }
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('debtsync:user_updated', { detail: { isAdmin: true } }));
-      }
-      await fetchAdminData();
-    } catch (err) {
-      console.error('Failed to promote user to admin:', err);
-    } finally {
-      setPromotingSelf(false);
-    }
-  };
+  if (!loading && !isCurrentUserAdmin) {
+    const currentEmail = allProfiles.find((p) => p.id === currentUserId)?.email || 'your-email@example.com';
+    return (
+      <div className="page-enter min-h-[65vh] flex flex-col items-center justify-center text-center p-6 space-y-5 max-w-lg mx-auto">
+        <div className="w-16 h-16 rounded-2xl bg-red-500/10 text-red-500 flex items-center justify-center border border-red-500/20 shadow-sm">
+          <span className="material-symbols-outlined text-[34px]">lock</span>
+        </div>
+        <div className="space-y-1.5">
+          <h1 className="font-heading text-2xl font-bold text-[var(--on-surface)]">
+            Access Restricted
+          </h1>
+          <p className="font-mono text-xs text-[var(--on-surface-variant)] leading-relaxed">
+            The Admin Observatory requires verified Administrator privileges. In accordance with security policy, admin status cannot be self-assigned in-app and must be granted directly via database access.
+          </p>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 font-mono text-xs text-left w-full space-y-2">
+          <div className="font-semibold text-[var(--on-surface)] flex items-center gap-1.5">
+            <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">terminal</span>
+            <span>Grant via Supabase SQL Editor:</span>
+          </div>
+          <code className="block p-2.5 rounded-xl bg-[var(--surface-container-high)] text-[var(--primary)] text-[11px] select-all break-all border border-[var(--outline-variant)]/20">
+            UPDATE public.profiles SET is_admin = true WHERE email = &apos;{currentEmail}&apos;;
+          </code>
+        </div>
+
+        <Link
+          href="/"
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:brightness-110 transition-all shadow-sm"
+        >
+          <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+          <span>Return to Dashboard</span>
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="page-enter space-y-6 md:space-y-8">
@@ -375,26 +391,6 @@ export default function AdminDashboardPage() {
           </button>
         </div>
       </div>
-
-      {/* Permission helper banner if not yet flagged in Supabase */}
-      {!loading && !isCurrentUserAdmin && (
-        <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-200 text-xs font-mono flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-[18px] text-amber-500 shrink-0">info</span>
-            <span>
-              Your profile is not yet flagged as Administrator in Supabase. You can promote your current account with one click.
-            </span>
-          </div>
-          <button
-            type="button"
-            disabled={promotingSelf}
-            onClick={handlePromoteSelf}
-            className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold transition-colors shrink-0 cursor-pointer text-xs"
-          >
-            {promotingSelf ? 'Promoting...' : 'Make Me Admin Now'}
-          </button>
-        </div>
-      )}
 
       {/* Admin Tabs */}
       <div className="flex items-center gap-1.5 border-b border-[var(--outline-variant)]/20 pb-2 overflow-x-auto">

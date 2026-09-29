@@ -25,52 +25,18 @@ AS $$
   );
 $$;
 
--- 4. RPC TO PROMOTE AN ACCOUNT TO ADMIN
--- Can be called by any authenticated user for their own account, or by existing admins for any email
-CREATE OR REPLACE FUNCTION public.promote_user_to_admin(
-  target_email TEXT DEFAULT NULL
-)
-RETURNS JSONB
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, auth, pg_temp
-AS $$
-DECLARE
-  v_caller_id UUID;
-  v_caller_is_admin BOOLEAN;
-  v_target_email TEXT;
-BEGIN
-  v_caller_id := auth.uid();
-  IF v_caller_id IS NULL THEN
-    RETURN jsonb_build_object('success', false, 'error', 'Not authenticated');
-  END IF;
+-- 4. ADMIN PRIVILEGE SECURITY
+-- In-app self-promotion is strictly disabled.
+-- Administrator privileges MUST ONLY be granted directly through Supabase DB access (SQL Editor or Table Editor):
+--
+-- To grant admin access to a user, run:
+--   UPDATE public.profiles SET is_admin = true WHERE email = 'admin@example.com';
+--
+-- To revoke admin access:
+--   UPDATE public.profiles SET is_admin = false WHERE email = 'admin@example.com';
 
-  SELECT COALESCE(is_admin, false) INTO v_caller_is_admin
-  FROM public.profiles WHERE id = v_caller_id;
-
-  -- If target_email not provided, promote self
-  IF target_email IS NULL OR trim(target_email) = '' THEN
-    UPDATE public.profiles
-    SET is_admin = true
-    WHERE id = v_caller_id;
-
-    RETURN jsonb_build_object('success', true, 'message', 'Current account promoted to administrator.');
-  END IF;
-
-  v_target_email := lower(trim(target_email));
-
-  -- Promote target email
-  UPDATE public.profiles
-  SET is_admin = true
-  WHERE lower(email) = v_target_email;
-
-  IF FOUND THEN
-    RETURN jsonb_build_object('success', true, 'message', 'User ' || v_target_email || ' promoted to administrator.');
-  ELSE
-    RETURN jsonb_build_object('success', false, 'error', 'User with email ' || v_target_email || ' not found.');
-  END IF;
-END;
-$$;
+DROP FUNCTION IF EXISTS public.promote_user_to_admin(TEXT);
+DROP FUNCTION IF EXISTS public.promote_user_to_admin();
 
 -- 5. RLS POLICIES FOR ADMIN ACCESS
 -- Ensure existing non-admin policies continue to function, while admins can view all platform records

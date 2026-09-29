@@ -72,7 +72,7 @@ export async function generateUPIQRCodeDataURL(upiLink: string, size: number = 2
 }
 
 export interface DetectedUPIApp {
-  appId: 'gpay' | 'phonepe' | 'paytm' | 'bhim' | 'cred' | 'navi' | 'amazonpay' | 'jupiter' | 'bank' | 'other';
+  appId: 'gpay' | 'phonepe' | 'paytm' | 'bhim' | 'cred' | 'navi' | 'amazonpay' | 'jupiter' | 'slice' | 'revolut' | 'bank' | 'other';
   name: string;        // e.g. "Google Pay"
   shortName: string;   // e.g. "GPay"
   bank?: string;       // e.g. "HDFC Bank"
@@ -227,7 +227,38 @@ export function detectUPIApp(upiId?: string | null): DetectedUPIApp {
     };
   }
 
-  // 9. Direct Bank handles:
+  // 9. Slice handles: @slice, @sliceaxis, @slc, @slicepay
+  if (['slice', 'sliceaxis', 'slc', 'slicepay'].includes(handle) || handle.includes('slice')) {
+    const bankName = handle.includes('axis') ? 'Axis Bank' : 'Slice';
+    return {
+      appId: 'slice',
+      name: 'Slice UPI',
+      shortName: 'Slice',
+      bank: bankName,
+      icon: 'credit_card',
+      badgeClass: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/25',
+      isKnownApp: true,
+    };
+  }
+
+  // 10. Revolut India handles: @revolut, @rev, @revolutybl, @revolutaxis
+  if (['revolut', 'rev', 'revolutybl', 'revolutaxis'].includes(handle) || handle.includes('revolut')) {
+    let bankName = 'Revolut';
+    if (handle.includes('ybl')) bankName = 'Yes Bank';
+    else if (handle.includes('axis')) bankName = 'Axis Bank';
+
+    return {
+      appId: 'revolut',
+      name: 'Revolut India',
+      shortName: 'Revolut',
+      bank: bankName,
+      icon: 'credit_card',
+      badgeClass: 'bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/25',
+      isKnownApp: true,
+    };
+  }
+
+  // 11. Direct Bank handles:
   const directBanks: Record<string, string> = {
     sbi: 'SBI',
     hdfcbank: 'HDFC Bank',
@@ -276,7 +307,7 @@ export function detectUPIApp(upiId?: string | null): DetectedUPIApp {
 export function isUPIMethod(method?: string | null): boolean {
   if (!method) return false;
   const m = method.toLowerCase();
-  return ['upi', 'gpay', 'google_pay', 'phonepe', 'paytm', 'bhim', 'cred'].includes(m);
+  return ['upi', 'gpay', 'google_pay', 'phonepe', 'paytm', 'bhim', 'cred', 'slice', 'revolut'].includes(m);
 }
 
 /**
@@ -294,6 +325,8 @@ export const UPI_SUB_APPS = [
   { id: 'paytm', name: 'Paytm', shortName: 'Paytm' },
   { id: 'bhim', name: 'BHIM', shortName: 'BHIM' },
   { id: 'cred', name: 'CRED', shortName: 'CRED' },
+  { id: 'slice', name: 'Slice', shortName: 'Slice' },
+  { id: 'revolut', name: 'Revolut India', shortName: 'Revolut' },
   { id: 'other', name: 'Other UPI', shortName: 'Other' },
 ] as const;
 
@@ -305,7 +338,7 @@ export const PAYMENT_METHOD_LABELS: Record<string, { label: string; icon: string
     label: 'UPI',
     icon: 'qr_code_2',
     placeholder: '12-digit UPI Transaction Ref (UTR)',
-    description: 'Instant transfer via Google Pay, PhonePe, Paytm, BHIM, CRED, or Bank UPI',
+    description: 'Instant transfer via Google Pay, PhonePe, Paytm, BHIM, CRED, Slice, Revolut, or Bank UPI',
   },
   bank_transfer: {
     label: 'Bank Transfer',
@@ -344,6 +377,18 @@ export const PAYMENT_METHOD_LABELS: Record<string, { label: string; icon: string
     placeholder: 'Paytm Order/Transaction ID',
     description: 'UPI transfer via Paytm',
   },
+  slice: {
+    label: 'Slice (UPI)',
+    icon: 'credit_card',
+    placeholder: 'Slice UTR / Txn Reference',
+    description: 'UPI transfer via Slice',
+  },
+  revolut: {
+    label: 'Revolut (UPI)',
+    icon: 'credit_card',
+    placeholder: 'Revolut Reference ID',
+    description: 'UPI transfer via Revolut India',
+  },
 };
 
 /**
@@ -378,6 +423,13 @@ export function formatPaymentMethodDisplay(
       badgeClass = 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/25';
     } else if (m === 'cred') {
       appLabel = 'CRED';
+      badgeClass = 'bg-neutral-500/10 text-neutral-800 dark:text-neutral-200 border-neutral-500/25';
+    } else if (m === 'slice') {
+      appLabel = 'Slice';
+      badgeClass = 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/25';
+    } else if (m === 'revolut') {
+      appLabel = 'Revolut';
+      badgeClass = 'bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/25';
     } else if (upiId) {
       const detected = detectUPIApp(upiId);
       if (detected.isKnownApp) {
