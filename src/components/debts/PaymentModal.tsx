@@ -49,6 +49,7 @@ export function PaymentModal({
   const [showQrCode, setShowQrCode] = useState(false);
   const [selectedUpiApp, setSelectedUpiApp] = useState<string>('auto');
   const [generatingQr, setGeneratingQr] = useState(false);
+  const [isCurrentUserIsolated, setIsCurrentUserIsolated] = useState(false);
 
   const supabase = createClient();
   const detectedLenderApp = detectUPIApp(lenderProfile?.upi_id);
@@ -100,6 +101,9 @@ export function PaymentModal({
       try {
         const user = await getCurrentUserFast(supabase);
         if (!user) return;
+
+        const { data: myProf } = await supabase.from('profiles').select('is_isolated').eq('id', user.id).single();
+        setIsCurrentUserIsolated(Boolean(myProf?.is_isolated));
 
         const userIsLender = user.id === debt.lender_id;
         setIsLender(userIsLender);
@@ -160,6 +164,10 @@ export function PaymentModal({
     try {
       const user = await getCurrentUserFast(supabase);
       if (!user) throw new Error('User not logged in');
+
+      if (isCurrentUserIsolated) {
+        throw new Error('Your account is quarantined in security isolation. Submitting payments is disabled.');
+      }
 
       const rawNum = Number(amount);
       if (isNaN(rawNum) || rawNum <= 0) throw new Error('Payment amount must be greater than 0');
@@ -315,6 +323,13 @@ export function PaymentModal({
         {error && (
           <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-[var(--error)] text-sm border border-[var(--error)]/20">
             {error}
+          </div>
+        )}
+
+        {isCurrentUserIsolated && (
+          <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 font-mono text-xs flex items-center gap-2">
+            <span className="material-symbols-outlined text-[18px]">security</span>
+            <span>Your account is currently quarantined in security isolation. Submitting payments is disabled.</span>
           </div>
         )}
 
@@ -634,13 +649,15 @@ export function PaymentModal({
           </button>
           <button
             type="submit"
-            disabled={loading || checkingLimits || isBlockedByPending}
+            disabled={loading || checkingLimits || isBlockedByPending || isCurrentUserIsolated}
             className="flex-1 py-2.5 px-4 rounded-xl bg-[var(--secondary)] text-[var(--on-secondary)] font-mono text-xs font-bold hover:opacity-95 disabled:opacity-50"
           >
             {loading
               ? 'Submitting...'
               : checkingLimits
               ? 'Checking...'
+              : isCurrentUserIsolated
+              ? 'Account Quarantined'
               : isLender
               ? 'Record Payment'
               : isBlockedByPending

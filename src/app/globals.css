@@ -191,3 +191,25 @@ body {
 .ticker-decimals {
   opacity: 0.6;
 }
+
+/* ═══════════════════════════════════════════════════════
+   Mobile Responsive & Zooming Optimizations
+   ═══════════════════════════════════════════════════════ */
+@media screen and (max-width: 768px) {
+  /* Prevent iOS Safari forced auto-zoom jumps on inputs while allowing manual pinch-to-zoom */
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  /* Smooth momentum touch scrolling for all modal and popup dialog containers */
+  .modal-scroll-container {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+}
+
+.safe-area-bottom {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}

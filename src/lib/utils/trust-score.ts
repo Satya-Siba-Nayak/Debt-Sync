@@ -11,205 +11,401 @@ export interface TrustFactor {
   icon: string; // Material Symbols icon name
 }
 
-export interface TrustScoreBreakdown {
-  score: number;           // 350-850
-  rating: string;          // 'Exceptional' | 'Very Good' | 'Good' | 'Fair' | 'Poor'
-  ratingColor: string;     // Tailwind color class
-  factors: TrustFactor[];  // Individual factor contributions
-  tips: string[];          // Actionable improvement tips
+export interface TrustScorePillars {
+  paymentHistory: number;    // 0 - 100%
+  debtClearance: number;     // 0 - 100%
+  networkBreadth: number;    // 0 - 100%
+  disputeCleanliness: number;// 0 - 100%
 }
 
-const BASE_SCORE = 720;
-const MIN_SCORE = 350;
-const MAX_SCORE = 850;
+export interface TrustScoreBreakdown {
+  score: number;             // 300 - 850
+  rating: string;            // 'Exceptional' | 'Very Good' | 'Good' | 'Fair' | 'Poor'
+  ratingColor: string;       // Tailwind color class
+  factors: TrustFactor[];    // Individual factor contributions
+  tips: string[];            // Actionable improvement tips
+  pillars: TrustScorePillars;// Quantitative pillars
+  isCalibrated: boolean;     // Whether user has enough transactional history
+  overdueActiveCount: number;// Currently delinquent active debts
+}
+
+const BASE_SCORE = 650;      // Standard neutral baseline for new participants
+const MIN_SCORE = 300;       // Minimum rating floor
+const MAX_SCORE = 850;       // Maximum prime credit score
 
 /**
- * Calculate a comprehensive trust score with factor-by-factor breakdown.
- * This can be called for the current user OR a counterparty (given their debts/payments).
+ * Enhanced Multi-Dimensional Network Score Engine
+ *
+ * Evaluates:
+ * 1. Payment History (On-time settlements, overdue active debts, delinquency penalty)
+ * 2. Debt Clearance Velocity (Repayment volume, obligations vs cleared ratio)
+ * 3. Network Breadth & Counterparty Diversity (Cross-peer settlements vs wash trading)
+ * 4. Dispute Cleanliness & Security Standing (Zero disputes, admin isolation penalty)
  */
 export function calculateTrustScore(
   debts: Debt[],
   payments: Payment[],
-  userId?: string
+  userId?: string,
+  extraOptions?: { isIsolated?: boolean; isVerified?: boolean }
 ): TrustScoreBreakdown {
   const factors: TrustFactor[] = [];
   const tips: string[] = [];
+  const now = Date.now();
 
-  // --- Factor 1: Base Score ---
+  // --- 1. Base Starting Score ---
   factors.push({
-    name: 'Base Score',
+    name: 'Starting Baseline',
     impact: 'neutral',
     points: BASE_SCORE,
-    description: 'Starting baseline for all DebtSync users',
+    description: 'Neutral benchmark for all verified DebtSync participants',
     icon: 'shield',
   });
 
-  // --- Factor 2: Settled Debts ---
-  const settledCount = debts.filter((d) => d.status === 'settled').length;
-  if (settledCount > 0) {
-    const settledPoints = settledCount * 25;
-    factors.push({
-      name: 'Settled Debts',
-      impact: 'positive',
-      points: settledPoints,
-      description: `${settledCount} debt${settledCount > 1 ? 's' : ''} fully settled (+25 each)`,
-      icon: 'check_circle',
-    });
-  } else if (debts.length > 0) {
-    tips.push('Settle outstanding debts to earn +25 points per settled debt.');
-  }
+  // Filter debts where this user is borrower vs lender
+  const borrowedDebts = userId
+    ? debts.filter((d) => d.borrower_id === userId)
+    : debts;
+  const lentDebts = userId
+    ? debts.filter((d) => d.lender_id === userId)
+    : [];
 
-  // --- Factor 3: Declined Debts ---
-  const declinedCount = debts.filter((d) => d.status === 'declined').length;
-  if (declinedCount > 0) {
-    const declinedPoints = -(declinedCount * 40);
-    factors.push({
-      name: 'Declined Requests',
-      impact: 'negative',
-      points: declinedPoints,
-      description: `${declinedCount} debt request${declinedCount > 1 ? 's' : ''} declined (-40 each)`,
-      icon: 'block',
-    });
-    tips.push('Avoid situations that lead to declined debt requests — each costs 40 points.');
-  }
-
-  // --- Factor 4: Repayment Velocity ---
   const verifiedPayments = payments.filter(
     (p) => p.is_verified && !(typeof p.note === 'string' && p.note.includes('[DISPUTED]'))
   );
-  const totalRepaid = round2(verifiedPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0));
 
-  // Calculate total obligations (sum of all active/settled debt principals where user is borrower)
-  const borrowedDebts = userId
-    ? debts.filter((d) => d.borrower_id === userId && (d.status === 'active' || d.status === 'settled'))
-    : debts.filter((d) => d.status === 'active' || d.status === 'settled');
-  const totalObligations = round2(borrowedDebts.reduce((sum, d) => sum + (Number(d.principal) || 0), 0));
+  // --- 2. Real-Time Overdue Active Debts (Delinquency Penalty) ---
+  let overdueActiveCount = 0;
+  let severeDelinquentCount = 0;
+  let totalOverdueAmount = 0;
 
-  const repaymentVelocity = totalObligations > 0
-    ? Math.min(100, Math.round((totalRepaid / totalObligations) * 100))
-    : debts.length === 0 ? 100 : 85;
-
-  if (repaymentVelocity >= 80) {
-    factors.push({
-      name: 'Repayment Velocity',
-      impact: 'positive',
-      points: 30,
-      description: `${repaymentVelocity}% of obligations repaid (≥80% threshold met)`,
-      icon: 'speed',
-    });
-  } else {
-    factors.push({
-      name: 'Repayment Velocity',
-      impact: 'negative',
-      points: -20,
-      description: `${repaymentVelocity}% of obligations repaid (below 80% threshold)`,
-      icon: 'speed',
-    });
-    tips.push('Increase repayment velocity above 80% to earn +30 bonus points (currently -20).');
-  }
-
-  // --- Factor 5: On-Time Payments ---
-  let onTimeCount = 0;
-  let lateCount = 0;
-  for (const d of debts) {
-    if (d.status !== 'settled' || !d.due_date || !d.settled_at) continue;
-    const dueDate = new Date(d.due_date).getTime();
-    const settledDate = new Date(d.settled_at).getTime();
-    if (settledDate <= dueDate) {
-      onTimeCount++;
-    } else {
-      lateCount++;
+  for (const d of borrowedDebts) {
+    if (d.status === 'active' && d.due_date) {
+      const dueTimestamp = new Date(d.due_date).getTime();
+      if (now > dueTimestamp) {
+        overdueActiveCount++;
+        const daysPastDue = Math.floor((now - dueTimestamp) / (1000 * 60 * 60 * 24));
+        totalOverdueAmount += Number(d.principal) || 0;
+        if (daysPastDue > 30) {
+          severeDelinquentCount++;
+        }
+      }
     }
   }
 
-  if (onTimeCount > 0) {
+  if (overdueActiveCount > 0) {
+    // Penalty scales with count and severe delinquency (>30 days overdue)
+    const overduePenalty = -(overdueActiveCount * 30 + severeDelinquentCount * 35);
+    factors.push({
+      name: 'Active Overdue Debts',
+      impact: 'negative',
+      points: overduePenalty,
+      description: `${overdueActiveCount} active debt${overdueActiveCount > 1 ? 's are' : ' is'} past due (${severeDelinquentCount} severely delinquent >30 days)`,
+      icon: 'warning',
+    });
+    tips.push(
+      `Clear your ${overdueActiveCount} overdue active debt${overdueActiveCount > 1 ? 's' : ''} immediately to recover ${Math.abs(overduePenalty)} points.`
+    );
+  }
+
+  // --- 3. Settled Debts & On-Time Performance ---
+  const settledDebts = debts.filter((d) => d.status === 'settled');
+  let onTimeSettlements = 0;
+  let lateSettlements = 0;
+  let undatedSettlements = 0;
+
+  for (const d of settledDebts) {
+    if (!d.due_date || !d.settled_at) {
+      undatedSettlements++;
+      continue;
+    }
+    const dueDate = new Date(d.due_date).getTime();
+    const settledDate = new Date(d.settled_at).getTime();
+    // 24-hour grace period for payment confirmations
+    if (settledDate <= dueDate + 86400000) {
+      onTimeSettlements++;
+    } else {
+      lateSettlements++;
+    }
+  }
+
+  if (onTimeSettlements > 0) {
+    // Diminishing returns after 5 to prevent gaming small circular settlements
+    const effectiveOnTime = Math.min(8, onTimeSettlements);
+    const onTimePoints = effectiveOnTime * 18 + Math.max(0, onTimeSettlements - 8) * 8;
     factors.push({
       name: 'On-Time Settlements',
       impact: 'positive',
-      points: onTimeCount * 15,
-      description: `${onTimeCount} debt${onTimeCount > 1 ? 's' : ''} settled on or before due date (+15 each)`,
-      icon: 'schedule',
+      points: onTimePoints,
+      description: `${onTimeSettlements} debt${onTimeSettlements > 1 ? 's' : ''} settled on or before agreed due date`,
+      icon: 'verified',
     });
   }
 
-  if (lateCount > 0) {
+  if (lateSettlements > 0) {
+    const latePoints = -(lateSettlements * 12);
     factors.push({
       name: 'Late Settlements',
       impact: 'negative',
-      points: -(lateCount * 10),
-      description: `${lateCount} debt${lateCount > 1 ? 's' : ''} settled after due date (-10 each)`,
-      icon: 'event_busy',
+      points: latePoints,
+      description: `${lateSettlements} debt${lateSettlements > 1 ? 's' : ''} settled past the due date (-12 each)`,
+      icon: 'history_toggle_off',
     });
-    tips.push('Pay on or before due dates to earn +15 per on-time settlement instead of losing -10 for late ones.');
+    tips.push('Settling on or before agreed due dates earns up to +18 points per debt instead of losing points.');
   }
 
-  // --- Factor 6: Disputed Payments ---
-  const disputedPayments = payments.filter(
-    (p) => typeof p.note === 'string' && p.note.includes('[DISPUTED]')
-  );
-  if (disputedPayments.length > 0) {
+  if (undatedSettlements > 0) {
+    const undatedPoints = Math.min(5, undatedSettlements) * 10;
     factors.push({
-      name: 'Disputed Payments',
+      name: 'Open Settlements',
+      impact: 'positive',
+      points: undatedPoints,
+      description: `${undatedSettlements} open debt${undatedSettlements > 1 ? 's' : ''} settled in full`,
+      icon: 'check_circle',
+    });
+  }
+
+  // --- 4. Counterparty Diversity (Cross-Network Breadth) ---
+  const uniqueCounterparties = new Set<string>();
+  for (const d of debts) {
+    if (d.status === 'settled' || d.status === 'active') {
+      if (d.lender_id && d.lender_id !== userId) uniqueCounterparties.add(d.lender_id);
+      if (d.borrower_id && d.borrower_id !== userId) uniqueCounterparties.add(d.borrower_id);
+    }
+  }
+
+  const peerCount = uniqueCounterparties.size;
+  if (peerCount >= 5) {
+    factors.push({
+      name: 'Broad Network Trust',
+      impact: 'positive',
+      points: 40,
+      description: `Transactions confirmed across ${peerCount} distinct counterparties`,
+      icon: 'hub',
+    });
+  } else if (peerCount >= 3) {
+    factors.push({
+      name: 'Diverse Peer Network',
+      impact: 'positive',
+      points: 25,
+      description: `Active trusted relationships with ${peerCount} unique counterparties`,
+      icon: 'groups',
+    });
+  } else if (debts.length > 3 && peerCount <= 1) {
+    tips.push('Transact with more unique network peers to prove broad community trustworthiness.');
+  }
+
+  // --- 5. Repaid Volume & Capital Velocity ---
+  const totalRepaidAmount = round2(
+    verifiedPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+  );
+  if (totalRepaidAmount >= 50000) {
+    factors.push({
+      name: 'High Capital Velocity',
+      impact: 'positive',
+      points: 45,
+      description: `Substantial proven repayments totaling ₹${totalRepaidAmount.toLocaleString()}`,
+      icon: 'workspace_premium',
+    });
+  } else if (totalRepaidAmount >= 10000) {
+    factors.push({
+      name: 'Proven Repayment Volume',
+      impact: 'positive',
+      points: 25,
+      description: `Established volume of ₹${totalRepaidAmount.toLocaleString()} successfully settled`,
+      icon: 'payments',
+    });
+  } else if (totalRepaidAmount >= 2500) {
+    factors.push({
+      name: 'Active Repayment Volume',
+      impact: 'positive',
+      points: 15,
+      description: `Repayments totaling ₹${totalRepaidAmount.toLocaleString()} verified on-ledger`,
+      icon: 'payments',
+    });
+  }
+
+  // --- 6. Clearance Ratio (Obligations vs Settlements) ---
+  const totalBorrowedPrincipal = round2(
+    borrowedDebts.reduce((sum, d) => sum + (Number(d.principal) || 0), 0)
+  );
+
+  const clearanceRatio =
+    totalBorrowedPrincipal > 0
+      ? Math.min(100, Math.round((totalRepaidAmount / totalBorrowedPrincipal) * 100))
+      : debts.length === 0
+      ? 100
+      : 90;
+
+  if (clearanceRatio >= 90 && settledDebts.length > 0) {
+    factors.push({
+      name: 'High Debt Clearance Rate',
+      impact: 'positive',
+      points: 30,
+      description: `${clearanceRatio}% of lifetime obligations satisfied`,
+      icon: 'speed',
+    });
+  } else if (clearanceRatio < 50 && overdueActiveCount > 0) {
+    factors.push({
+      name: 'Low Clearance Velocity',
       impact: 'negative',
-      points: -(disputedPayments.length * 20),
-      description: `${disputedPayments.length} payment${disputedPayments.length > 1 ? 's' : ''} disputed (-20 each)`,
+      points: -25,
+      description: `Only ${clearanceRatio}% of obligations satisfied with active delinquent debts`,
+      icon: 'trending_down',
+    });
+    tips.push('Maintain an obligations clearance rate above 80% to earn +30 bonus points.');
+  }
+
+  // --- 7. Disputes & Declines ---
+  const disputedDebtsCount = debts.filter((d) => d.status === 'disputed').length;
+  const disputedPaymentsCount = payments.filter(
+    (p) => typeof p.note === 'string' && p.note.includes('[DISPUTED]')
+  ).length;
+  const totalDisputes = disputedDebtsCount + disputedPaymentsCount;
+
+  if (totalDisputes > 0) {
+    const disputePenalty = -(totalDisputes * 40);
+    factors.push({
+      name: 'Contested Disputes',
+      impact: 'negative',
+      points: disputePenalty,
+      description: `${totalDisputes} contested transaction dispute${totalDisputes > 1 ? 's' : ''} on record (-40 each)`,
       icon: 'gavel',
     });
-    tips.push('Resolve payment disputes to avoid -20 point penalties per dispute.');
+    tips.push('Resolve all open transaction disputes to lift point deductions.');
   }
 
-  // --- Factor 7: Account Age / Activity ---
-  if (debts.length === 0) {
+  const declinedCount = debts.filter((d) => d.status === 'declined').length;
+  if (declinedCount > 0) {
+    const declinedPoints = -(declinedCount * 25);
     factors.push({
-      name: 'New Account',
-      impact: 'neutral',
-      points: 30,
-      description: 'New account bonus — build history to unlock higher scores',
-      icon: 'new_releases',
+      name: 'Declined Proposals',
+      impact: 'negative',
+      points: declinedPoints,
+      description: `${declinedCount} debt proposal${declinedCount > 1 ? 's' : ''} rejected by counterparty`,
+      icon: 'cancel',
     });
-    tips.push('Start recording debts and making payments to build your trust history.');
+    tips.push('Ensure counterparty consensus before sending debt terms to avoid declined proposals.');
   }
 
-  // --- Calculate Total ---
+  // --- 8. Admin Security Isolation / Verification Flag ---
+  if (extraOptions?.isIsolated) {
+    factors.push({
+      name: 'Account Isolated by Admin',
+      impact: 'negative',
+      points: -150,
+      description: 'Account placed in restricted security quarantine by platform administrator',
+      icon: 'security',
+    });
+    tips.push('Contact support or platform admin to review account isolation status.');
+  }
+
+  if (extraOptions?.isVerified) {
+    factors.push({
+      name: 'Admin-Verified Account',
+      impact: 'positive',
+      points: 25,
+      description: 'Identity and contact details independently verified by administrator',
+      icon: 'verified_user',
+    });
+  }
+
+  // --- 9. Calibration Check ---
+  const isCalibrated = debts.length >= 3 || settledDebts.length >= 1;
+  if (!isCalibrated) {
+    factors.push({
+      name: 'Building History',
+      impact: 'neutral',
+      points: 0,
+      description: 'Score is provisional until at least 3 transactions or 1 settlement are confirmed',
+      icon: 'hourglass_empty',
+    });
+    tips.push('Complete your first settled transaction to establish full score calibration.');
+  }
+
+  // --- Calculate Final Clamped Score ---
   const rawScore = factors.reduce((sum, f) => sum + f.points, 0);
   const score = Math.min(MAX_SCORE, Math.max(MIN_SCORE, rawScore));
 
+  // Determine Rating Tier
   const rating =
-    score >= 780 ? 'Exceptional'
+    score >= 800 ? 'Exceptional'
     : score >= 740 ? 'Very Good'
     : score >= 670 ? 'Good'
-    : score >= 550 ? 'Fair'
+    : score >= 580 ? 'Fair'
     : 'Poor';
 
   const ratingColor =
-    score >= 780 ? 'text-emerald-500'
+    score >= 800 ? 'text-emerald-500'
     : score >= 740 ? 'text-green-500'
     : score >= 670 ? 'text-blue-500'
-    : score >= 550 ? 'text-amber-500'
+    : score >= 580 ? 'text-amber-500'
     : 'text-red-500';
 
-  // Add general tips if score can improve
+  // --- Compute Quantitative Pillars (0 - 100%) ---
+  const paymentHistory = Math.min(
+    100,
+    Math.max(
+      20,
+      Math.round(
+        100 -
+          (overdueActiveCount * 25 + lateSettlements * 15 + (totalDisputes > 0 ? 30 : 0)) +
+          onTimeSettlements * 8
+      )
+    )
+  );
+
+  const debtClearance = Math.min(100, Math.max(15, clearanceRatio));
+
+  const networkBreadth = Math.min(
+    100,
+    Math.max(20, Math.round((peerCount / 5) * 80 + (settledDebts.length > 0 ? 20 : 0)))
+  );
+
+  const disputeCleanliness = Math.max(
+    0,
+    Math.min(100, Math.round(100 - totalDisputes * 35 - declinedCount * 15))
+  );
+
   if (score < MAX_SCORE && tips.length === 0) {
-    tips.push('Continue settling debts on time to maintain and increase your score.');
+    tips.push('Maintain timely on-ledger repayments to keep your score in the prime 750+ tier.');
   }
 
-  return { score, rating, ratingColor, factors, tips };
+  return {
+    score,
+    rating,
+    ratingColor,
+    factors,
+    tips,
+    pillars: {
+      paymentHistory,
+      debtClearance,
+      networkBreadth,
+      disputeCleanliness,
+    },
+    isCalibrated,
+    overdueActiveCount,
+  };
 }
 
 /**
- * Get a quick trust score number without full breakdown (for badges/cards).
+ * Get a quick trust score number without full breakdown.
  */
-export function getQuickTrustScore(debts: Debt[], payments: Payment[], userId?: string): number {
-  return calculateTrustScore(debts, payments, userId).score;
+export function getQuickTrustScore(
+  debts: Debt[],
+  payments: Payment[],
+  userId?: string,
+  extraOptions?: { isIsolated?: boolean; isVerified?: boolean }
+): number {
+  return calculateTrustScore(debts, payments, userId, extraOptions).score;
 }
 
 /**
  * Get trust rating label from score.
  */
 export function getTrustRating(score: number): string {
-  return score >= 780 ? 'Exceptional'
+  return score >= 800 ? 'Exceptional'
     : score >= 740 ? 'Very Good'
     : score >= 670 ? 'Good'
-    : score >= 550 ? 'Fair'
+    : score >= 580 ? 'Fair'
     : 'Poor';
 }

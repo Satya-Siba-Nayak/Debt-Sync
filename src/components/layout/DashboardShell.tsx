@@ -117,7 +117,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* Mobile Bottom Navigation */}
-      <BottomNav onNewTransaction={() => setIsRecordModalOpen(true)} />
+      <BottomNav
+        isAdmin={userProfile?.is_admin}
+        onNewTransaction={() => setIsRecordModalOpen(true)}
+      />
 
       {/* Global Record New Debt Modal */}
       <RecordDebtModal

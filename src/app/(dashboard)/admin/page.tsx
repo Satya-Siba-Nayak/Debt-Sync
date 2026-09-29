@@ -1,24 +1,37 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment, Profile, ActivityLogEntry } from '@/lib/types/database';
 import { formatCurrency } from '@/lib/utils/currency';
 import { calculateDebtBalance, round2 } from '@/lib/utils/interest';
-import { calculateTrustScore } from '@/lib/utils/trust-score';
+import { calculateTrustScore, TrustScoreBreakdown } from '@/lib/utils/trust-score';
 import {
   PAYMENT_METHOD_LABELS,
   isUPIMethod,
   PRIMARY_PAYMENT_METHODS,
   formatPaymentMethodDisplay,
+  detectUPIApp,
 } from '@/lib/utils/upi-link';
 import { Avatar } from '@/components/ui/Avatar';
-import { Chip } from '@/components/ui/Chip';
 import { Modal } from '@/components/ui/Modal';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
 
-type AdminTab = 'overview' | 'users' | 'transactions' | 'analytics';
+export type AdminTab = 'overview' | 'live' | 'users' | 'transactions' | 'analytics';
+
+export interface TelemetryEvent {
+  id: string;
+  timestamp: string; // ISO
+  relativeTime: string;
+  table: 'debts' | 'payments' | 'profiles' | 'activity_log';
+  eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+  title: string;
+  description: string;
+  badgeClass: string;
+  icon: string;
+  payload: any;
+}
 
 export default function AdminDashboardPage() {
   const supabase = createClient();
@@ -34,10 +47,26 @@ export default function AdminDashboardPage() {
   const [allPayments, setAllPayments] = useState<Payment[]>([]);
   const [allLogs, setAllLogs] = useState<ActivityLogEntry[]>([]);
 
+  // Live Stream / Telemetry state
+  const [liveEvents, setLiveEvents] = useState<TelemetryEvent[]>([]);
+  const [isLivePaused, setIsLivePaused] = useState(false);
+  const [isWebSocketActive, setIsWebSocketActive] = useState(false);
+  const [liveFilter, setLiveFilter] = useState<'all' | 'payments' | 'debts' | 'profiles' | 'admin'>('all');
+  const [selectedTelemetryEvent, setSelectedTelemetryEvent] = useState<TelemetryEvent | null>(null);
+  const livePausedRef = useRef(isLivePaused);
+  livePausedRef.current = isLivePaused;
+
   // Filtering states for Users tab
   const [userSearch, setUserSearch] = useState('');
-  const [userFilter, setUserFilter] = useState<'all' | 'registered' | 'ghost' | 'active_debts'>('all');
+  const [userFilter, setUserFilter] = useState<'all' | 'registered' | 'ghost' | 'isolated' | 'active_debts'>('all');
   const [selectedUser, setSelectedUser] = useState<Profile | null>(null);
+
+  // User control modals
+  const [isolationTarget, setIsolationTarget] = useState<Profile | null>(null);
+  const [isolationReasonInput, setIsolationReasonInput] = useState('');
+  const [purgeTarget, setPurgeTarget] = useState<Profile | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionFeedback, setActionFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Filtering states for Transactions tab
   const [txnSearch, setTxnSearch] = useState('');
@@ -45,8 +74,44 @@ export default function AdminDashboardPage() {
   const [txnMethodFilter, setTxnMethodFilter] = useState<string>('all');
   const [selectedDebtDetail, setSelectedDebtDetail] = useState<Debt | null>(null);
 
-  const fetchAdminData = useCallback(async () => {
-    setLoading(true);
+  // URL synchronization for direct tab linking
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab') as AdminTab | null;
+      if (tabParam && ['overview', 'live', 'users', 'transactions', 'analytics'].includes(tabParam)) {
+        setActiveTab(tabParam);
+      }
+    }
+  }, []);
+
+  const handleSelectTab = (tab: AdminTab) => {
+    setActiveTab(tab);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (tab === 'overview') {
+        url.searchParams.delete('tab');
+      } else {
+        url.searchParams.set('tab', tab);
+      }
+      window.history.replaceState({}, '', url.toString());
+    }
+  };
+
+  const addTelemetryEvent = useCallback((event: Omit<TelemetryEvent, 'id' | 'timestamp' | 'relativeTime'>) => {
+    const now = new Date();
+    const newEvt: TelemetryEvent = {
+      ...event,
+      id: `evt-${Date.now()}-${Math.random().toString(36).substring(6)}`,
+      timestamp: now.toISOString(),
+      relativeTime: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    };
+
+    setLiveEvents((prev) => [newEvt, ...prev].slice(0, 100));
+  }, []);
+
+  const fetchAdminData = useCallback(async (isSilent: boolean = false) => {
+    if (!isSilent) setLoading(true);
     try {
       const user = await getCurrentUserFast(supabase);
       if (user) {
@@ -82,7 +147,7 @@ export default function AdminDashboardPage() {
           .from('activity_log')
           .select('*')
           .order('created_at', { ascending: false })
-          .limit(30),
+          .limit(40),
       ]);
 
       if (profilesRes.data) setAllProfiles(profilesRes.data as Profile[]);
@@ -92,7 +157,7 @@ export default function AdminDashboardPage() {
     } catch (err) {
       console.error('Error fetching admin data:', err);
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
     }
   }, [supabase]);
 
@@ -100,11 +165,96 @@ export default function AdminDashboardPage() {
     fetchAdminData();
   }, [fetchAdminData]);
 
+  // --- Real-Time Telemetry WebSocket Streaming ---
+  useEffect(() => {
+    const channelName = `admin_live_stream_${Math.random().toString(36).substring(7)}`;
+    const channel = supabase
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'payments' },
+        (payload: any) => {
+          const rec: any = payload.new || payload.old || {};
+          const isInsert = payload.eventType === 'INSERT';
+          addTelemetryEvent({
+            table: 'payments',
+            eventType: payload.eventType as any,
+            title: isInsert ? `Payment Submitted: ${formatCurrency(rec.amount || 0, rec.currency || 'INR')}` : `Payment ${payload.eventType}`,
+            description: `Payment ${rec.id?.substring(0, 8)}... via ${rec.payment_method || 'UPI'} ${rec.is_verified ? '(Verified)' : '(Pending)'}`,
+            badgeClass: isInsert ? 'bg-emerald-500/15 text-emerald-500 border-emerald-500/20' : 'bg-blue-500/15 text-blue-500 border-blue-500/20',
+            icon: 'payments',
+            payload,
+          });
+          if (!livePausedRef.current) fetchAdminData(true);
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'debts' },
+        (payload: any) => {
+          const rec: any = payload.new || payload.old || {};
+          const isInsert = payload.eventType === 'INSERT';
+          addTelemetryEvent({
+            table: 'debts',
+            eventType: payload.eventType as any,
+            title: isInsert ? `New Debt Contract: ${formatCurrency(rec.principal || 0, rec.currency || 'INR')}` : `Debt ${payload.eventType} (${rec.status})`,
+            description: `Status: ${rec.status || 'pending'} • APR: ${rec.interest_rate || 0}% (${rec.interest_type || 'none'})`,
+            badgeClass: rec.status === 'settled' ? 'bg-emerald-500/15 text-emerald-500 border-emerald-500/20' : rec.status === 'disputed' ? 'bg-red-500/15 text-red-500 border-red-500/20' : 'bg-indigo-500/15 text-indigo-500 border-indigo-500/20',
+            icon: 'receipt_long',
+            payload,
+          });
+          if (!livePausedRef.current) fetchAdminData(true);
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'profiles' },
+        (payload: any) => {
+          const rec: any = payload.new || payload.old || {};
+          const isInsert = payload.eventType === 'INSERT';
+          addTelemetryEvent({
+            table: 'profiles',
+            eventType: payload.eventType as any,
+            title: isInsert ? `New User Registered: ${rec.full_name || rec.email}` : `Profile Modified: ${rec.full_name || rec.email}`,
+            description: `${rec.email} ${rec.is_isolated ? '[ISOLATED]' : rec.is_verified ? '[VERIFIED]' : ''}`,
+            badgeClass: rec.is_isolated ? 'bg-red-500/15 text-red-500 border-red-500/20' : 'bg-teal-500/15 text-teal-500 border-teal-500/20',
+            icon: 'person',
+            payload,
+          });
+          if (!livePausedRef.current) fetchAdminData(true);
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'activity_log' },
+        (payload: any) => {
+          const rec: any = payload.new || {};
+          addTelemetryEvent({
+            table: 'activity_log',
+            eventType: 'INSERT',
+            title: `System Action: ${rec.action || 'AUDIT'}`,
+            description: `Triggered by ${rec.user_id?.substring(0, 8)}...`,
+            badgeClass: 'bg-purple-500/15 text-purple-500 border-purple-500/20',
+            icon: 'security',
+            payload,
+          });
+        }
+      )
+      .subscribe((status: any) => {
+        setIsWebSocketActive(status === 'SUBSCRIBED');
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [supabase, addTelemetryEvent, fetchAdminData]);
+
   // --- Aggregate Platform Metrics ---
   const metrics = useMemo(() => {
     const totalUsers = allProfiles.length;
     const registeredUsers = allProfiles.filter((p) => !p.is_shadow).length;
     const ghostUsers = allProfiles.filter((p) => p.is_shadow).length;
+    const isolatedUsers = allProfiles.filter((p) => p.is_isolated).length;
 
     let totalPrincipalVolume = 0;
     let totalOutstandingVolume = 0;
@@ -131,24 +281,27 @@ export default function AdminDashboardPage() {
     const totalRepaymentsVolume = verifiedPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
     const pendingPaymentsCount = allPayments.filter((p) => !p.is_verified).length;
 
-    // Disputed payments
     const disputedPaymentsCount = allPayments.filter(
       (p) => typeof p.note === 'string' && p.note.includes('[DISPUTED]')
     ).length;
 
-    // Average trust score across platform
+    // Average trust score across platform using enhanced algorithm
     const userScores = allProfiles.map((p) => {
       const uDebts = allDebts.filter((d) => d.lender_id === p.id || d.borrower_id === p.id);
       const uPayments = allPayments.filter((pm) => pm.paid_by === p.id);
-      return calculateTrustScore(uDebts, uPayments, p.id).score;
+      return calculateTrustScore(uDebts, uPayments, p.id, {
+        isIsolated: p.is_isolated,
+        isVerified: p.is_verified,
+      }).score;
     });
     const avgTrustScore =
-      userScores.length > 0 ? Math.round(userScores.reduce((a, b) => a + b, 0) / userScores.length) : 720;
+      userScores.length > 0 ? Math.round(userScores.reduce((a, b) => a + b, 0) / userScores.length) : 650;
 
     return {
       totalUsers,
       registeredUsers,
       ghostUsers,
+      isolatedUsers,
       totalPrincipalVolume: round2(totalPrincipalVolume),
       totalOutstandingVolume: round2(totalOutstandingVolume),
       totalRepaymentsVolume: round2(totalRepaymentsVolume),
@@ -162,7 +315,7 @@ export default function AdminDashboardPage() {
     };
   }, [allProfiles, allDebts, allPayments]);
 
-  // --- Users list with computed metrics ---
+  // --- Users list with computed metrics & enhanced trust breakdown ---
   const usersWithMetrics = useMemo(() => {
     return allProfiles.map((profile) => {
       const userDebts = allDebts.filter((d) => d.lender_id === profile.id || d.borrower_id === profile.id);
@@ -184,7 +337,10 @@ export default function AdminDashboardPage() {
         totalOwedBalance += calculateDebtBalance(d, dPayments).currentBalance;
       }
 
-      const trust = calculateTrustScore(userDebts, userPayments, profile.id);
+      const trust = calculateTrustScore(userDebts, userPayments, profile.id, {
+        isIsolated: profile.is_isolated,
+        isVerified: profile.is_verified,
+      });
 
       return {
         ...profile,
@@ -195,6 +351,7 @@ export default function AdminDashboardPage() {
         trustScore: trust.score,
         trustRating: trust.rating,
         trustRatingColor: trust.ratingColor,
+        trustBreakdown: trust,
       };
     });
   }, [allProfiles, allDebts, allPayments]);
@@ -204,6 +361,7 @@ export default function AdminDashboardPage() {
     return usersWithMetrics.filter((u) => {
       if (userFilter === 'registered' && u.is_shadow) return false;
       if (userFilter === 'ghost' && !u.is_shadow) return false;
+      if (userFilter === 'isolated' && !u.is_isolated) return false;
       if (userFilter === 'active_debts' && u.debtsCount === 0) return false;
 
       if (!userSearch.trim()) return true;
@@ -212,12 +370,23 @@ export default function AdminDashboardPage() {
         (u.full_name && u.full_name.toLowerCase().includes(q)) ||
         (u.email && u.email.toLowerCase().includes(q)) ||
         (u.phone && u.phone.includes(q)) ||
+        (u.upi_id && u.upi_id.toLowerCase().includes(q)) ||
         u.id.includes(q)
       );
     });
   }, [usersWithMetrics, userSearch, userFilter]);
 
-  // Filtered transactions (debts + payments combined or debts focus)
+  // Filtered live events
+  const filteredLiveEvents = useMemo(() => {
+    if (liveFilter === 'all') return liveEvents;
+    if (liveFilter === 'payments') return liveEvents.filter((e) => e.table === 'payments');
+    if (liveFilter === 'debts') return liveEvents.filter((e) => e.table === 'debts');
+    if (liveFilter === 'profiles') return liveEvents.filter((e) => e.table === 'profiles');
+    if (liveFilter === 'admin') return liveEvents.filter((e) => e.table === 'activity_log');
+    return liveEvents;
+  }, [liveEvents, liveFilter]);
+
+  // Filtered transactions
   const filteredDebts = useMemo(() => {
     return allDebts.filter((d) => {
       if (txnStatusFilter !== 'all') {
@@ -242,7 +411,6 @@ export default function AdminDashboardPage() {
       const notes = d.notes?.toLowerCase() || '';
       const debtId = d.id.toLowerCase();
 
-      // Check if any payment UTR matches
       const matchesUtr = allPayments.some(
         (p) => p.debt_id === d.id && p.transaction_ref?.toLowerCase().includes(q)
       );
@@ -257,59 +425,213 @@ export default function AdminDashboardPage() {
     });
   }, [allDebts, allPayments, txnSearch, txnStatusFilter, txnMethodFilter]);
 
-  // Payment channel distribution (Consolidated under UPI + TPAP app breakdown)
-  const paymentChannelAnalytics = useMemo(() => {
-    const channels: Record<string, { count: number; volume: number }> = {
-      upi: { count: 0, volume: 0 },
-      bank_transfer: { count: 0, volume: 0 },
-      cash: { count: 0, volume: 0 },
-      other: { count: 0, volume: 0 },
-    };
-    const upiApps: Record<string, { label: string; count: number; volume: number }> = {
-      gpay: { label: 'Google Pay', count: 0, volume: 0 },
-      phonepe: { label: 'PhonePe', count: 0, volume: 0 },
-      paytm: { label: 'Paytm', count: 0, volume: 0 },
-      other_upi: { label: 'BHIM & Bank UPI', count: 0, volume: 0 },
-    };
+  // --- Admin Moderation & User Control Actions ---
+  const handleToggleIsolation = async (targetUser: Profile, isolate: boolean, reason?: string) => {
+    setActionLoading(true);
+    setActionFeedback(null);
+    try {
+      let rpcSuccess = false;
+      try {
+        const { data, error } = await supabase.rpc('admin_toggle_user_isolation', {
+          target_user_id: targetUser.id,
+          isolate,
+          reason: reason || null,
+        });
+        if (!error && data?.success) rpcSuccess = true;
+      } catch (e) {}
 
-    for (const p of allPayments) {
-      const mode = (p.payment_method || 'other').toLowerCase();
-      const amount = Number(p.amount) || 0;
-
-      if (isUPIMethod(mode)) {
-        channels.upi.count++;
-        channels.upi.volume = round2(channels.upi.volume + amount);
-
-        const noteText = typeof p.note === 'string' ? p.note.toUpperCase() : '';
-        if (mode === 'gpay' || mode === 'google_pay' || noteText.includes('[UPI: GPAY]') || noteText.includes('GOOGLE PAY')) {
-          upiApps.gpay.count++;
-          upiApps.gpay.volume = round2(upiApps.gpay.volume + amount);
-        } else if (mode === 'phonepe' || noteText.includes('[UPI: PHONEPE]') || noteText.includes('PHONEPE')) {
-          upiApps.phonepe.count++;
-          upiApps.phonepe.volume = round2(upiApps.phonepe.volume + amount);
-        } else if (mode === 'paytm' || noteText.includes('[UPI: PAYTM]') || noteText.includes('PAYTM')) {
-          upiApps.paytm.count++;
-          upiApps.paytm.volume = round2(upiApps.paytm.volume + amount);
-        } else {
-          upiApps.other_upi.count++;
-          upiApps.other_upi.volume = round2(upiApps.other_upi.volume + amount);
-        }
-      } else if (mode === 'bank_transfer') {
-        channels.bank_transfer.count++;
-        channels.bank_transfer.volume = round2(channels.bank_transfer.volume + amount);
-      } else if (mode === 'cash') {
-        channels.cash.count++;
-        channels.cash.volume = round2(channels.cash.volume + amount);
-      } else {
-        channels.other.count++;
-        channels.other.volume = round2(channels.other.volume + amount);
+      if (!rpcSuccess) {
+        await supabase
+          .from('profiles')
+          .update({
+            is_isolated: isolate,
+            isolation_reason: isolate ? (reason || 'Isolated by admin for security review') : null,
+          })
+          .eq('id', targetUser.id);
       }
+
+      setAllProfiles((prev) =>
+        prev.map((p) =>
+          p.id === targetUser.id
+            ? { ...p, is_isolated: isolate, isolation_reason: isolate ? reason : null }
+            : p
+        )
+      );
+
+      if (selectedUser?.id === targetUser.id) {
+        setSelectedUser((prev) =>
+          prev ? { ...prev, is_isolated: isolate, isolation_reason: isolate ? reason : null } : null
+        );
+      }
+
+      addTelemetryEvent({
+        table: 'profiles',
+        eventType: 'UPDATE',
+        title: isolate ? 'User Placed in Quarantine' : 'User Isolation Lifted',
+        description: `${targetUser.full_name || targetUser.email} ${isolate ? 'isolated from ledger actions' : 'restored to active standing'}`,
+        badgeClass: isolate ? 'bg-red-500/15 text-red-500 border-red-500/20' : 'bg-emerald-500/15 text-emerald-500 border-emerald-500/20',
+        icon: isolate ? 'security' : 'lock_open',
+        payload: { userId: targetUser.id, isolate, reason },
+      });
+
+      setIsolationTarget(null);
+      setIsolationReasonInput('');
+      setActionFeedback({
+        type: 'success',
+        text: isolate ? 'Account successfully placed in isolation.' : 'Account isolation lifted.',
+      });
+    } catch (err: any) {
+      setActionFeedback({ type: 'error', text: err.message || 'Action failed' });
+    } finally {
+      setActionLoading(false);
     }
-    return { channels, upiApps };
-  }, [allPayments]);
+  };
+
+  const handleToggleVerification = async (targetUser: Profile, verified: boolean) => {
+    setActionLoading(true);
+    setActionFeedback(null);
+    try {
+      let rpcSuccess = false;
+      try {
+        const { data, error } = await supabase.rpc('admin_toggle_user_verification', {
+          target_user_id: targetUser.id,
+          verified,
+        });
+        if (!error && data?.success) rpcSuccess = true;
+      } catch (e) {}
+
+      if (!rpcSuccess) {
+        await supabase
+          .from('profiles')
+          .update({ is_verified: verified, needs_reverification: false })
+          .eq('id', targetUser.id);
+      }
+
+      setAllProfiles((prev) =>
+        prev.map((p) =>
+          p.id === targetUser.id ? { ...p, is_verified: verified, needs_reverification: false } : p
+        )
+      );
+
+      if (selectedUser?.id === targetUser.id) {
+        setSelectedUser((prev) =>
+          prev ? { ...prev, is_verified: verified, needs_reverification: false } : null
+        );
+      }
+
+      addTelemetryEvent({
+        table: 'profiles',
+        eventType: 'UPDATE',
+        title: verified ? 'User Admin-Verified' : 'Verification Cleared',
+        description: `Verified standing granted to ${targetUser.full_name || targetUser.email}`,
+        badgeClass: verified ? 'bg-blue-500/15 text-blue-500 border-blue-500/20' : 'bg-neutral-500/15 text-neutral-400 border-neutral-500/20',
+        icon: 'verified_user',
+        payload: { userId: targetUser.id, verified },
+      });
+
+      setActionFeedback({
+        type: 'success',
+        text: verified ? 'Account marked as Admin-Verified.' : 'Verification cleared.',
+      });
+    } catch (err: any) {
+      setActionFeedback({ type: 'error', text: err.message || 'Action failed' });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleForceReverification = async (targetUser: Profile) => {
+    setActionLoading(true);
+    setActionFeedback(null);
+    try {
+      let rpcSuccess = false;
+      try {
+        const { data, error } = await supabase.rpc('admin_force_reverification', {
+          target_user_id: targetUser.id,
+        });
+        if (!error && data?.success) rpcSuccess = true;
+      } catch (e) {}
+
+      if (!rpcSuccess) {
+        await supabase
+          .from('profiles')
+          .update({ needs_reverification: true, is_verified: false })
+          .eq('id', targetUser.id);
+      }
+
+      setAllProfiles((prev) =>
+        prev.map((p) =>
+          p.id === targetUser.id ? { ...p, needs_reverification: true, is_verified: false } : p
+        )
+      );
+
+      if (selectedUser?.id === targetUser.id) {
+        setSelectedUser((prev) =>
+          prev ? { ...prev, needs_reverification: true, is_verified: false } : null
+        );
+      }
+
+      addTelemetryEvent({
+        table: 'profiles',
+        eventType: 'UPDATE',
+        title: 'Force Reverification Required',
+        description: `Security flagged for ${targetUser.full_name || targetUser.email}`,
+        badgeClass: 'bg-amber-500/15 text-amber-500 border-amber-500/20',
+        icon: 'contact_page',
+        payload: { userId: targetUser.id },
+      });
+
+      setActionFeedback({ type: 'success', text: 'Account flagged: Reverification will be required.' });
+    } catch (err: any) {
+      setActionFeedback({ type: 'error', text: err.message || 'Action failed' });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handlePurgeUser = async (targetUser: Profile) => {
+    setActionLoading(true);
+    try {
+      let rpcSuccess = false;
+      try {
+        const { data, error } = await supabase.rpc('admin_delete_user', {
+          target_user_id: targetUser.id,
+        });
+        if (!error && data?.success) rpcSuccess = true;
+      } catch (e) {}
+
+      if (!rpcSuccess) {
+        await supabase.from('user_settings').delete().eq('user_id', targetUser.id);
+        await supabase.from('contacts').delete().or(`owner_id.eq.${targetUser.id},contact_id.eq.${targetUser.id}`);
+        await supabase.from('contact_requests').delete().or(`sender_id.eq.${targetUser.id},receiver_id.eq.${targetUser.id}`);
+        await supabase.from('profiles').delete().eq('id', targetUser.id);
+      }
+
+      setAllProfiles((prev) => prev.filter((p) => p.id !== targetUser.id));
+      setSelectedUser(null);
+      setPurgeTarget(null);
+
+      addTelemetryEvent({
+        table: 'profiles',
+        eventType: 'DELETE',
+        title: 'User Purged Permanently',
+        description: `Account ${targetUser.email} removed by administrator`,
+        badgeClass: 'bg-red-500/20 text-red-500 border-red-500/30',
+        icon: 'delete_forever',
+        payload: { userId: targetUser.id, email: targetUser.email },
+      });
+
+      await fetchAdminData(true);
+    } catch (err: any) {
+      alert(`Purge failed: ${err.message}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   const isCurrentUserAdmin = allProfiles.find((p) => p.id === currentUserId)?.is_admin ?? false;
 
+  // Strict Access Guard for Non-Admins
   if (!loading && !isCurrentUserAdmin) {
     const currentEmail = allProfiles.find((p) => p.id === currentUserId)?.email || 'your-email@example.com';
     return (
@@ -359,12 +681,13 @@ export default function AdminDashboardPage() {
             <h1 className="font-heading text-2xl md:text-3xl font-bold text-[var(--on-surface)]">
               Admin Observatory
             </h1>
-            <span className="px-2 py-0.5 rounded-full text-[11px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)]">
-              LIVE SYSTEM
-            </span>
+            <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>LIVE SYSTEM</span>
+            </div>
           </div>
           <p className="font-mono text-xs text-[var(--on-surface-variant)] mt-1">
-            Global monitoring of all user accounts, active ledgers, digital payment UTRs, and network health
+            Global monitoring of accounts, live WebSocket telemetry, user moderation, and platform ledgers
           </p>
         </div>
 
@@ -380,7 +703,7 @@ export default function AdminDashboardPage() {
 
           <button
             type="button"
-            onClick={fetchAdminData}
+            onClick={() => fetchAdminData(false)}
             disabled={loading}
             className="px-3.5 py-2 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
           >
@@ -396,160 +719,317 @@ export default function AdminDashboardPage() {
       <div className="flex items-center gap-1.5 border-b border-[var(--outline-variant)]/20 pb-2 overflow-x-auto">
         {(
           [
-            { id: 'overview', label: 'Platform Overview', icon: 'dashboard' },
-            { id: 'users', label: `Users (${allProfiles.length})`, icon: 'people' },
-            { id: 'transactions', label: `All Ledgers (${allDebts.length})`, icon: 'receipt_long' },
-            { id: 'analytics', label: 'Platform Analytics', icon: 'monitoring' },
-          ] as const
+            { id: 'overview' as AdminTab, label: 'Platform Overview', icon: 'dashboard', badge: undefined },
+            { id: 'live' as AdminTab, label: `Live Stream (${liveEvents.length})`, icon: 'sensors', badge: isWebSocketActive ? 'LIVE' : 'CONN' },
+            { id: 'users' as AdminTab, label: `Users (${allProfiles.length})`, icon: 'manage_accounts', badge: metrics.isolatedUsers > 0 ? `${metrics.isolatedUsers} ISOLATED` : undefined },
+            { id: 'transactions' as AdminTab, label: `All Ledgers (${allDebts.length})`, icon: 'receipt_long', badge: undefined },
+            { id: 'analytics' as AdminTab, label: 'System Analytics', icon: 'monitoring', badge: undefined },
+          ] as Array<{ id: AdminTab; label: string; icon: string; badge?: string }>
         ).map((t) => (
           <button
             key={t.id}
             type="button"
-            onClick={() => setActiveTab(t.id)}
-            className={`px-3.5 py-2 rounded-xl font-mono text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shrink-0 ${
+            onClick={() => handleSelectTab(t.id)}
+            className={`px-3.5 py-2 rounded-xl font-mono text-xs font-semibold flex items-center gap-2 whitespace-nowrap transition-all cursor-pointer ${
               activeTab === t.id
                 ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-sm'
-                : 'text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)] hover:text-[var(--on-surface)]'
+                : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)] hover:text-[var(--on-surface)]'
             }`}
           >
             <span className="material-symbols-outlined text-[17px]">{t.icon}</span>
             <span>{t.label}</span>
+            {t.badge && (
+              <span
+                className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                  activeTab === t.id
+                    ? 'bg-white/20 text-white'
+                    : t.badge.includes('ISOLATED')
+                    ? 'bg-red-500/20 text-red-500'
+                    : 'bg-emerald-500/20 text-emerald-500 animate-pulse'
+                }`}
+              >
+                {t.badge}
+              </span>
+            )}
           </button>
         ))}
       </div>
 
-      {/* TAB 1: OVERVIEW */}
+      {/* TAB 1: PLATFORM OVERVIEW */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
-          {/* Top 4 KPI Cards */}
-          <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-[var(--surface-container-lowest)] p-5 rounded-2xl border border-[var(--outline-variant)]/30 shadow-sm">
-              <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider font-semibold block">
+          {/* Top Key Metrics */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            <div className="p-4 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30">
+              <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider block">
                 Total Users
               </span>
-              <div className="font-heading text-2xl font-bold text-[var(--on-surface)] mt-2">
+              <div className="font-heading text-2xl font-bold text-[var(--on-surface)] mt-1">
                 {metrics.totalUsers}
               </div>
-              <div className="flex items-center gap-2 text-[11px] font-mono text-[var(--on-surface-variant)] mt-1">
-                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{metrics.registeredUsers} Reg</span>
+              <div className="font-mono text-[11px] text-[var(--on-surface-variant)] mt-1 flex items-center gap-2">
+                <span className="text-emerald-600 dark:text-emerald-400 font-bold">{metrics.registeredUsers} Reg</span>
                 <span>•</span>
-                <span className="text-amber-600 dark:text-amber-400 font-semibold">{metrics.ghostUsers} Ghost</span>
+                <span className="text-amber-600 dark:text-amber-400 font-bold">{metrics.ghostUsers} Ghost</span>
+                {metrics.isolatedUsers > 0 && (
+                  <>
+                    <span>•</span>
+                    <span className="text-red-500 font-bold">{metrics.isolatedUsers} Isolated</span>
+                  </>
+                )}
               </div>
             </div>
 
-            <div className="bg-[var(--surface-container-lowest)] p-5 rounded-2xl border border-[var(--outline-variant)]/30 shadow-sm">
-              <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider font-semibold block">
-                Platform Volume
+            <div className="p-4 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30">
+              <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider block">
+                Active Ledgers
               </span>
-              <div className="font-heading text-2xl font-bold text-[var(--on-surface)] mt-2">
-                {formatCurrency(metrics.totalPrincipalVolume, currency)}
+              <div className="font-heading text-2xl font-bold text-[var(--on-surface)] mt-1">
+                {metrics.totalDebts}
               </div>
-              <div className="text-[11px] font-mono text-[var(--primary)] mt-1 font-semibold">
-                {formatCurrency(metrics.totalOutstandingVolume, currency)} active
+              <div className="font-mono text-[11px] text-[var(--on-surface-variant)] mt-1 flex items-center gap-2">
+                <span className="text-blue-600 dark:text-blue-400 font-bold">{metrics.activeDebtsCount} Open</span>
+                <span>•</span>
+                <span className="text-emerald-600 dark:text-emerald-400 font-bold">{metrics.settledDebtsCount} Settled</span>
               </div>
             </div>
 
-            <div className="bg-[var(--surface-container-lowest)] p-5 rounded-2xl border border-[var(--outline-variant)]/30 shadow-sm">
-              <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider font-semibold block">
-                Settled Repayments
+            <div className="p-4 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30">
+              <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider block">
+                Outstanding Principal
               </span>
-              <div className="font-heading text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-2">
-                {formatCurrency(metrics.totalRepaymentsVolume, currency)}
+              <div className="font-heading text-2xl font-bold text-[var(--primary)] mt-1">
+                {formatCurrency(metrics.totalOutstandingVolume, currency)}
               </div>
-              <div className="text-[11px] font-mono text-[var(--on-surface-variant)] mt-1">
-                {metrics.settledDebtsCount} settled / {metrics.totalDebts} total
+              <div className="font-mono text-[11px] text-[var(--on-surface-variant)] mt-1">
+                Lifetime: {formatCurrency(metrics.totalPrincipalVolume, currency)}
               </div>
             </div>
 
-            <div className="bg-[var(--surface-container-lowest)] p-5 rounded-2xl border border-[var(--outline-variant)]/30 shadow-sm">
-              <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider font-semibold block">
-                Disputes &amp; Pending
+            <div className="p-4 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30">
+              <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider block">
+                Avg Network Score
               </span>
-              <div className="font-heading text-2xl font-bold text-amber-600 dark:text-amber-400 mt-2">
-                {metrics.disputedCount}
+              <div className="font-heading text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+                {metrics.avgTrustScore}
               </div>
-              <div className="text-[11px] font-mono text-[var(--on-surface-variant)] mt-1">
-                {metrics.pendingPaymentsCount} awaiting review
+              <div className="font-mono text-[11px] text-[var(--on-surface-variant)] mt-1">
+                Multi-Pillar Trust Calibrated
               </div>
-            </div>
-          </section>
-
-          {/* System Health & Status Banner */}
-          <div className="p-4 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-mono">
-            <div className="flex items-center gap-3">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-[var(--on-surface)] font-bold">PostgreSQL Realtime Channel: Active</span>
-              <span className="text-[var(--on-surface-variant)]">•</span>
-              <span className="text-[var(--on-surface-variant)]">Average Network Trust Score: {metrics.avgTrustScore}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold">
-                100% LEDGER INTEGRITY
-              </span>
             </div>
           </div>
 
-          {/* Recent Live Activity Stream across Platform */}
-          <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 border border-[var(--outline-variant)]/30 shadow-sm space-y-4">
+          {/* Real-Time Live Ticker Card */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 space-y-3">
             <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-heading text-lg font-bold text-[var(--on-surface)]">
-                  Live Platform Activity Stream
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                <h3 className="font-mono text-xs uppercase tracking-wider font-bold text-[var(--on-surface)]">
+                  Live Platform Telemetry Stream
                 </h3>
-                <p className="font-mono text-xs text-[var(--on-surface-variant)] mt-0.5">
-                  Latest system events, debt logs, and payment reports
-                </p>
               </div>
-              <span className="material-symbols-outlined text-[20px] text-[var(--primary)]">rss_feed</span>
+              <button
+                type="button"
+                onClick={() => handleSelectTab('live')}
+                className="text-[11px] font-mono text-[var(--primary)] hover:underline flex items-center gap-1 font-bold"
+              >
+                <span>Open Full Stream Console</span>
+                <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+              </button>
             </div>
 
             <div className="divide-y divide-[var(--outline-variant)]/10 font-mono text-xs">
-              {allLogs.length === 0 ? (
-                <p className="py-6 text-center text-[var(--on-surface-variant)]">No system events logged yet.</p>
+              {liveEvents.length === 0 ? (
+                <div className="py-6 text-center text-[var(--on-surface-variant)] space-y-1">
+                  <span className="material-symbols-outlined text-[28px] text-[var(--outline)] animate-pulse block">
+                    sensors
+                  </span>
+                  <p>Listening for real-time transactions and audit events...</p>
+                </div>
               ) : (
-                allLogs.slice(0, 10).map((log) => {
-                  const details: any = log.details || {};
-                  return (
-                    <div key={log.id} className="py-3 flex items-start justify-between gap-4">
-                      <div className="flex items-start gap-2.5 min-w-0">
-                        <span className="material-symbols-outlined text-[17px] text-[var(--primary)] shrink-0 mt-0.5">
-                          {log.action.includes('payment')
-                            ? 'payments'
-                            : log.action.includes('dispute')
-                            ? 'gavel'
-                            : 'sync_alt'}
-                        </span>
-                        <div className="min-w-0">
-                          <span className="font-bold text-[var(--on-surface)] capitalize">
-                            {log.action.replace(/_/g, ' ')}
-                          </span>
-                          {details.amount && (
-                            <span className="ml-2 font-bold text-emerald-600 dark:text-emerald-400">
-                              {formatCurrency(details.amount, details.currency || currency)}
-                            </span>
-                          )}
-                          {details.note && (
-                            <p className="text-[11px] text-[var(--on-surface-variant)] truncate mt-0.5">
-                              &quot;{details.note}&quot;
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      <span className="text-[10px] text-[var(--outline)] shrink-0">
-                        {new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                liveEvents.slice(0, 5).map((evt) => (
+                  <div
+                    key={evt.id}
+                    onClick={() => setSelectedTelemetryEvent(evt)}
+                    className="py-2.5 flex items-center justify-between gap-3 hover:bg-[var(--surface-container-high)]/50 px-2 rounded-xl cursor-pointer transition-colors"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="material-symbols-outlined text-[17px] text-[var(--primary)] shrink-0">
+                        {evt.icon}
                       </span>
+                      <div className="min-w-0">
+                        <span className="font-bold text-[var(--on-surface)] truncate block sm:inline">
+                          {evt.title}
+                        </span>
+                        <span className="text-[11px] text-[var(--on-surface-variant)] truncate block">
+                          {evt.description}
+                        </span>
+                      </div>
                     </div>
-                  );
-                })
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${evt.badgeClass}`}>
+                        {evt.eventType}
+                      </span>
+                      <span className="text-[10px] text-[var(--outline)]">{evt.relativeTime}</span>
+                    </div>
+                  </div>
+                ))
               )}
             </div>
           </div>
         </div>
       )}
 
-      {/* TAB 2: ALL USERS */}
+      {/* TAB 2: LIVE STREAM CONSOLE */}
+      {activeTab === 'live' && (
+        <div className="space-y-4">
+          {/* Controls Bar */}
+          <div className="p-4 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/20 font-mono text-xs">
+                <span className={`w-2.5 h-2.5 rounded-full ${isWebSocketActive ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                <span className="font-bold text-[var(--on-surface)]">
+                  {isWebSocketActive ? 'WebSocket Connected' : 'Connecting WebSocket...'}
+                </span>
+                <span className="text-[10px] text-[var(--outline)]">• {liveEvents.length} events captured</span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsLivePaused(!isLivePaused)}
+                className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
+                  isLivePaused
+                    ? 'bg-amber-500 text-white'
+                    : 'bg-[var(--surface-container-high)] text-[var(--on-surface)] hover:bg-[var(--surface-container-highest)]'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[16px]">
+                  {isLivePaused ? 'play_arrow' : 'pause'}
+                </span>
+                <span>{isLivePaused ? 'Resume Stream' : 'Pause Stream'}</span>
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2 overflow-x-auto">
+              {(
+                [
+                  { id: 'all', label: 'All Events' },
+                  { id: 'payments', label: 'Payments' },
+                  { id: 'debts', label: 'Debts' },
+                  { id: 'profiles', label: 'Users' },
+                  { id: 'admin', label: 'Admin Logs' },
+                ] as const
+              ).map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setLiveFilter(f.id)}
+                  className={`px-3 py-1.5 rounded-lg font-mono text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                    liveFilter === f.id
+                      ? 'bg-[var(--primary)] text-[var(--on-primary)]'
+                      : 'bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+
+              <button
+                type="button"
+                onClick={() => setLiveEvents([])}
+                className="px-2.5 py-1.5 rounded-lg border border-[var(--outline-variant)]/40 hover:bg-red-500/10 text-red-500 font-mono text-xs font-bold transition-colors cursor-pointer"
+                title="Clear current event buffer"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+
+          {/* Stream Logs List */}
+          <div className="bg-[var(--surface-container-lowest)] rounded-2xl border border-[var(--outline-variant)]/30 overflow-hidden shadow-sm">
+            <div className="p-3 bg-[var(--surface-container)] border-b border-[var(--outline-variant)]/20 font-mono text-xs flex items-center justify-between">
+              <span className="font-bold text-[var(--on-surface)] uppercase tracking-wider">
+                Telemetry Packet Feed
+              </span>
+              <span className="text-[11px] text-[var(--on-surface-variant)]">Click any entry to inspect payload JSON</span>
+            </div>
+
+            <div className="divide-y divide-[var(--outline-variant)]/10 font-mono text-xs max-h-[65vh] overflow-y-auto overscroll-contain">
+              {filteredLiveEvents.length === 0 ? (
+                <div className="py-16 text-center text-[var(--on-surface-variant)] space-y-2">
+                  <span className="material-symbols-outlined text-[36px] text-[var(--outline)] animate-pulse block">
+                    wifi_tethering
+                  </span>
+                  <p className="font-bold">Awaiting Telemetry Signals</p>
+                  <p className="text-[11px] text-[var(--outline)]">
+                    Perform a transaction, submit a payment, or alter profile data in another window to see packets live.
+                  </p>
+                </div>
+              ) : (
+                filteredLiveEvents.map((evt) => (
+                  <div
+                    key={evt.id}
+                    onClick={() => setSelectedTelemetryEvent(evt)}
+                    className="p-3.5 flex items-start justify-between gap-4 hover:bg-[var(--surface-container-low)] transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div className="w-8 h-8 rounded-xl bg-[var(--surface-container)] flex items-center justify-center shrink-0 mt-0.5">
+                        <span className="material-symbols-outlined text-[18px] text-[var(--primary)]">
+                          {evt.icon}
+                        </span>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-[var(--on-surface)]">
+                            {evt.title}
+                          </span>
+                          <span className={`px-2 py-0.2 rounded text-[9px] font-bold border ${evt.badgeClass}`}>
+                            {evt.table.toUpperCase()} • {evt.eventType}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-[var(--on-surface-variant)] mt-0.5 truncate">
+                          {evt.description}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className="text-[11px] text-[var(--outline)] block">
+                        {evt.relativeTime}
+                      </span>
+                      <span className="text-[10px] text-[var(--primary)] hover:underline">
+                        Inspect
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: USER CONTROL & MODERATION */}
       {activeTab === 'users' && (
         <div className="space-y-4">
+          {actionFeedback && (
+            <div
+              className={`p-3.5 rounded-2xl text-xs font-mono flex items-center justify-between border ${
+                actionFeedback.type === 'success'
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                  : 'bg-red-500/10 border-red-500/30 text-red-500'
+              }`}
+            >
+              <span>{actionFeedback.text}</span>
+              <button
+                type="button"
+                onClick={() => setActionFeedback(null)}
+                className="text-[11px] underline cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
           {/* Search & Filter Bar */}
           <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
             <div className="relative flex-1 max-w-md">
@@ -560,7 +1040,7 @@ export default function AdminDashboardPage() {
                 type="text"
                 value={userSearch}
                 onChange={(e) => setUserSearch(e.target.value)}
-                placeholder="Search user by name, email, phone, or UUID..."
+                placeholder="Search by name, email, phone, VPA or ID..."
                 className="w-full pl-9 pr-4 py-2 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] font-mono text-xs outline-none focus:border-[var(--primary)]"
               />
             </div>
@@ -570,7 +1050,8 @@ export default function AdminDashboardPage() {
                 [
                   { id: 'all', label: 'All Users' },
                   { id: 'registered', label: 'Registered' },
-                  { id: 'ghost', label: 'Ghost/Claimable' },
+                  { id: 'ghost', label: 'Ghost' },
+                  { id: 'isolated', label: 'Quarantined / Isolated' },
                   { id: 'active_debts', label: 'With Debts' },
                 ] as const
               ).map((f) => (
@@ -597,75 +1078,136 @@ export default function AdminDashboardPage() {
                 <thead className="bg-[var(--surface-container)] border-b border-[var(--outline-variant)]/20 text-[var(--on-surface-variant)] uppercase">
                   <tr>
                     <th className="py-3 px-4">User</th>
-                    <th className="py-3 px-4">Type</th>
-                    <th className="py-3 px-4">Trust Score</th>
-                    <th className="py-3 px-4">Debts</th>
-                    <th className="py-3 px-4">Outstanding Lent</th>
-                    <th className="py-3 px-4">Outstanding Owed</th>
-                    <th className="py-3 px-4 text-right">Actions</th>
+                    <th className="py-3 px-4">Status &amp; Verification</th>
+                    <th className="py-3 px-4">Network Score</th>
+                    <th className="py-3 px-4">UPI Identifier</th>
+                    <th className="py-3 px-4">Lent / Owed</th>
+                    <th className="py-3 px-4 text-right">Moderation</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--outline-variant)]/10">
                   {filteredUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-[var(--on-surface-variant)]">
+                      <td colSpan={6} className="py-8 text-center text-[var(--on-surface-variant)]">
                         No users match the search criteria.
                       </td>
                     </tr>
                   ) : (
-                    filteredUsers.map((u) => (
-                      <tr key={u.id} className="hover:bg-[var(--surface-container-low)] transition-colors">
-                        <td className="py-3 px-4">
-                          <div className="flex items-center gap-2.5">
-                            <Avatar src={u.avatar_url} name={u.full_name || u.email} size="sm" />
-                            <div className="min-w-0">
-                              <span className="font-bold text-[var(--on-surface)] block truncate">
-                                {u.full_name || 'Unnamed User'}
-                              </span>
-                              <span className="text-[11px] text-[var(--on-surface-variant)] block truncate">
-                                {u.email} {u.phone && `• ${u.phone}`}
+                    filteredUsers.map((u) => {
+                      const detectedVpa = detectUPIApp(u.upi_id);
+                      return (
+                        <tr key={u.id} className="hover:bg-[var(--surface-container-low)] transition-colors">
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2.5">
+                              <Avatar src={u.avatar_url} name={u.full_name || u.email} size="sm" />
+                              <div className="min-w-0">
+                                <span className="font-bold text-[var(--on-surface)] block truncate">
+                                  {u.full_name || 'Unnamed User'}
+                                </span>
+                                <span className="text-[11px] text-[var(--on-surface-variant)] block truncate">
+                                  {u.email}
+                                </span>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {u.is_isolated ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/15 text-red-500 border border-red-500/30">
+                                  ISOLATED
+                                </span>
+                              ) : u.needs_reverification ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                                  REVERIFY
+                                </span>
+                              ) : u.is_verified ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30">
+                                  VERIFIED
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                                  ACTIVE
+                                </span>
+                              )}
+
+                              <span className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-[var(--surface-container-high)] text-[var(--outline)]">
+                                {u.is_shadow ? 'GHOST' : 'REG'}
                               </span>
                             </div>
-                          </div>
-                        </td>
-                        <td className="py-3 px-4">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              u.is_shadow
-                                ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                                : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                            }`}
-                          >
-                            {u.is_shadow ? 'Ghost' : 'Registered'}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">
-                          <span className="inline-flex items-center gap-1 font-bold text-[var(--on-surface)]">
-                            <span className="material-symbols-outlined text-[14px] text-[var(--primary)]">
-                              verified_user
-                            </span>
-                            <span>{u.trustScore}</span>
-                            <span className={`text-[10px] ${u.trustRatingColor}`}>({u.trustRating})</span>
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 font-bold">{u.debtsCount}</td>
-                        <td className="py-3 px-4 text-emerald-600 dark:text-emerald-400 font-bold">
-                          {formatCurrency(u.totalLentBalance, currency)}
-                        </td>
-                        <td className="py-3 px-4 text-[var(--error)] font-bold">
-                          {formatCurrency(u.totalOwedBalance, currency)}
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedUser(u)}
-                            className="px-2.5 py-1 rounded-lg bg-[var(--surface-container-high)] text-[var(--primary)] font-bold hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-all cursor-pointer"
-                          >
-                            Inspect
-                          </button>
-                        </td>
-                      </tr>
-                    ))
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold text-[var(--on-surface)]">{u.trustScore}</span>
+                              <span className={`text-[10px] font-semibold ${u.trustRatingColor}`}>
+                                ({u.trustRating})
+                              </span>
+                              {u.trustBreakdown?.overdueActiveCount > 0 && (
+                                <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-red-500/20 text-red-500" title="Delinquent past due active debts">
+                                  {u.trustBreakdown.overdueActiveCount} OVERDUE
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            {u.upi_id ? (
+                              <div className="flex items-center gap-1.5">
+                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${detectedVpa.badgeClass}`}>
+                                  {detectedVpa.shortName}
+                                </span>
+                                <span className="text-[11px] text-[var(--on-surface-variant)] truncate max-w-[120px]">
+                                  {u.upi_id}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-[var(--outline)]">No VPA</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="text-[11px]">
+                              <span className="text-emerald-600 dark:text-emerald-400 font-bold block">
+                                +{formatCurrency(u.totalLentBalance, currency)}
+                              </span>
+                              <span className="text-[var(--error)] font-bold block">
+                                -{formatCurrency(u.totalOwedBalance, currency)}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedUser(u)}
+                                className="px-2.5 py-1 rounded-lg bg-[var(--surface-container-high)] text-[var(--primary)] font-bold hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-all cursor-pointer"
+                              >
+                                Controls
+                              </button>
+                              {u.is_isolated ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleIsolation(u, false)}
+                                  className="px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 font-bold hover:bg-emerald-500/20 transition-all cursor-pointer text-[10px]"
+                                  title="Lift quarantine"
+                                >
+                                  Unfreeze
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsolationTarget(u);
+                                    setIsolationReasonInput('');
+                                  }}
+                                  className="px-2 py-1 rounded-lg bg-red-500/10 text-red-500 font-bold hover:bg-red-500/20 transition-all cursor-pointer text-[10px]"
+                                  title="Quarantine account"
+                                >
+                                  Isolate
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -674,7 +1216,7 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      {/* TAB 3: ALL TRANSACTIONS */}
+      {/* TAB 4: ALL TRANSACTIONS */}
       {activeTab === 'transactions' && (
         <div className="space-y-4">
           {/* Search & Filters */}
@@ -693,7 +1235,6 @@ export default function AdminDashboardPage() {
             </div>
 
             <div className="flex items-center gap-2 overflow-x-auto">
-              {/* Status filter */}
               <select
                 value={txnStatusFilter}
                 onChange={(e: any) => setTxnStatusFilter(e.target.value)}
@@ -706,14 +1247,13 @@ export default function AdminDashboardPage() {
                 <option value="disputed">Disputed</option>
               </select>
 
-              {/* Method filter */}
               <select
                 value={txnMethodFilter}
                 onChange={(e) => setTxnMethodFilter(e.target.value)}
                 className="px-3 py-1.5 rounded-lg border border-[var(--outline-variant)]/40 bg-[var(--surface-container)] text-[var(--on-surface)] font-mono text-xs outline-none"
               >
                 <option value="all">All Payment Channels</option>
-                <option value="upi">UPI (GPay, PhonePe, Paytm, BHIM)</option>
+                <option value="upi">UPI (GPay, PhonePe, Paytm, Slice, Revolut)</option>
                 <option value="bank_transfer">Bank Transfer (NEFT/IMPS)</option>
                 <option value="cash">Cash</option>
                 <option value="other">Other</option>
@@ -748,77 +1288,68 @@ export default function AdminDashboardPage() {
                       const debtPayments = allPayments.filter((p) => p.debt_id === d.id);
                       const calc = calculateDebtBalance(d, debtPayments);
                       const latestPayment = debtPayments[0];
+                      const paymentMethodInfo = latestPayment
+                        ? formatPaymentMethodDisplay(latestPayment.payment_method, latestPayment.transaction_ref)
+                        : null;
 
                       return (
                         <tr key={d.id} className="hover:bg-[var(--surface-container-low)] transition-colors">
                           <td className="py-3 px-4">
                             <div className="min-w-0">
-                              <span className="font-bold text-[var(--on-surface)] flex items-center gap-1.5">
-                                <span>{d.lender?.full_name || 'Lender'}</span>
-                                <span className="material-symbols-outlined text-[13px] text-[var(--primary)]">
-                                  arrow_forward
-                                </span>
-                                <span>{d.borrower?.full_name || 'Borrower'}</span>
+                              <span className="font-bold text-[var(--on-surface)] block truncate">
+                                {d.lender?.full_name || 'Lender'} → {d.borrower?.full_name || 'Borrower'}
                               </span>
-                              <span className="text-[11px] text-[var(--on-surface-variant)] truncate block mt-0.5">
-                                {d.notes || 'No description note'}
+                              <span className="text-[10px] text-[var(--outline)] block">
+                                ID: {d.id.substring(0, 8)}...
                               </span>
                             </div>
                           </td>
-                          <td className="py-3 px-4">
-                            <span className="font-bold text-[var(--on-surface)]">
-                              {formatCurrency(d.principal, d.currency)}
-                            </span>
-                            <span className="text-[10px] text-[var(--outline)] block">
-                              {d.interest_rate ? `${d.interest_rate}% APR (${d.interest_type})` : '0% APR'}
-                            </span>
+                          <td className="py-3 px-4 font-bold">
+                            <div>
+                              <span>{formatCurrency(d.principal, d.currency)}</span>
+                              {d.interest_type !== 'none' && (
+                                <span className="text-[10px] text-[var(--primary)] block font-normal">
+                                  {d.interest_rate}% {d.interest_type}
+                                </span>
+                              )}
+                            </div>
                           </td>
-                          <td className="py-3 px-4 font-bold text-[var(--primary)]">
-                            {formatCurrency(calc.currentBalance, d.currency, { showDecimals: true })}
+                          <td className="py-3 px-4 font-bold">
+                            <span className={d.status === 'settled' ? 'text-emerald-600' : 'text-[var(--on-surface)]'}>
+                              {formatCurrency(calc.currentBalance, d.currency)}
+                            </span>
                           </td>
                           <td className="py-3 px-4">
                             {latestPayment?.transaction_ref ? (
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                {(() => {
-                                  const disp = formatPaymentMethodDisplay(latestPayment.payment_method, latestPayment.transaction_ref);
-                                  return (
-                                    <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold border ${disp.badgeClass}`}>
-                                      {disp.fullLabel}
-                                    </span>
-                                  );
-                                })()}
-                                <span className="font-mono text-[11px] font-bold truncate max-w-[110px]">
+                              <div>
+                                <span className="font-bold text-[var(--primary)] block truncate max-w-[120px]">
                                   {latestPayment.transaction_ref}
                                 </span>
-                                <button
-                                  type="button"
-                                  onClick={() => navigator.clipboard.writeText(latestPayment.transaction_ref || '')}
-                                  className="text-[var(--primary)] hover:underline cursor-pointer"
-                                  title="Copy UTR"
-                                >
-                                  <span className="material-symbols-outlined text-[13px]">content_copy</span>
-                                </button>
+                                <span className="text-[10px] text-[var(--outline)] block">
+                                  {paymentMethodInfo?.fullLabel}
+                                </span>
                               </div>
                             ) : (
-                              <span className="text-[var(--outline)] text-[11px]">None</span>
+                              <span className="text-[11px] text-[var(--outline)]">—</span>
                             )}
                           </td>
                           <td className="py-3 px-4">
-                            <Chip
-                              label={d.status}
-                              variant={
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                                 d.status === 'settled'
-                                  ? 'settled'
+                                  ? 'bg-emerald-500/15 text-emerald-600'
                                   : d.status === 'active'
-                                  ? 'active'
-                                  : d.status === 'pending'
-                                  ? 'pending'
-                                  : 'declined'
-                              }
-                            />
+                                  ? 'bg-blue-500/15 text-blue-600'
+                                  : d.status === 'disputed'
+                                  ? 'bg-red-500/15 text-red-600'
+                                  : 'bg-amber-500/15 text-amber-600'
+                              }`}
+                            >
+                              {d.status.toUpperCase()}
+                            </span>
                           </td>
-                          <td className="py-3 px-4 text-[var(--on-surface-variant)] text-[11px]">
-                            {new Date(d.created_at).toLocaleDateString()}
+                          <td className="py-3 px-4 text-[11px] text-[var(--on-surface-variant)]">
+                            {new Date(d.created_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}
                           </td>
                           <td className="py-3 px-4 text-right">
                             <button
@@ -826,7 +1357,7 @@ export default function AdminDashboardPage() {
                               onClick={() => setSelectedDebtDetail(d)}
                               className="px-2.5 py-1 rounded-lg bg-[var(--surface-container-high)] text-[var(--primary)] font-bold hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-all cursor-pointer"
                             >
-                              View
+                              Audit
                             </button>
                           </td>
                         </tr>
@@ -840,184 +1371,377 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      {/* TAB 4: PLATFORM ANALYTICS */}
+      {/* TAB 5: SYSTEM ANALYTICS */}
       {activeTab === 'analytics' && (
         <div className="space-y-6">
-          {/* Payment Method Distribution */}
-          <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 border border-[var(--outline-variant)]/30 shadow-sm">
-            <h3 className="font-heading text-lg font-bold text-[var(--on-surface)] mb-1">
-              Payment Channels &amp; Modes (Platform-Wide)
-            </h3>
-            <p className="font-mono text-xs text-[var(--on-surface-variant)] mb-4">
-              Aggregate volume and frequency breakdown across all recorded payments
-            </p>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {PRIMARY_PAYMENT_METHODS.map((mode) => {
-                const meta = PAYMENT_METHOD_LABELS[mode];
-                const stat = paymentChannelAnalytics.channels[mode] || { count: 0, volume: 0 };
-                return (
-                  <div
-                    key={mode}
-                    className="p-4 rounded-xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/20"
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="material-symbols-outlined text-[20px] text-[var(--primary)]">
-                        {meta?.icon || 'payment'}
-                      </span>
-                      <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-[var(--surface-container-high)] text-[var(--on-surface)]">
-                        {stat.count} txns
-                      </span>
-                    </div>
-                    <span className="font-mono text-xs text-[var(--on-surface-variant)] block">
-                      {meta?.label || mode.toUpperCase()}
-                    </span>
-                    <span className="font-mono font-bold text-base text-[var(--on-surface)] block mt-0.5">
-                      {formatCurrency(stat.volume, currency)}
-                    </span>
-                  </div>
-                );
-              })}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-5 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 space-y-2">
+              <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider block">
+                Total Debt Principal
+              </span>
+              <div className="font-heading text-2xl font-bold text-[var(--on-surface)]">
+                {formatCurrency(metrics.totalPrincipalVolume, currency)}
+              </div>
+              <p className="text-[11px] text-[var(--outline)]">Total volume committed across all agreements</p>
             </div>
 
-            {/* UPI App Ecosystem Breakdown */}
-            {paymentChannelAnalytics.channels.upi.count > 0 && (
-              <div className="mt-4 p-4 rounded-xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/20 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 font-mono text-xs font-bold text-[var(--on-surface)]">
-                    <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">apps</span>
-                    <span>UPI App Ecosystem Distribution</span>
-                  </div>
-                  <span className="text-[10px] font-mono text-[var(--on-surface-variant)]">
-                    TPAP application share across all UPI settlements
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {Object.entries(paymentChannelAnalytics.upiApps).map(([key, stat]) => (
-                    <div key={key} className="p-2.5 rounded-lg bg-[var(--surface-container-high)]/70 border border-[var(--outline-variant)]/15 text-xs font-mono">
-                      <div className="flex items-center justify-between text-[10px] text-[var(--on-surface-variant)] mb-1">
-                        <span className="font-semibold">{stat.label}</span>
-                        <span className="px-1.5 py-0.2 rounded bg-[var(--surface-container)]">{stat.count} txns</span>
-                      </div>
-                      <div className="font-bold text-[var(--on-surface)]">
-                        {formatCurrency(stat.volume, currency)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+            <div className="p-5 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 space-y-2">
+              <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider block">
+                Verified Repayments
+              </span>
+              <div className="font-heading text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+                {formatCurrency(metrics.totalRepaymentsVolume, currency)}
               </div>
-            )}
-          </div>
+              <p className="text-[11px] text-[var(--outline)]">Direct settlements confirmed on-ledger</p>
+            </div>
 
-          {/* User Trust Score Distribution */}
-          <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 border border-[var(--outline-variant)]/30 shadow-sm">
-            <h3 className="font-heading text-lg font-bold text-[var(--on-surface)] mb-1">
-              Network Trust Distribution
-            </h3>
-            <p className="font-mono text-xs text-[var(--on-surface-variant)] mb-4">
-              Breakdown of registered and ghost users across trust score tiers
-            </p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 font-mono text-xs">
-              <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/25">
-                <span className="text-emerald-700 dark:text-emerald-400 font-bold block">Exceptional (780 - 850)</span>
-                <span className="font-heading text-2xl font-bold text-[var(--on-surface)] mt-1 block">
-                  {usersWithMetrics.filter((u) => u.trustScore >= 780).length} users
-                </span>
+            <div className="p-5 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 space-y-2">
+              <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider block">
+                Disputed Cases
+              </span>
+              <div className="font-heading text-2xl font-bold text-red-500">
+                {metrics.disputedCount}
               </div>
-              <div className="p-4 rounded-xl bg-green-500/10 border border-green-500/25">
-                <span className="text-green-700 dark:text-green-400 font-bold block">Very Good (740 - 779)</span>
-                <span className="font-heading text-2xl font-bold text-[var(--on-surface)] mt-1 block">
-                  {usersWithMetrics.filter((u) => u.trustScore >= 740 && u.trustScore < 780).length} users
-                </span>
-              </div>
-              <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/25">
-                <span className="text-blue-700 dark:text-blue-400 font-bold block">Good (670 - 739)</span>
-                <span className="font-heading text-2xl font-bold text-[var(--on-surface)] mt-1 block">
-                  {usersWithMetrics.filter((u) => u.trustScore >= 670 && u.trustScore < 740).length} users
-                </span>
-              </div>
-              <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/25">
-                <span className="text-amber-700 dark:text-amber-400 font-bold block">Fair / Review (&lt;670)</span>
-                <span className="font-heading text-2xl font-bold text-[var(--on-surface)] mt-1 block">
-                  {usersWithMetrics.filter((u) => u.trustScore < 670).length} users
-                </span>
-              </div>
+              <p className="text-[11px] text-[var(--outline)]">Contested debts or flagged payment receipts</p>
             </div>
           </div>
         </div>
       )}
 
-      {/* User Inspect Modal */}
+      {/* USER CONTROL MODAL */}
       {selectedUser && (
         <Modal
           isOpen={Boolean(selectedUser)}
           onClose={() => setSelectedUser(null)}
-          title={`User Observatory: ${selectedUser.full_name || selectedUser.email}`}
-          subtitle={`User ID: ${selectedUser.id}`}
-          maxWidth="max-w-xl"
+          title="User Control & Moderation Center"
+          subtitle={`Account ID: ${selectedUser.id}`}
+          maxWidth="max-w-2xl"
         >
-          <div className="space-y-4 font-mono text-xs">
-            <div className="flex items-center gap-3 p-3 bg-[var(--surface-container)] rounded-xl">
-              <Avatar src={selectedUser.avatar_url} name={selectedUser.full_name || selectedUser.email} size="lg" />
-              <div>
-                <span className="font-bold text-sm text-[var(--on-surface)] block">
-                  {selectedUser.full_name || 'Unnamed'}
+          <div className="space-y-5 font-mono text-xs">
+            {/* Header info */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-[var(--surface-container)] rounded-2xl">
+              <div className="flex items-center gap-3">
+                <Avatar src={selectedUser.avatar_url} name={selectedUser.full_name || selectedUser.email} size="md" />
+                <div>
+                  <h3 className="font-bold text-base text-[var(--on-surface)]">
+                    {selectedUser.full_name || 'Unnamed User'}
+                  </h3>
+                  <p className="text-xs text-[var(--on-surface-variant)]">{selectedUser.email}</p>
+                  {selectedUser.phone && <p className="text-[11px] text-[var(--outline)]">Phone: {selectedUser.phone}</p>}
+                </div>
+              </div>
+
+              <div className="flex flex-col items-end gap-1">
+                <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${selectedUser.is_isolated ? 'bg-red-500/15 text-red-500 border-red-500/30' : 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30'}`}>
+                  {selectedUser.is_isolated ? 'QUARANTINED / ISOLATED' : 'ACCOUNT ACTIVE'}
                 </span>
-                <span className="text-[var(--on-surface-variant)]">{selectedUser.email}</span>
-                {selectedUser.phone && <span className="block text-[var(--primary)]">{selectedUser.phone}</span>}
-                {selectedUser.upi_id && (
-                  <span className="block text-emerald-600 dark:text-emerald-400 font-bold">
-                    UPI: {selectedUser.upi_id}
-                  </span>
+                {selectedUser.is_shadow && (
+                  <span className="text-[10px] text-amber-500 font-bold">Unclaimed Ghost Profile</span>
                 )}
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="p-3 bg-[var(--surface-container)] rounded-xl">
-                <span className="text-[var(--on-surface-variant)] block">Account Status:</span>
-                <span className="font-bold text-[var(--on-surface)]">
-                  {selectedUser.is_shadow ? 'Ghost / Shadow Profile' : 'Verified Registered Account'}
-                </span>
+            {selectedUser.is_isolated && selectedUser.isolation_reason && (
+              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400">
+                <span className="font-bold block">Quarantine Rationale:</span>
+                <span>{selectedUser.isolation_reason}</span>
               </div>
-              <div className="p-3 bg-[var(--surface-container)] rounded-xl">
-                <span className="text-[var(--on-surface-variant)] block">Network Score:</span>
-                <span className="font-bold text-[var(--primary)] text-sm">
-                  {/* @ts-ignore */}
-                  {selectedUser.trustScore || 720}
-                </span>
+            )}
+
+            {/* Moderation Powers Action Bar */}
+            <div className="p-4 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 space-y-3">
+              <span className="font-bold text-[var(--on-surface)] uppercase tracking-wider block">
+                Administrative Powers &amp; Controls
+              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                {selectedUser.is_isolated ? (
+                  <button
+                    type="button"
+                    disabled={actionLoading}
+                    onClick={() => handleToggleIsolation(selectedUser, false)}
+                    className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">lock_open</span>
+                    <span>Lift Isolation / Unfreeze</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={actionLoading}
+                    onClick={() => {
+                      setIsolationTarget(selectedUser);
+                      setIsolationReasonInput('');
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">security</span>
+                    <span>Isolate / Quarantine User</span>
+                  </button>
+                )}
+
+                {selectedUser.is_verified ? (
+                  <button
+                    type="button"
+                    disabled={actionLoading}
+                    onClick={() => handleToggleVerification(selectedUser, false)}
+                    className="px-3.5 py-2 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">remove_moderator</span>
+                    <span>Clear Verification</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={actionLoading}
+                    onClick={() => handleToggleVerification(selectedUser, true)}
+                    className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">verified</span>
+                    <span>Grant Admin Verification</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  disabled={actionLoading}
+                  onClick={() => handleForceReverification(selectedUser)}
+                  className="px-3.5 py-2 rounded-xl border border-amber-500/40 text-amber-600 hover:bg-amber-500/10 font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <span className="material-symbols-outlined text-[16px]">contact_page</span>
+                  <span>Require Reverification</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={actionLoading}
+                  onClick={() => setPurgeTarget(selectedUser)}
+                  className="px-3.5 py-2 rounded-xl bg-red-500/10 text-red-500 hover:bg-red-500/20 font-bold transition-all cursor-pointer flex items-center gap-1.5 ml-auto"
+                >
+                  <span className="material-symbols-outlined text-[16px]">delete_forever</span>
+                  <span>Purge User</span>
+                </button>
               </div>
             </div>
 
-            <div className="pt-2">
-              <span className="font-bold text-[var(--on-surface)] block mb-2">User Debts &amp; Counterparties</span>
-              <div className="max-h-48 overflow-y-auto space-y-1.5 divide-y divide-[var(--outline-variant)]/10">
-                {allDebts
-                  .filter((d) => d.lender_id === selectedUser.id || d.borrower_id === selectedUser.id)
-                  .map((d) => (
-                    <div key={d.id} className="pt-1.5 flex justify-between items-center text-[11px]">
-                      <span>
-                        {d.lender_id === selectedUser.id ? 'Lent to: ' : 'Borrowed from: '}
-                        <strong>
-                          {d.lender_id === selectedUser.id
-                            ? d.borrower?.full_name || 'Borrower'
-                            : d.lender?.full_name || 'Lender'}
-                        </strong>
-                      </span>
-                      <span className="font-bold">{formatCurrency(d.principal, d.currency)}</span>
+            {/* Network Score & 4 Pillars Breakdown */}
+            {/* @ts-ignore */}
+            {selectedUser.trustBreakdown && (
+              <div className="p-4 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-[var(--on-surface)] uppercase tracking-wider block">
+                    Network Score Analysis
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {/* @ts-ignore */}
+                    <span className="font-bold text-lg text-[var(--primary)]">{selectedUser.trustScore}</span>
+                    {/* @ts-ignore */}
+                    <span className={`text-xs font-bold ${selectedUser.trustRatingColor}`}>({selectedUser.trustRating})</span>
+                  </div>
+                </div>
+
+                {/* 4 Pillars Progress Bars */}
+                <div className="grid grid-cols-2 gap-3 pt-2">
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-[var(--on-surface-variant)]">Payment Reliability</span>
+                      {/* @ts-ignore */}
+                      <span className="font-bold">{selectedUser.trustBreakdown.pillars.paymentHistory}%</span>
                     </div>
-                  ))}
+                    <div className="h-2 rounded-full bg-[var(--surface-container-high)] overflow-hidden">
+                      <div
+                        className="h-full bg-emerald-500 rounded-full"
+                        /* @ts-ignore */
+                        style={{ width: `${selectedUser.trustBreakdown.pillars.paymentHistory}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-[var(--on-surface-variant)]">Debt Clearance Velocity</span>
+                      {/* @ts-ignore */}
+                      <span className="font-bold">{selectedUser.trustBreakdown.pillars.debtClearance}%</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-[var(--surface-container-high)] overflow-hidden">
+                      <div
+                        className="h-full bg-blue-500 rounded-full"
+                        /* @ts-ignore */
+                        style={{ width: `${selectedUser.trustBreakdown.pillars.debtClearance}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-[var(--on-surface-variant)]">Network Peer Breadth</span>
+                      {/* @ts-ignore */}
+                      <span className="font-bold">{selectedUser.trustBreakdown.pillars.networkBreadth}%</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-[var(--surface-container-high)] overflow-hidden">
+                      <div
+                        className="h-full bg-indigo-500 rounded-full"
+                        /* @ts-ignore */
+                        style={{ width: `${selectedUser.trustBreakdown.pillars.networkBreadth}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-[var(--on-surface-variant)]">Dispute Cleanliness</span>
+                      {/* @ts-ignore */}
+                      <span className="font-bold">{selectedUser.trustBreakdown.pillars.disputeCleanliness}%</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-[var(--surface-container-high)] overflow-hidden">
+                      <div
+                        className="h-full bg-purple-500 rounded-full"
+                        /* @ts-ignore */
+                        style={{ width: `${selectedUser.trustBreakdown.pillars.disputeCleanliness}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="pt-3 border-t border-[var(--outline-variant)]/20 text-right">
               <button
                 type="button"
                 onClick={() => setSelectedUser(null)}
-                className="px-4 py-2 rounded-xl bg-[var(--surface-container-high)] text-[var(--on-surface)] font-bold hover:bg-[var(--surface-container-highest)]"
+                className="px-4 py-2 rounded-xl bg-[var(--surface-container-high)] text-[var(--on-surface)] font-bold hover:bg-[var(--surface-container-highest)] cursor-pointer"
               >
-                Close
+                Close Center
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ISOLATION CONFIRMATION MODAL */}
+      {isolationTarget && (
+        <Modal
+          isOpen={Boolean(isolationTarget)}
+          onClose={() => setIsolationTarget(null)}
+          title="Place User Account in Isolation"
+          subtitle={`Quarantining: ${isolationTarget.full_name || isolationTarget.email}`}
+          maxWidth="max-w-md"
+        >
+          <div className="space-y-4 font-mono text-xs">
+            <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-200">
+              <span className="font-bold block mb-1">Impact of Quarantine:</span>
+              <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                <li>User cannot create new debt agreements</li>
+                <li>User cannot submit payment confirmations</li>
+                <li>Account flagged with quarantine notice across platform</li>
+              </ul>
+            </div>
+
+            <div>
+              <label className="font-bold text-[var(--on-surface)] block mb-1">
+                Reason for Isolation (Audit Log):
+              </label>
+              <textarea
+                value={isolationReasonInput}
+                onChange={(e) => setIsolationReasonInput(e.target.value)}
+                placeholder="e.g. Unusual dispute velocity, unverified identity, or malicious reports..."
+                rows={3}
+                className="w-full p-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] outline-none focus:border-red-500 text-xs"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsolationTarget(null)}
+                className="px-3.5 py-2 rounded-xl bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={actionLoading}
+                onClick={() => handleToggleIsolation(isolationTarget, true, isolationReasonInput)}
+                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold cursor-pointer flex items-center gap-1.5"
+              >
+                <span>{actionLoading ? 'Quarantining...' : 'Confirm Quarantine'}</span>
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* PURGE ACCOUNT CONFIRMATION MODAL */}
+      {purgeTarget && (
+        <Modal
+          isOpen={Boolean(purgeTarget)}
+          onClose={() => setPurgeTarget(null)}
+          title="Danger: Permanent User Purge"
+          subtitle={`Target: ${purgeTarget.email}`}
+          maxWidth="max-w-md"
+        >
+          <div className="space-y-4 font-mono text-xs">
+            <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-500">
+              <span className="font-bold block mb-1">WARNING: IRREVERSIBLE OPERATION</span>
+              <p className="text-[11px]">
+                This will permanently delete this account profile, clear contact connections, and purge associated shadow records.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setPurgeTarget(null)}
+                className="px-3.5 py-2 rounded-xl bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={actionLoading}
+                onClick={() => handlePurgeUser(purgeTarget)}
+                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold cursor-pointer"
+              >
+                <span>{actionLoading ? 'Purging...' : 'Permanently Delete User'}</span>
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* TELEMETRY PACKET INSPECT MODAL */}
+      {selectedTelemetryEvent && (
+        <Modal
+          isOpen={Boolean(selectedTelemetryEvent)}
+          onClose={() => setSelectedTelemetryEvent(null)}
+          title="Telemetry Packet Inspection"
+          subtitle={`Event ID: ${selectedTelemetryEvent.id}`}
+          maxWidth="max-w-xl"
+        >
+          <div className="space-y-4 font-mono text-xs">
+            <div className="p-3 rounded-xl bg-[var(--surface-container)] flex items-center justify-between">
+              <div>
+                <span className="font-bold text-[var(--on-surface)]">{selectedTelemetryEvent.title}</span>
+                <span className="text-[11px] text-[var(--on-surface-variant)] block">{selectedTelemetryEvent.description}</span>
+              </div>
+              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${selectedTelemetryEvent.badgeClass}`}>
+                {selectedTelemetryEvent.eventType}
+              </span>
+            </div>
+
+            <div>
+              <span className="font-bold text-[var(--on-surface)] block mb-1">Raw Postgres Payload:</span>
+              <pre className="p-3 rounded-xl bg-[var(--surface-container-high)] text-[var(--primary)] text-[11px] overflow-x-auto max-h-60 border border-[var(--outline-variant)]/20">
+                {JSON.stringify(selectedTelemetryEvent.payload, null, 2)}
+              </pre>
+            </div>
+
+            <div className="pt-2 text-right">
+              <button
+                type="button"
+                onClick={() => setSelectedTelemetryEvent(null)}
+                className="px-4 py-2 rounded-xl bg-[var(--surface-container-high)] text-[var(--on-surface)] font-bold"
+              >
+                Close Inspector
               </button>
             </div>
           </div>

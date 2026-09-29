@@ -54,6 +54,7 @@ export function RecordDebtModal({
   // Anti-harassment cooldown states
   const [cooldown, setCooldown] = useState<CooldownCheckResult | null>(null);
   const [checkingCooldown, setCheckingCooldown] = useState(false);
+  const [isCurrentUserIsolated, setIsCurrentUserIsolated] = useState(false);
 
   // Numeric states backed by clean strings to avoid leading zero bugs and support 2 decimal places
   const [principalStr, setPrincipalStr] = useState<string>('1500');
@@ -108,6 +109,13 @@ export function RecordDebtModal({
     async function loadContacts() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+
+      const { data: myProf } = await supabase.from('profiles').select('is_isolated').eq('id', user.id).single();
+      if (myProf?.is_isolated) {
+        setIsCurrentUserIsolated(true);
+      } else {
+        setIsCurrentUserIsolated(false);
+      }
 
       const peopleMap = new Map<string, PersonOption>();
 
@@ -332,6 +340,12 @@ export function RecordDebtModal({
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('User not logged in');
 
+      if (isCurrentUserIsolated) {
+        setError('Your account is quarantined in security isolation. Transaction recording is restricted.');
+        setLoading(false);
+        return;
+      }
+
       let targetUserId = selectedPersonId || preselectedContactId || '';
 
       // If user wants to add a new person inline
@@ -482,6 +496,18 @@ export function RecordDebtModal({
         {error && (
           <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-[var(--error)] text-sm border border-[var(--error)]/20">
             {error}
+          </div>
+        )}
+
+        {isCurrentUserIsolated && (
+          <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 space-y-1">
+            <div className="flex items-center gap-2 font-mono text-xs font-bold uppercase tracking-wider">
+              <span className="material-symbols-outlined text-[18px]">security</span>
+              <span>Account Quarantined by Administrator</span>
+            </div>
+            <p className="text-xs leading-relaxed">
+              Your account is currently placed in security isolation by a platform administrator. Recording new debt agreements is restricted.
+            </p>
           </div>
         )}
 

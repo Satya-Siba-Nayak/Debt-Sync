@@ -131,7 +131,7 @@ export function TopBar({
         <div className="flex items-center gap-2.5">
           <NotificationCenter />
           <ThemeToggle />
-          {onNewTransaction && (
+          {onNewTransaction && !(isAdmin && viewMode === 'admin') && (
             <button
               onClick={onNewTransaction}
               className="p-1.5 rounded-lg bg-[var(--primary)] text-[var(--on-primary)] flex items-center justify-center cursor-pointer"

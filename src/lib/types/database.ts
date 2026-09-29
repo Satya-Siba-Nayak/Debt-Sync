@@ -7,6 +7,10 @@ export type Profile = {
   upi_id: string | null;
   is_shadow: boolean;
   is_admin: boolean;
+  is_isolated?: boolean;
+  isolation_reason?: string | null;
+  is_verified?: boolean;
+  needs_reverification?: boolean;
   claimed_at: string | null;
   secondary_emails?: string[];
   recent_custom_avatars?: string[];

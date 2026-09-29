@@ -49,16 +49,33 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
     router.push('/login');
   };
 
-  const navItems = [
+  const inAdminMode = Boolean(isAdmin && viewMode === 'admin');
+
+  interface NavItem {
+    label: string;
+    href: string;
+    icon: string;
+    badge?: string;
+  }
+
+  const adminNavItems: NavItem[] = [
+    { label: 'Admin Hub', href: '/admin', icon: 'admin_panel_settings', badge: 'ROOT' },
+    { label: 'Live Stream', href: '/admin?tab=live', icon: 'sensors', badge: 'LIVE' },
+    { label: 'User Controls', href: '/admin?tab=users', icon: 'manage_accounts' },
+    { label: 'Platform Ledgers', href: '/admin?tab=transactions', icon: 'receipt_long' },
+    { label: 'System Analytics', href: '/admin?tab=analytics', icon: 'monitoring' },
+    { label: 'Settings', href: '/settings', icon: 'settings' },
+  ];
+
+  const userNavItems: NavItem[] = [
     { label: 'Dashboard', href: '/', icon: 'dashboard' },
     { label: 'Directory', href: '/directory', icon: 'group' },
     { label: 'Transactions', href: '/transactions', icon: 'receipt_long' },
     { label: 'Analytics', href: '/analytics', icon: 'analytics' },
-    ...(isAdmin && viewMode === 'admin'
-      ? [{ label: 'Admin Hub', href: '/admin', icon: 'shield_person', badge: 'ADMIN' }]
-      : []),
     { label: 'Settings', href: '/settings', icon: 'settings' },
   ];
+
+  const navItems: NavItem[] = inAdminMode ? adminNavItems : userNavItems;
 
   return (
     <aside className="hidden md:flex bg-[var(--surface-container)] docked left-0 h-screen w-60 fixed left-0 top-0 flex-col p-4 border-r border-[var(--outline-variant)]/30 z-40 transition-colors">
@@ -72,16 +89,26 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
             DebtSync
           </div>
           <div className="font-mono text-[11px] text-[var(--on-surface-variant)] tracking-wider uppercase">
-            Trust & Precision
+            {inAdminMode ? 'Admin Console' : 'Trust & Precision'}
           </div>
         </div>
       </div>
 
-      {/* New Transaction Button */}
-      {onNewTransaction ? (
+      {/* Transaction Button or Admin Console Pill */}
+      {inAdminMode ? (
+        <div className="p-3 rounded-2xl bg-[var(--primary)]/10 border border-[var(--primary)]/20 mb-5 flex items-center justify-between shadow-2xs">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="font-mono text-xs font-bold text-[var(--primary)]">Admin Active</span>
+          </div>
+          <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-bold bg-[var(--primary)] text-[var(--on-primary)]">
+            SUPERUSER
+          </span>
+        </div>
+      ) : onNewTransaction ? (
         <button
           onClick={onNewTransaction}
-          className="bg-[var(--primary)] text-[var(--on-primary)] font-medium py-3 px-4 rounded-xl mb-6 w-full flex justify-center items-center gap-2 hover:opacity-95 active:scale-[0.98] transition-all shadow-sm"
+          className="bg-[var(--primary)] text-[var(--on-primary)] font-medium py-3 px-4 rounded-xl mb-6 w-full flex justify-center items-center gap-2 hover:opacity-95 active:scale-[0.98] transition-all shadow-sm cursor-pointer"
         >
           <span className="material-symbols-outlined text-[20px]">add</span>
           <span>New Transaction</span>
@@ -102,6 +129,8 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
           const isActive =
             item.href === '/'
               ? pathname === '/'
+              : item.href.startsWith('/admin')
+              ? pathname === '/admin'
               : pathname.startsWith(item.href);
 
           return (
