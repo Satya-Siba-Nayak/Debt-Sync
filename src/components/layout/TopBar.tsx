@@ -16,6 +16,7 @@ interface TopBarProps {
   userEmail?: string;
   avatarUrl?: string | null;
   recentCustomAvatars?: string[];
+  isAdmin?: boolean;
   onNewTransaction?: () => void;
 }
 
@@ -26,14 +27,38 @@ export function TopBar({
   userEmail,
   avatarUrl,
   recentCustomAvatars = [],
+  isAdmin,
   onNewTransaction,
 }: TopBarProps) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<'admin' | 'user'>('admin');
   const dropdownRef = useRef<HTMLDivElement>(null);
   const triggerMobileRef = useRef<HTMLButtonElement>(null);
   const triggerDesktopRef = useRef<HTMLButtonElement>(null);
   const supabase = createClient();
   const router = useRouter();
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('debtsync_view_mode') as 'admin' | 'user' | null;
+      if (saved) setViewMode(saved);
+
+      const handleModeChange = (e: any) => {
+        if (e.detail?.mode) setViewMode(e.detail.mode);
+      };
+      window.addEventListener('debtsync:view_mode_changed', handleModeChange);
+      return () => window.removeEventListener('debtsync:view_mode_changed', handleModeChange);
+    }
+  }, []);
+
+  const handleToggleMode = () => {
+    const nextMode = viewMode === 'admin' ? 'user' : 'admin';
+    setViewMode(nextMode);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('debtsync_view_mode', nextMode);
+      window.dispatchEvent(new CustomEvent('debtsync:view_mode_changed', { detail: { mode: nextMode } }));
+    }
+  };
 
   // Close dropdown on outside click or escape
   useEffect(() => {
@@ -271,6 +296,34 @@ export function TopBar({
 
           {/* Menu Actions */}
           <div className="pt-2 border-t border-[var(--outline-variant)]/20 space-y-1">
+            {isAdmin && (
+              <>
+                <Link
+                  href="/admin"
+                  onClick={() => setIsDropdownOpen(false)}
+                  className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl font-mono text-xs text-[var(--primary)] hover:bg-[var(--primary)]/10 transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[16px]">shield_person</span>
+                    <span className="font-bold">Admin Observatory</span>
+                  </div>
+                  <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-[var(--primary)]/15">ADMIN</span>
+                </Link>
+
+                <button
+                  type="button"
+                  onClick={handleToggleMode}
+                  className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl font-mono text-xs text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors cursor-pointer text-left"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[16px] text-[var(--on-surface-variant)]">swap_horiz</span>
+                    <span>View: {viewMode === 'admin' ? '⚡ Admin Mode' : '👤 User Mode'}</span>
+                  </div>
+                  <span className="text-[10px] text-[var(--primary)] font-semibold">Switch</span>
+                </button>
+              </>
+            )}
+
             <Link
               href="/settings"
               onClick={() => setIsDropdownOpen(false)}

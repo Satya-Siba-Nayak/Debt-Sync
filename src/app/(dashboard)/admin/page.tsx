@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment, Profile, ActivityLogEntry } from '@/lib/types/database';
 import { formatCurrency } from '@/lib/utils/currency';
@@ -21,6 +22,7 @@ export default function AdminDashboardPage() {
   const [activeTab, setActiveTab] = useState<AdminTab>('overview');
   const [currency, setCurrency] = useState('inr');
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [promotingSelf, setPromotingSelf] = useState(false);
 
   // Raw platform records
   const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
@@ -259,6 +261,28 @@ export default function AdminDashboardPage() {
     return stats;
   }, [allPayments]);
 
+  const isCurrentUserAdmin = allProfiles.find((p) => p.id === currentUserId)?.is_admin ?? false;
+
+  const handlePromoteSelf = async () => {
+    setPromotingSelf(true);
+    try {
+      const user = await getCurrentUserFast(supabase);
+      if (!user) return;
+      const { error: rpcErr } = await supabase.rpc('promote_user_to_admin');
+      if (rpcErr) {
+        await supabase.from('profiles').update({ is_admin: true }).eq('id', user.id);
+      }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('debtsync:user_updated', { detail: { isAdmin: true } }));
+      }
+      await fetchAdminData();
+    } catch (err) {
+      console.error('Failed to promote user to admin:', err);
+    } finally {
+      setPromotingSelf(false);
+    }
+  };
+
   return (
     <div className="page-enter space-y-6 md:space-y-8">
       {/* Header */}
@@ -280,18 +304,49 @@ export default function AdminDashboardPage() {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={fetchAdminData}
-          disabled={loading}
-          className="px-3.5 py-2 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-xs font-semibold flex items-center gap-1.5 transition-colors self-start sm:self-auto cursor-pointer"
-        >
-          <span className={`material-symbols-outlined text-[16px] ${loading ? 'animate-spin' : ''}`}>
-            sync
-          </span>
-          <span>{loading ? 'Refreshing...' : 'Refresh Records'}</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          <Link
+            href="/"
+            className="px-3.5 py-2 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Switch back to regular client dashboard view"
+          >
+            <span className="material-symbols-outlined text-[16px]">person</span>
+            <span>Switch to User View</span>
+          </Link>
+
+          <button
+            type="button"
+            onClick={fetchAdminData}
+            disabled={loading}
+            className="px-3.5 py-2 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <span className={`material-symbols-outlined text-[16px] ${loading ? 'animate-spin' : ''}`}>
+              sync
+            </span>
+            <span>{loading ? 'Refreshing...' : 'Refresh Records'}</span>
+          </button>
+        </div>
       </div>
+
+      {/* Permission helper banner if not yet flagged in Supabase */}
+      {!loading && !isCurrentUserAdmin && (
+        <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-200 text-xs font-mono flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-[18px] text-amber-500 shrink-0">info</span>
+            <span>
+              Your profile is not yet flagged as Administrator in Supabase. You can promote your current account with one click.
+            </span>
+          </div>
+          <button
+            type="button"
+            disabled={promotingSelf}
+            onClick={handlePromoteSelf}
+            className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold transition-colors shrink-0 cursor-pointer text-xs"
+          >
+            {promotingSelf ? 'Promoting...' : 'Make Me Admin Now'}
+          </button>
+        </div>
+      )}
 
       {/* Admin Tabs */}
       <div className="flex items-center gap-1.5 border-b border-[var(--outline-variant)]/20 pb-2 overflow-x-auto">

@@ -38,7 +38,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       let profile: any = null;
       const { data: p1, error: p1Err } = await supabase
         .from('profiles')
-        .select('id, full_name, email, avatar_url, recent_custom_avatars')
+        .select('id, full_name, email, avatar_url, recent_custom_avatars, is_admin')
         .eq('id', user.id)
         .single();
 
@@ -63,6 +63,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         email: user.email,
         avatar_url: profile?.avatar_url || null,
         recent_custom_avatars: recentFromDb,
+        is_admin: Boolean(profile?.is_admin),
       };
 
       setUserProfile(resolved);
@@ -80,6 +81,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           email: prev?.email,
           avatar_url: detail.avatarUrl !== undefined ? detail.avatarUrl : prev?.avatar_url,
           recent_custom_avatars: detail.recentCustomAvatars !== undefined ? detail.recentCustomAvatars : prev?.recent_custom_avatars,
+          is_admin: detail.isAdmin !== undefined ? detail.isAdmin : prev?.is_admin,
         };
         setCachedUserProfile(updated);
         return updated;
@@ -92,7 +94,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--background)] text-[var(--on-background)] font-body-md">
       {/* Desktop Sidebar */}
-      <Sidebar onNewTransaction={() => setIsRecordModalOpen(true)} />
+      <Sidebar
+        isAdmin={userProfile?.is_admin}
+        onNewTransaction={() => setIsRecordModalOpen(true)}
+      />
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col md:ml-60 h-screen overflow-y-auto pb-24 md:pb-8">
@@ -102,6 +107,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           userEmail={userProfile?.email}
           avatarUrl={userProfile?.avatar_url}
           recentCustomAvatars={userProfile?.recent_custom_avatars}
+          isAdmin={userProfile?.is_admin}
           onNewTransaction={() => setIsRecordModalOpen(true)}
         />
 

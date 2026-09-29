@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Auth session and user profile caching utilities.
  * Ensures page reloads are instantaneous without waiting for remote auth network roundtrips.
  */
@@ -11,6 +11,7 @@ export interface CachedProfile {
   email?: string;
   avatar_url?: string | null;
   recent_custom_avatars?: string[];
+  is_admin?: boolean;
 }
 
 /**

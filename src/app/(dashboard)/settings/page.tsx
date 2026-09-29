@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { formatCurrency, SUPPORTED_CURRENCIES } from '@/lib/utils/currency';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
@@ -52,6 +53,9 @@ export default function SettingsPage() {
   const [isCropModalOpen, setIsCropModalOpen] = useState(false);
   const [showAllPresets, setShowAllPresets] = useState(false);
   const [showAdvancedApp, setShowAdvancedApp] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [viewMode, setViewMode] = useState<'admin' | 'user'>('admin');
+  const [promotingAdmin, setPromotingAdmin] = useState(false);
 
   // Account deletion & CSV export states
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -67,6 +71,9 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
+      const localViewMode = localStorage.getItem('debtsync_view_mode') as 'admin' | 'user' | null;
+      if (localViewMode) setViewMode(localViewMode);
+
       setIsStandalone(
         window.matchMedia('(display-mode: standalone)').matches ||
         (window.navigator as any).standalone === true
@@ -94,14 +101,14 @@ export default function SettingsPage() {
         let profile: any = null;
         const { data: pData, error: pErr } = await supabase
           .from('profiles')
-          .select('full_name, phone, secondary_emails, avatar_url, recent_custom_avatars, upi_id')
+          .select('full_name, phone, secondary_emails, avatar_url, recent_custom_avatars, upi_id, is_admin')
           .eq('id', user.id)
           .single();
 
         if (!pErr && pData) {
           profile = pData;
         } else {
-          // Graceful fallback if recent_custom_avatars or upi_id column is not yet migrated
+          // Graceful fallback if columns are not yet migrated
           const { data: fallbackData } = await supabase
             .from('profiles')
             .select('full_name, phone, secondary_emails, avatar_url')
@@ -114,6 +121,7 @@ export default function SettingsPage() {
           setFullName(profile.full_name || '');
           setPhone(profile.phone || '');
           setUpiId(profile.upi_id || '');
+          setIsAdmin(Boolean(profile.is_admin));
           setSecondaryEmails(profile.secondary_emails || []);
           setAvatarUrl(profile.avatar_url || null);
 
@@ -352,6 +360,38 @@ export default function SettingsPage() {
       setError(err.message || 'Failed to update settings');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleToggleViewMode = (mode: 'admin' | 'user') => {
+    setViewMode(mode);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('debtsync_view_mode', mode);
+      window.dispatchEvent(new CustomEvent('debtsync:view_mode_changed', { detail: { mode } }));
+    }
+    setMessage(`Switched to ${mode === 'admin' ? 'Administrator' : 'Normal User'} display view.`);
+  };
+
+  const handlePromoteToAdmin = async () => {
+    setPromotingAdmin(true);
+    setMessage('');
+    setError('');
+    try {
+      const user = await getCurrentUserFast(supabase);
+      if (!user) return;
+      const { error: rpcErr } = await supabase.rpc('promote_user_to_admin');
+      if (rpcErr) {
+        await supabase.from('profiles').update({ is_admin: true }).eq('id', user.id);
+      }
+      setIsAdmin(true);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('debtsync:user_updated', { detail: { isAdmin: true } }));
+      }
+      setMessage('Your account has been granted Administrator privileges.');
+    } catch (err: any) {
+      setError(err.message || 'Failed to promote account to admin.');
+    } finally {
+      setPromotingAdmin(false);
     }
   };
 
@@ -875,6 +915,87 @@ export default function SettingsPage() {
               placeholder="Leave blank to keep unchanged"
               className="w-full px-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-sm outline-none focus:border-[var(--primary)]"
             />
+          </div>
+        </div>
+
+        {/* Administrator Privileges & View Controls */}
+        <div className="pt-6 border-t border-[var(--outline-variant)]/20 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-mono text-xs uppercase tracking-wider font-semibold text-[var(--on-surface-variant)] flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">admin_panel_settings</span>
+              <span>Administrator Privileges &amp; View Controls</span>
+            </h3>
+            <span
+              className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                isAdmin
+                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                  : 'bg-[var(--surface-container-high)] text-[var(--outline)]'
+              }`}
+            >
+              {isAdmin ? 'ADMIN ACCOUNT' : 'STANDARD USER'}
+            </span>
+          </div>
+
+          <p className="text-xs text-[var(--on-surface-variant)]">
+            Control platform monitoring, inspect global ledgers, and toggle between Administrator and Normal User viewing modes.
+          </p>
+
+          <div className="p-4 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <span className="font-mono text-xs font-bold text-[var(--on-surface)] block">
+                  Active Display Mode
+                </span>
+                <span className="text-[11px] font-mono text-[var(--on-surface-variant)]">
+                  Switching to Normal User View simulates the standard client experience.
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleToggleViewMode('user')}
+                  className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold transition-all cursor-pointer ${
+                    viewMode === 'user'
+                      ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-sm'
+                      : 'bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                  }`}
+                >
+                  👤 Normal View
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleToggleViewMode('admin')}
+                  className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold transition-all cursor-pointer ${
+                    viewMode === 'admin'
+                      ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-sm'
+                      : 'bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                  }`}
+                >
+                  ⚡ Admin View
+                </button>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-[var(--outline-variant)]/15 flex flex-wrap items-center justify-between gap-2">
+              <Link
+                href="/admin"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:brightness-110 shadow-xs"
+              >
+                <span className="material-symbols-outlined text-[15px]">dashboard</span>
+                <span>Open Admin Observatory</span>
+              </Link>
+
+              {!isAdmin && (
+                <button
+                  type="button"
+                  disabled={promotingAdmin}
+                  onClick={handlePromoteToAdmin}
+                  className="px-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container-high)] text-[var(--primary)] font-mono text-xs font-bold transition-colors cursor-pointer"
+                >
+                  {promotingAdmin ? 'Promoting...' : 'Make My Account an Admin'}
+                </button>
+              )}
+            </div>
           </div>
         </div>
 

@@ -10,12 +10,38 @@ import { clearAuthSessionData } from '@/lib/utils/auth-session';
 
 interface SidebarProps {
   onNewTransaction?: () => void;
+  isAdmin?: boolean;
 }
 
-export function Sidebar({ onNewTransaction }: SidebarProps) {
+export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
+  const [viewMode, setViewMode] = React.useState<'admin' | 'user'>('admin');
+
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('debtsync_view_mode') as 'admin' | 'user' | null;
+      if (saved) setViewMode(saved);
+
+      const handleModeChange = (e: any) => {
+        if (e.detail?.mode) {
+          setViewMode(e.detail.mode);
+        }
+      };
+      window.addEventListener('debtsync:view_mode_changed', handleModeChange);
+      return () => window.removeEventListener('debtsync:view_mode_changed', handleModeChange);
+    }
+  }, []);
+
+  const handleToggleMode = () => {
+    const nextMode = viewMode === 'admin' ? 'user' : 'admin';
+    setViewMode(nextMode);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('debtsync_view_mode', nextMode);
+      window.dispatchEvent(new CustomEvent('debtsync:view_mode_changed', { detail: { mode: nextMode } }));
+    }
+  };
 
   const handleSignOut = async () => {
     clearAuthSessionData();
@@ -28,7 +54,9 @@ export function Sidebar({ onNewTransaction }: SidebarProps) {
     { label: 'Directory', href: '/directory', icon: 'group' },
     { label: 'Transactions', href: '/transactions', icon: 'receipt_long' },
     { label: 'Analytics', href: '/analytics', icon: 'analytics' },
-    { label: 'Admin Hub', href: '/admin', icon: 'shield_person', badge: 'ADMIN' },
+    ...(isAdmin && viewMode === 'admin'
+      ? [{ label: 'Admin Hub', href: '/admin', icon: 'shield_person', badge: 'ADMIN' }]
+      : []),
     { label: 'Settings', href: '/settings', icon: 'settings' },
   ];
 
@@ -107,6 +135,21 @@ export function Sidebar({ onNewTransaction }: SidebarProps) {
 
       {/* Bottom Footer Area */}
       <div className="mt-auto flex flex-col gap-2 border-t border-[var(--outline-variant)]/20 pt-4">
+        {isAdmin && (
+          <div className="flex items-center justify-between px-1 mb-1">
+            <span className="font-mono text-xs text-[var(--on-surface-variant)]">View Mode</span>
+            <button
+              type="button"
+              onClick={handleToggleMode}
+              className="px-2 py-0.5 rounded-lg border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container-high)] text-[10px] font-mono font-bold transition-all cursor-pointer flex items-center gap-1 text-[var(--primary)]"
+              title={viewMode === 'admin' ? 'Currently Admin View. Click to preview normal user view' : 'Currently Normal User View. Click to restore admin view'}
+            >
+              <span>{viewMode === 'admin' ? '⚡ Admin' : '👤 User'}</span>
+              <span className="material-symbols-outlined text-[12px]">swap_horiz</span>
+            </button>
+          </div>
+        )}
+
         <div className="flex items-center justify-between px-1 mb-1">
           <span className="font-mono text-xs text-[var(--on-surface-variant)]">Theme</span>
           <ThemeToggle />
