@@ -285,7 +285,7 @@ export default function AdminDashboardPage() {
       (p) => typeof p.note === 'string' && p.note.includes('[DISPUTED]')
     ).length;
 
-    // Average trust score across platform using enhanced algorithm
+    // Average trust score across platform using enhanced algorithm (filtering unscored users)
     const userScores = allProfiles.map((p) => {
       const uDebts = allDebts.filter((d) => d.lender_id === p.id || d.borrower_id === p.id);
       const uPayments = allPayments.filter((pm) => pm.paid_by === p.id);
@@ -294,8 +294,9 @@ export default function AdminDashboardPage() {
         isVerified: p.is_verified,
       }).score;
     });
+    const scoredUsers = userScores.filter((s) => s > 0);
     const avgTrustScore =
-      userScores.length > 0 ? Math.round(userScores.reduce((a, b) => a + b, 0) / userScores.length) : 650;
+      scoredUsers.length > 0 ? Math.round(scoredUsers.reduce((a, b) => a + b, 0) / scoredUsers.length) : -1;
 
     return {
       totalUsers,
@@ -810,11 +811,13 @@ export default function AdminDashboardPage() {
               <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider block">
                 Avg Network Score
               </span>
-              <div className="font-heading text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
-                {metrics.avgTrustScore}
+              <div className={`font-heading text-2xl font-bold mt-1 ${
+                metrics.avgTrustScore > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-[var(--outline)]'
+              }`}>
+                {metrics.avgTrustScore > 0 ? metrics.avgTrustScore : '-1 (Unrated)'}
               </div>
               <div className="font-mono text-[11px] text-[var(--on-surface-variant)] mt-1">
-                Multi-Pillar Trust Calibrated
+                {metrics.avgTrustScore > 0 ? 'Multi-Pillar Trust Calibrated' : 'No Settled/Active Records'}
               </div>
             </div>
           </div>
@@ -1137,14 +1140,23 @@ export default function AdminDashboardPage() {
                           </td>
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-1.5">
-                              <span className="font-bold text-[var(--on-surface)]">{u.trustScore}</span>
-                              <span className={`text-[10px] font-semibold ${u.trustRatingColor}`}>
-                                ({u.trustRating})
-                              </span>
-                              {u.trustBreakdown?.overdueActiveCount > 0 && (
-                                <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-red-500/20 text-red-500" title="Delinquent past due active debts">
-                                  {u.trustBreakdown.overdueActiveCount} OVERDUE
+                              {u.trustScore === -1 ? (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[var(--surface-container-high)] text-[var(--outline)] border border-[var(--outline-variant)]/30">
+                                  <span className="material-symbols-outlined text-[12px]">history_toggle_off</span>
+                                  <span>-1 (No Score)</span>
                                 </span>
+                              ) : (
+                                <>
+                                  <span className="font-bold text-[var(--on-surface)]">{u.trustScore}</span>
+                                  <span className={`text-[10px] font-semibold ${u.trustRatingColor}`}>
+                                    ({u.trustRating})
+                                  </span>
+                                  {u.trustBreakdown?.overdueActiveCount > 0 && (
+                                    <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-red-500/20 text-red-500" title="Delinquent past due active debts">
+                                      {u.trustBreakdown.overdueActiveCount} OVERDUE
+                                    </span>
+                                  )}
+                                </>
                               )}
                             </div>
                           </td>
@@ -1533,74 +1545,88 @@ export default function AdminDashboardPage() {
                   </span>
                   <div className="flex items-center gap-2">
                     {/* @ts-ignore */}
-                    <span className="font-bold text-lg text-[var(--primary)]">{selectedUser.trustScore}</span>
+                    <span className={`font-bold text-lg ${selectedUser.trustScore === -1 ? 'text-[var(--outline)]' : 'text-[var(--primary)]'}`}>
+                      {/* @ts-ignore */}
+                      {selectedUser.trustScore === -1 ? '-1' : selectedUser.trustScore}
+                    </span>
                     {/* @ts-ignore */}
-                    <span className={`text-xs font-bold ${selectedUser.trustRatingColor}`}>({selectedUser.trustRating})</span>
+                    <span className={`text-xs font-bold ${selectedUser.trustScore === -1 ? 'text-[var(--outline)]' : selectedUser.trustRatingColor}`}>
+                      {/* @ts-ignore */}
+                      ({selectedUser.trustRating})
+                    </span>
                   </div>
                 </div>
 
-                {/* 4 Pillars Progress Bars */}
-                <div className="grid grid-cols-2 gap-3 pt-2">
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-[11px]">
-                      <span className="text-[var(--on-surface-variant)]">Payment Reliability</span>
-                      {/* @ts-ignore */}
-                      <span className="font-bold">{selectedUser.trustBreakdown.pillars.paymentHistory}%</span>
-                    </div>
-                    <div className="h-2 rounded-full bg-[var(--surface-container-high)] overflow-hidden">
-                      <div
-                        className="h-full bg-emerald-500 rounded-full"
-                        /* @ts-ignore */
-                        style={{ width: `${selectedUser.trustBreakdown.pillars.paymentHistory}%` }}
-                      />
-                    </div>
+                {/* @ts-ignore */}
+                {selectedUser.trustScore === -1 ? (
+                  <div className="p-3 rounded-xl bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/20 text-xs font-mono text-[var(--on-surface-variant)] flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[18px] text-[var(--outline)]">history_toggle_off</span>
+                    <span>No transaction history on-ledger yet. Network score is uncalibrated (-1) until first settlement or active debt.</span>
                   </div>
+                ) : (
+                  /* 4 Pillars Progress Bars */
+                  <div className="grid grid-cols-2 gap-3 pt-2">
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-[var(--on-surface-variant)]">Payment Reliability</span>
+                        {/* @ts-ignore */}
+                        <span className="font-bold">{selectedUser.trustBreakdown.pillars.paymentHistory}%</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-[var(--surface-container-high)] overflow-hidden">
+                        <div
+                          className="h-full bg-emerald-500 rounded-full"
+                          /* @ts-ignore */
+                          style={{ width: `${selectedUser.trustBreakdown.pillars.paymentHistory}%` }}
+                        />
+                      </div>
+                    </div>
 
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-[11px]">
-                      <span className="text-[var(--on-surface-variant)]">Debt Clearance Velocity</span>
-                      {/* @ts-ignore */}
-                      <span className="font-bold">{selectedUser.trustBreakdown.pillars.debtClearance}%</span>
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-[var(--on-surface-variant)]">Debt Clearance Velocity</span>
+                        {/* @ts-ignore */}
+                        <span className="font-bold">{selectedUser.trustBreakdown.pillars.debtClearance}%</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-[var(--surface-container-high)] overflow-hidden">
+                        <div
+                          className="h-full bg-blue-500 rounded-full"
+                          /* @ts-ignore */
+                          style={{ width: `${selectedUser.trustBreakdown.pillars.debtClearance}%` }}
+                        />
+                      </div>
                     </div>
-                    <div className="h-2 rounded-full bg-[var(--surface-container-high)] overflow-hidden">
-                      <div
-                        className="h-full bg-blue-500 rounded-full"
-                        /* @ts-ignore */
-                        style={{ width: `${selectedUser.trustBreakdown.pillars.debtClearance}%` }}
-                      />
-                    </div>
-                  </div>
 
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-[11px]">
-                      <span className="text-[var(--on-surface-variant)]">Network Peer Breadth</span>
-                      {/* @ts-ignore */}
-                      <span className="font-bold">{selectedUser.trustBreakdown.pillars.networkBreadth}%</span>
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-[var(--on-surface-variant)]">Network Peer Breadth</span>
+                        {/* @ts-ignore */}
+                        <span className="font-bold">{selectedUser.trustBreakdown.pillars.networkBreadth}%</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-[var(--surface-container-high)] overflow-hidden">
+                        <div
+                          className="h-full bg-indigo-500 rounded-full"
+                          /* @ts-ignore */
+                          style={{ width: `${selectedUser.trustBreakdown.pillars.networkBreadth}%` }}
+                        />
+                      </div>
                     </div>
-                    <div className="h-2 rounded-full bg-[var(--surface-container-high)] overflow-hidden">
-                      <div
-                        className="h-full bg-indigo-500 rounded-full"
-                        /* @ts-ignore */
-                        style={{ width: `${selectedUser.trustBreakdown.pillars.networkBreadth}%` }}
-                      />
-                    </div>
-                  </div>
 
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-[11px]">
-                      <span className="text-[var(--on-surface-variant)]">Dispute Cleanliness</span>
-                      {/* @ts-ignore */}
-                      <span className="font-bold">{selectedUser.trustBreakdown.pillars.disputeCleanliness}%</span>
-                    </div>
-                    <div className="h-2 rounded-full bg-[var(--surface-container-high)] overflow-hidden">
-                      <div
-                        className="h-full bg-purple-500 rounded-full"
-                        /* @ts-ignore */
-                        style={{ width: `${selectedUser.trustBreakdown.pillars.disputeCleanliness}%` }}
-                      />
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-[var(--on-surface-variant)]">Dispute Cleanliness</span>
+                        {/* @ts-ignore */}
+                        <span className="font-bold">{selectedUser.trustBreakdown.pillars.disputeCleanliness}%</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-[var(--surface-container-high)] overflow-hidden">
+                        <div
+                          className="h-full bg-purple-500 rounded-full"
+                          /* @ts-ignore */
+                          style={{ width: `${selectedUser.trustBreakdown.pillars.disputeCleanliness}%` }}
+                        />
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
               </div>
             )}
 

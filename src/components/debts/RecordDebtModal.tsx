@@ -628,13 +628,23 @@ export function RecordDebtModal({
                             Registered
                           </span>
                         )}
-                        {selectedPerson.trustScore && (
+                        {selectedPerson.trustScore !== undefined && (
                           <span
-                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[var(--surface-container-high)] text-[var(--primary)] border border-[var(--outline-variant)]/20 shrink-0"
-                            title={`Network Trust Score: ${selectedPerson.trustScore} (${selectedPerson.trustRating || 'Good'})`}
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold border shrink-0 ${
+                              selectedPerson.trustScore === -1
+                                ? 'bg-[var(--surface-container-high)] text-[var(--outline)] border-[var(--outline-variant)]/30'
+                                : 'bg-[var(--surface-container-high)] text-[var(--primary)] border-[var(--outline-variant)]/20'
+                            }`}
+                            title={
+                              selectedPerson.trustScore === -1
+                                ? 'Network Trust Score: -1 (No Score / No History)'
+                                : `Network Trust Score: ${selectedPerson.trustScore} (${selectedPerson.trustRating || 'Good'})`
+                            }
                           >
-                            <span className="material-symbols-outlined text-[12px]">verified_user</span>
-                            <span>{selectedPerson.trustScore}</span>
+                            <span className="material-symbols-outlined text-[12px]">
+                              {selectedPerson.trustScore === -1 ? 'history_toggle_off' : 'verified_user'}
+                            </span>
+                            <span>{selectedPerson.trustScore === -1 ? '-1 (No Score)' : selectedPerson.trustScore}</span>
                           </span>
                         )}
                       </div>
@@ -700,10 +710,23 @@ export function RecordDebtModal({
                           </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0 ml-2">
-                          {p.trustScore && (
-                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[var(--surface-container-high)] text-[var(--primary)] border border-[var(--outline-variant)]/20">
-                              <span className="material-symbols-outlined text-[11px]">verified_user</span>
-                              <span>{p.trustScore}</span>
+                          {p.trustScore !== undefined && (
+                            <span
+                              className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold border ${
+                                p.trustScore === -1
+                                  ? 'bg-[var(--surface-container-high)] text-[var(--outline)] border-[var(--outline-variant)]/30'
+                                  : 'bg-[var(--surface-container-high)] text-[var(--primary)] border-[var(--outline-variant)]/20'
+                              }`}
+                              title={
+                                p.trustScore === -1
+                                  ? 'Network Trust Score: -1 (No Score / No History)'
+                                  : `Network Trust Score: ${p.trustScore} (${p.trustRating || 'Good'})`
+                              }
+                            >
+                              <span className="material-symbols-outlined text-[11px]">
+                                {p.trustScore === -1 ? 'history_toggle_off' : 'verified_user'}
+                              </span>
+                              <span>{p.trustScore === -1 ? '-1 (No Score)' : p.trustScore}</span>
                             </span>
                           )}
                           <span className="text-[11px] font-mono text-[var(--outline)] group-hover:text-[var(--primary)]">

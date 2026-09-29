@@ -68,13 +68,27 @@ export function PersonCard({ person, currency = 'inr', onRecordDebt }: PersonCar
                       : 'settled'
                   }
                 />
-                {person.trustScore && (
+                {person.trustScore !== undefined && (
                   <span
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--surface-container)] border border-[var(--outline-variant)]/20 font-mono text-[11px] font-bold text-[var(--on-surface)]"
-                    title={`Network Trust Score: ${person.trustScore} (${person.trustRating || 'Good'})`}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border font-mono text-[11px] font-bold ${
+                      person.trustScore === -1
+                        ? 'bg-[var(--surface-container)] border-[var(--outline-variant)]/30 text-[var(--outline)]'
+                        : 'bg-[var(--surface-container)] border-[var(--outline-variant)]/20 text-[var(--on-surface)]'
+                    }`}
+                    title={
+                      person.trustScore === -1
+                        ? 'Network Trust Score: -1 (No Score / No History)'
+                        : `Network Trust Score: ${person.trustScore} (${person.trustRating || 'Good'})`
+                    }
                   >
-                    <span className="material-symbols-outlined text-[13px] text-[var(--primary)]">verified_user</span>
-                    <span>{person.trustScore}</span>
+                    <span
+                      className={`material-symbols-outlined text-[13px] ${
+                        person.trustScore === -1 ? 'text-[var(--outline)]' : 'text-[var(--primary)]'
+                      }`}
+                    >
+                      {person.trustScore === -1 ? 'history_toggle_off' : 'verified_user'}
+                    </span>
+                    <span>{person.trustScore === -1 ? '-1 (No Score)' : person.trustScore}</span>
                   </span>
                 )}
                 {person.upiId && (() => {

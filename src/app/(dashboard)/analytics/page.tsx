@@ -463,8 +463,14 @@ export default function AnalyticsPage() {
         <div className="lg:col-span-4 space-y-6">
           {/* Trust Score Card matching Stitch with Factor Breakdown */}
           <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 md:p-8 border border-[var(--outline-variant)]/30 shadow-sm flex flex-col items-center text-center">
-            <div className="w-10 h-10 rounded-xl bg-[var(--surface-container-high)] text-[var(--primary)] flex items-center justify-center mb-3">
-              <span className="material-symbols-outlined text-[22px]">verified_user</span>
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-3 ${
+              trustScore === -1
+                ? 'bg-[var(--surface-container-high)] text-[var(--outline)]'
+                : 'bg-[var(--surface-container-high)] text-[var(--primary)]'
+            }`}>
+              <span className="material-symbols-outlined text-[22px]">
+                {trustScore === -1 ? 'history_toggle_off' : 'verified_user'}
+              </span>
             </div>
             <span className="font-mono text-xs uppercase tracking-wider font-semibold text-[var(--on-surface-variant)]">
               Network Trust Score
@@ -472,19 +478,31 @@ export default function AnalyticsPage() {
 
             {/* Geometric diamond badge */}
             <div className="my-6 relative w-36 h-36 flex items-center justify-center">
-              <div className="absolute inset-0 border-2 border-[var(--primary)] rotate-45 rounded-2xl" />
+              <div
+                className={`absolute inset-0 border-2 rotate-45 rounded-2xl ${
+                  trustScore === -1
+                    ? 'border-[var(--outline-variant)]/60'
+                    : 'border-[var(--primary)]'
+                }`}
+              />
               <div className="relative z-10 flex flex-col items-center">
-                <span className="font-numeric-ticker text-4xl font-bold text-[var(--on-surface)]">
+                <span className={`font-numeric-ticker text-4xl font-bold ${
+                  trustScore === -1 ? 'text-[var(--outline)]' : 'text-[var(--on-surface)]'
+                }`}>
                   {trustScore}
                 </span>
-                <span className={`font-mono text-xs font-bold uppercase mt-0.5 ${trustRatingColor}`}>
+                <span className={`font-mono text-xs font-bold uppercase mt-0.5 ${
+                  trustScore === -1 ? 'text-[var(--outline)]' : trustRatingColor
+                }`}>
                   {trustRating}
                 </span>
               </div>
             </div>
 
             <p className="font-mono text-xs text-[var(--on-surface-variant)] leading-relaxed mb-4">
-              Calculated dynamically from {settledDebtsCount} settled cycles, {repaymentVelocityPercent}% repayment velocity, and on-time records.
+              {trustScore === -1
+                ? 'No transactions recorded on-ledger yet. Your network score will dynamically calibrate (300–850) as soon as your first debt or repayment is recorded.'
+                : `Calculated dynamically from ${settledDebtsCount} settled cycles, ${repaymentVelocityPercent}% repayment velocity, and on-time records.`}
             </p>
 
             {/* Factor breakdown toggle button */}

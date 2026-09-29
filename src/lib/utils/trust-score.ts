@@ -52,6 +52,41 @@ export function calculateTrustScore(
   const tips: string[] = [];
   const now = Date.now();
 
+  // Filter debts and payments relevant to this user if userId is provided
+  const relevantDebts = userId
+    ? debts.filter((d) => d.borrower_id === userId || d.lender_id === userId)
+    : debts;
+  const relevantPayments = userId
+    ? payments.filter((p) => p.paid_by === userId || relevantDebts.some((d) => d.id === p.debt_id))
+    : payments;
+
+  // --- 0. Zero History Check (Credit Bureau Unscored File: -1 / NH) ---
+  if (relevantDebts.length === 0 && relevantPayments.length === 0) {
+    return {
+      score: -1,
+      rating: 'No Score',
+      ratingColor: 'text-[var(--outline)]',
+      factors: [
+        {
+          name: 'No Credit History',
+          impact: 'neutral',
+          points: 0,
+          description: 'No loan, debt, or repayment transactions on record. Unrated (-1) until first transaction.',
+          icon: 'history_toggle_off',
+        },
+      ],
+      tips: ['Complete your first loan, debt, or repayment transaction to generate a calibrated network score.'],
+      pillars: {
+        paymentHistory: 0,
+        debtClearance: 0,
+        networkBreadth: 0,
+        disputeCleanliness: 0,
+      },
+      isCalibrated: false,
+      overdueActiveCount: 0,
+    };
+  }
+
   // --- 1. Base Starting Score ---
   factors.push({
     name: 'Starting Baseline',
@@ -63,13 +98,13 @@ export function calculateTrustScore(
 
   // Filter debts where this user is borrower vs lender
   const borrowedDebts = userId
-    ? debts.filter((d) => d.borrower_id === userId)
+    ? relevantDebts.filter((d) => d.borrower_id === userId)
     : debts;
   const lentDebts = userId
-    ? debts.filter((d) => d.lender_id === userId)
+    ? relevantDebts.filter((d) => d.lender_id === userId)
     : [];
 
-  const verifiedPayments = payments.filter(
+  const verifiedPayments = relevantPayments.filter(
     (p) => p.is_verified && !(typeof p.note === 'string' && p.note.includes('[DISPUTED]'))
   );
 
@@ -108,7 +143,7 @@ export function calculateTrustScore(
   }
 
   // --- 3. Settled Debts & On-Time Performance ---
-  const settledDebts = debts.filter((d) => d.status === 'settled');
+  const settledDebts = relevantDebts.filter((d) => d.status === 'settled');
   let onTimeSettlements = 0;
   let lateSettlements = 0;
   let undatedSettlements = 0;
@@ -166,7 +201,7 @@ export function calculateTrustScore(
 
   // --- 4. Counterparty Diversity (Cross-Network Breadth) ---
   const uniqueCounterparties = new Set<string>();
-  for (const d of debts) {
+  for (const d of relevantDebts) {
     if (d.status === 'settled' || d.status === 'active') {
       if (d.lender_id && d.lender_id !== userId) uniqueCounterparties.add(d.lender_id);
       if (d.borrower_id && d.borrower_id !== userId) uniqueCounterparties.add(d.borrower_id);
@@ -190,7 +225,7 @@ export function calculateTrustScore(
       description: `Active trusted relationships with ${peerCount} unique counterparties`,
       icon: 'groups',
     });
-  } else if (debts.length > 3 && peerCount <= 1) {
+  } else if (relevantDebts.length > 3 && peerCount <= 1) {
     tips.push('Transact with more unique network peers to prove broad community trustworthiness.');
   }
 
@@ -232,7 +267,7 @@ export function calculateTrustScore(
   const clearanceRatio =
     totalBorrowedPrincipal > 0
       ? Math.min(100, Math.round((totalRepaidAmount / totalBorrowedPrincipal) * 100))
-      : debts.length === 0
+      : relevantDebts.length === 0
       ? 100
       : 90;
 
@@ -256,8 +291,8 @@ export function calculateTrustScore(
   }
 
   // --- 7. Disputes & Declines ---
-  const disputedDebtsCount = debts.filter((d) => d.status === 'disputed').length;
-  const disputedPaymentsCount = payments.filter(
+  const disputedDebtsCount = relevantDebts.filter((d) => d.status === 'disputed').length;
+  const disputedPaymentsCount = relevantPayments.filter(
     (p) => typeof p.note === 'string' && p.note.includes('[DISPUTED]')
   ).length;
   const totalDisputes = disputedDebtsCount + disputedPaymentsCount;
@@ -274,7 +309,7 @@ export function calculateTrustScore(
     tips.push('Resolve all open transaction disputes to lift point deductions.');
   }
 
-  const declinedCount = debts.filter((d) => d.status === 'declined').length;
+  const declinedCount = relevantDebts.filter((d) => d.status === 'declined').length;
   if (declinedCount > 0) {
     const declinedPoints = -(declinedCount * 25);
     factors.push({
@@ -310,7 +345,7 @@ export function calculateTrustScore(
   }
 
   // --- 9. Calibration Check ---
-  const isCalibrated = debts.length >= 3 || settledDebts.length >= 1;
+  const isCalibrated = relevantDebts.length >= 3 || settledDebts.length >= 1;
   if (!isCalibrated) {
     factors.push({
       name: 'Building History',
@@ -403,6 +438,7 @@ export function getQuickTrustScore(
  * Get trust rating label from score.
  */
 export function getTrustRating(score: number): string {
+  if (score < 0) return 'No Score';
   return score >= 800 ? 'Exceptional'
     : score >= 740 ? 'Very Good'
     : score >= 670 ? 'Good'

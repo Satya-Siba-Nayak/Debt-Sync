@@ -430,12 +430,30 @@ function PersonDebtDetailContent() {
                 variant={netBalance !== 0 ? 'active' : 'settled'}
               />
               <div
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 font-mono text-xs shadow-2xs"
-                title={`Network Trust Score: ${contactTrust.score} (${contactTrust.rating})`}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--surface-container)] border font-mono text-xs shadow-2xs ${
+                  contactTrust.score === -1
+                    ? 'border-[var(--outline-variant)]/30 text-[var(--outline)]'
+                    : 'border-[var(--outline-variant)]/30'
+                }`}
+                title={
+                  contactTrust.score === -1
+                    ? 'Network Trust Score: -1 (No Score / No History)'
+                    : `Network Trust Score: ${contactTrust.score} (${contactTrust.rating})`
+                }
               >
-                <span className="material-symbols-outlined text-[15px] text-[var(--primary)]">verified_user</span>
-                <span className="font-bold text-[var(--on-surface)]">{contactTrust.score}</span>
-                <span className={`text-[10px] font-semibold ${contactTrust.ratingColor}`}>• {contactTrust.rating}</span>
+                <span
+                  className={`material-symbols-outlined text-[15px] ${
+                    contactTrust.score === -1 ? 'text-[var(--outline)]' : 'text-[var(--primary)]'
+                  }`}
+                >
+                  {contactTrust.score === -1 ? 'history_toggle_off' : 'verified_user'}
+                </span>
+                <span className="font-bold text-[var(--on-surface)]">
+                  {contactTrust.score === -1 ? '-1 (No Score)' : contactTrust.score}
+                </span>
+                {contactTrust.score !== -1 && (
+                  <span className={`text-[10px] font-semibold ${contactTrust.ratingColor}`}>• {contactTrust.rating}</span>
+                )}
               </div>
               {person?.upi_id && (() => {
                 const detected = detectUPIApp(person.upi_id);
