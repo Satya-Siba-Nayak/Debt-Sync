@@ -10,7 +10,7 @@ import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { getLedgerCache, setLedgerCache } from '@/lib/stores/ledger-store';
 import { SkeletonBalanceCards } from '@/components/ui/Skeleton';
 import { calculateTrustScore } from '@/lib/utils/trust-score';
-import { PAYMENT_METHOD_LABELS } from '@/lib/utils/upi-link';
+import { PAYMENT_METHOD_LABELS, isUPIMethod, PRIMARY_PAYMENT_METHODS } from '@/lib/utils/upi-link';
 
 export default function AnalyticsPage() {
   const supabase = createClient();
@@ -153,16 +153,54 @@ export default function AnalyticsPage() {
   const trustFactors = trustBreakdown.factors;
   const trustTips = trustBreakdown.tips;
 
-  // Payment Channel & Methods Distribution
-  const paymentMethodsStats: Record<string, { count: number; volume: number }> = {};
+  // Payment Channel & Methods Distribution (Consolidated under UPI with TPAP app breakdown)
+  const channelStats: Record<string, { count: number; volume: number }> = {
+    upi: { count: 0, volume: 0 },
+    bank_transfer: { count: 0, volume: 0 },
+    cash: { count: 0, volume: 0 },
+    other: { count: 0, volume: 0 },
+  };
+
+  const upiAppBreakdown: Record<string, { label: string; count: number; volume: number }> = {
+    gpay: { label: 'Google Pay', count: 0, volume: 0 },
+    phonepe: { label: 'PhonePe', count: 0, volume: 0 },
+    paytm: { label: 'Paytm', count: 0, volume: 0 },
+    other_upi: { label: 'BHIM & Bank UPI', count: 0, volume: 0 },
+  };
+
   for (const p of payments) {
     if (!p.is_verified) continue;
-    const mode = p.payment_method || 'other';
-    if (!paymentMethodsStats[mode]) {
-      paymentMethodsStats[mode] = { count: 0, volume: 0 };
+    const mode = (p.payment_method || 'other').toLowerCase();
+    const amount = Number(p.amount) || 0;
+
+    if (isUPIMethod(mode)) {
+      channelStats.upi.count += 1;
+      channelStats.upi.volume = round2(channelStats.upi.volume + amount);
+
+      const noteText = typeof p.note === 'string' ? p.note.toUpperCase() : '';
+      if (mode === 'gpay' || mode === 'google_pay' || noteText.includes('[UPI: GPAY]') || noteText.includes('GOOGLE PAY')) {
+        upiAppBreakdown.gpay.count += 1;
+        upiAppBreakdown.gpay.volume = round2(upiAppBreakdown.gpay.volume + amount);
+      } else if (mode === 'phonepe' || noteText.includes('[UPI: PHONEPE]') || noteText.includes('PHONEPE')) {
+        upiAppBreakdown.phonepe.count += 1;
+        upiAppBreakdown.phonepe.volume = round2(upiAppBreakdown.phonepe.volume + amount);
+      } else if (mode === 'paytm' || noteText.includes('[UPI: PAYTM]') || noteText.includes('PAYTM')) {
+        upiAppBreakdown.paytm.count += 1;
+        upiAppBreakdown.paytm.volume = round2(upiAppBreakdown.paytm.volume + amount);
+      } else {
+        upiAppBreakdown.other_upi.count += 1;
+        upiAppBreakdown.other_upi.volume = round2(upiAppBreakdown.other_upi.volume + amount);
+      }
+    } else if (mode === 'bank_transfer') {
+      channelStats.bank_transfer.count += 1;
+      channelStats.bank_transfer.volume = round2(channelStats.bank_transfer.volume + amount);
+    } else if (mode === 'cash') {
+      channelStats.cash.count += 1;
+      channelStats.cash.volume = round2(channelStats.cash.volume + amount);
+    } else {
+      channelStats.other.count += 1;
+      channelStats.other.volume = round2(channelStats.other.volume + amount);
     }
-    paymentMethodsStats[mode].count += 1;
-    paymentMethodsStats[mode].volume = round2(paymentMethodsStats[mode].volume + (Number(p.amount) || 0));
   }
 
   // Debt Age Distribution
@@ -362,9 +400,9 @@ export default function AnalyticsPage() {
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
-              {['upi', 'bank_transfer', 'cash', 'gpay', 'phonepe', 'paytm', 'other'].map((mode) => {
+              {PRIMARY_PAYMENT_METHODS.map((mode) => {
                 const meta = PAYMENT_METHOD_LABELS[mode];
-                const stats = paymentMethodsStats[mode] || { count: 0, volume: 0 };
+                const stats = channelStats[mode] || { count: 0, volume: 0 };
                 return (
                   <div
                     key={mode}
@@ -390,6 +428,34 @@ export default function AnalyticsPage() {
                 );
               })}
             </div>
+
+            {/* UPI TPAP Apps Breakdown */}
+            {channelStats.upi.count > 0 && (
+              <div className="mt-4 p-3.5 rounded-xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/20 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 font-mono text-xs font-bold text-[var(--on-surface)]">
+                    <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">apps</span>
+                    <span>UPI App Ecosystem (TPAPs)</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-[var(--on-surface-variant)]">
+                    All apps settle through NPCI Unified Payments Interface
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {Object.entries(upiAppBreakdown).map(([key, stat]) => (
+                    <div key={key} className="p-2.5 rounded-lg bg-[var(--surface-container-high)]/70 border border-[var(--outline-variant)]/15 text-xs font-mono">
+                      <div className="flex items-center justify-between text-[10px] text-[var(--on-surface-variant)] mb-1">
+                        <span className="font-semibold">{stat.label}</span>
+                        <span className="px-1.5 py-0.2 rounded bg-[var(--surface-container)]">{stat.count} txns</span>
+                      </div>
+                      <div className="font-bold text-[var(--on-surface)]">
+                        {formatCurrency(stat.volume, currency)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

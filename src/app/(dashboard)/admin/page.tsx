@@ -7,7 +7,12 @@ import { Debt, Payment, Profile, ActivityLogEntry } from '@/lib/types/database';
 import { formatCurrency } from '@/lib/utils/currency';
 import { calculateDebtBalance, round2 } from '@/lib/utils/interest';
 import { calculateTrustScore } from '@/lib/utils/trust-score';
-import { PAYMENT_METHOD_LABELS } from '@/lib/utils/upi-link';
+import {
+  PAYMENT_METHOD_LABELS,
+  isUPIMethod,
+  PRIMARY_PAYMENT_METHODS,
+  formatPaymentMethodDisplay,
+} from '@/lib/utils/upi-link';
 import { Avatar } from '@/components/ui/Avatar';
 import { Chip } from '@/components/ui/Chip';
 import { Modal } from '@/components/ui/Modal';
@@ -221,9 +226,13 @@ export default function AdminDashboardPage() {
       }
 
       if (txnMethodFilter !== 'all') {
-        const hasPaymentMethod = allPayments.some(
-          (p) => p.debt_id === d.id && p.payment_method === txnMethodFilter
-        );
+        const hasPaymentMethod = allPayments.some((p) => {
+          if (p.debt_id !== d.id) return false;
+          if (txnMethodFilter === 'upi') {
+            return isUPIMethod(p.payment_method);
+          }
+          return (p.payment_method || 'other') === txnMethodFilter;
+        });
         if (!hasPaymentMethod) return false;
       }
 
@@ -249,16 +258,55 @@ export default function AdminDashboardPage() {
     });
   }, [allDebts, allPayments, txnSearch, txnStatusFilter, txnMethodFilter]);
 
-  // Payment channel distribution
-  const paymentMethodAnalytics = useMemo(() => {
-    const stats: Record<string, { count: number; volume: number }> = {};
+  // Payment channel distribution (Consolidated under UPI + TPAP app breakdown)
+  const paymentChannelAnalytics = useMemo(() => {
+    const channels: Record<string, { count: number; volume: number }> = {
+      upi: { count: 0, volume: 0 },
+      bank_transfer: { count: 0, volume: 0 },
+      cash: { count: 0, volume: 0 },
+      other: { count: 0, volume: 0 },
+    };
+    const upiApps: Record<string, { label: string; count: number; volume: number }> = {
+      gpay: { label: 'Google Pay', count: 0, volume: 0 },
+      phonepe: { label: 'PhonePe', count: 0, volume: 0 },
+      paytm: { label: 'Paytm', count: 0, volume: 0 },
+      other_upi: { label: 'BHIM & Bank UPI', count: 0, volume: 0 },
+    };
+
     for (const p of allPayments) {
-      const mode = p.payment_method || 'other';
-      if (!stats[mode]) stats[mode] = { count: 0, volume: 0 };
-      stats[mode].count++;
-      stats[mode].volume = round2(stats[mode].volume + (Number(p.amount) || 0));
+      const mode = (p.payment_method || 'other').toLowerCase();
+      const amount = Number(p.amount) || 0;
+
+      if (isUPIMethod(mode)) {
+        channels.upi.count++;
+        channels.upi.volume = round2(channels.upi.volume + amount);
+
+        const noteText = typeof p.note === 'string' ? p.note.toUpperCase() : '';
+        if (mode === 'gpay' || mode === 'google_pay' || noteText.includes('[UPI: GPAY]') || noteText.includes('GOOGLE PAY')) {
+          upiApps.gpay.count++;
+          upiApps.gpay.volume = round2(upiApps.gpay.volume + amount);
+        } else if (mode === 'phonepe' || noteText.includes('[UPI: PHONEPE]') || noteText.includes('PHONEPE')) {
+          upiApps.phonepe.count++;
+          upiApps.phonepe.volume = round2(upiApps.phonepe.volume + amount);
+        } else if (mode === 'paytm' || noteText.includes('[UPI: PAYTM]') || noteText.includes('PAYTM')) {
+          upiApps.paytm.count++;
+          upiApps.paytm.volume = round2(upiApps.paytm.volume + amount);
+        } else {
+          upiApps.other_upi.count++;
+          upiApps.other_upi.volume = round2(upiApps.other_upi.volume + amount);
+        }
+      } else if (mode === 'bank_transfer') {
+        channels.bank_transfer.count++;
+        channels.bank_transfer.volume = round2(channels.bank_transfer.volume + amount);
+      } else if (mode === 'cash') {
+        channels.cash.count++;
+        channels.cash.volume = round2(channels.cash.volume + amount);
+      } else {
+        channels.other.count++;
+        channels.other.volume = round2(channels.other.volume + amount);
+      }
     }
-    return stats;
+    return { channels, upiApps };
   }, [allPayments]);
 
   const isCurrentUserAdmin = allProfiles.find((p) => p.id === currentUserId)?.is_admin ?? false;
@@ -668,13 +716,11 @@ export default function AdminDashboardPage() {
                 onChange={(e) => setTxnMethodFilter(e.target.value)}
                 className="px-3 py-1.5 rounded-lg border border-[var(--outline-variant)]/40 bg-[var(--surface-container)] text-[var(--on-surface)] font-mono text-xs outline-none"
               >
-                <option value="all">All Payment Modes</option>
-                <option value="upi">UPI</option>
-                <option value="gpay">Google Pay</option>
-                <option value="phonepe">PhonePe</option>
-                <option value="paytm">Paytm</option>
-                <option value="bank_transfer">Bank Transfer</option>
+                <option value="all">All Payment Channels</option>
+                <option value="upi">UPI (GPay, PhonePe, Paytm, BHIM)</option>
+                <option value="bank_transfer">Bank Transfer (NEFT/IMPS)</option>
                 <option value="cash">Cash</option>
+                <option value="other">Other</option>
               </select>
             </div>
           </div>
@@ -736,15 +782,22 @@ export default function AdminDashboardPage() {
                           </td>
                           <td className="py-3 px-4">
                             {latestPayment?.transaction_ref ? (
-                              <div className="flex items-center gap-1">
-                                <span className="material-symbols-outlined text-[13px] text-primary">tag</span>
-                                <span className="font-mono text-[11px] font-bold truncate max-w-[120px]">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {(() => {
+                                  const disp = formatPaymentMethodDisplay(latestPayment.payment_method, latestPayment.transaction_ref);
+                                  return (
+                                    <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold border ${disp.badgeClass}`}>
+                                      {disp.fullLabel}
+                                    </span>
+                                  );
+                                })()}
+                                <span className="font-mono text-[11px] font-bold truncate max-w-[110px]">
                                   {latestPayment.transaction_ref}
                                 </span>
                                 <button
                                   type="button"
                                   onClick={() => navigator.clipboard.writeText(latestPayment.transaction_ref || '')}
-                                  className="text-[var(--primary)] hover:underline"
+                                  className="text-[var(--primary)] hover:underline cursor-pointer"
                                   title="Copy UTR"
                                 >
                                   <span className="material-symbols-outlined text-[13px]">content_copy</span>
@@ -804,9 +857,9 @@ export default function AdminDashboardPage() {
             </p>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {['upi', 'gpay', 'phonepe', 'paytm', 'bank_transfer', 'cash', 'other'].map((mode) => {
+              {PRIMARY_PAYMENT_METHODS.map((mode) => {
                 const meta = PAYMENT_METHOD_LABELS[mode];
-                const stat = paymentMethodAnalytics[mode] || { count: 0, volume: 0 };
+                const stat = paymentChannelAnalytics.channels[mode] || { count: 0, volume: 0 };
                 return (
                   <div
                     key={mode}
@@ -830,6 +883,34 @@ export default function AdminDashboardPage() {
                 );
               })}
             </div>
+
+            {/* UPI App Ecosystem Breakdown */}
+            {paymentChannelAnalytics.channels.upi.count > 0 && (
+              <div className="mt-4 p-4 rounded-xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/20 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 font-mono text-xs font-bold text-[var(--on-surface)]">
+                    <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">apps</span>
+                    <span>UPI App Ecosystem Distribution</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-[var(--on-surface-variant)]">
+                    TPAP application share across all UPI settlements
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {Object.entries(paymentChannelAnalytics.upiApps).map(([key, stat]) => (
+                    <div key={key} className="p-2.5 rounded-lg bg-[var(--surface-container-high)]/70 border border-[var(--outline-variant)]/15 text-xs font-mono">
+                      <div className="flex items-center justify-between text-[10px] text-[var(--on-surface-variant)] mb-1">
+                        <span className="font-semibold">{stat.label}</span>
+                        <span className="px-1.5 py-0.2 rounded bg-[var(--surface-container)]">{stat.count} txns</span>
+                      </div>
+                      <div className="font-bold text-[var(--on-surface)]">
+                        {formatCurrency(stat.volume, currency)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* User Trust Score Distribution */}
@@ -995,19 +1076,22 @@ export default function AdminDashboardPage() {
                 ) : (
                   allPayments
                     .filter((p) => p.debt_id === selectedDebtDetail.id)
-                    .map((p) => (
-                      <div key={p.id} className="p-2 rounded-lg bg-[var(--surface-container)] flex items-center justify-between">
-                        <div>
-                          <span className="font-bold">{formatCurrency(p.amount, p.currency)}</span>
-                          <span className="text-[10px] text-[var(--outline)] block">
-                            Mode: {p.payment_method || 'other'} {p.transaction_ref && `• UTR: ${p.transaction_ref}`}
+                    .map((p) => {
+                      const disp = formatPaymentMethodDisplay(p.payment_method, p.transaction_ref);
+                      return (
+                        <div key={p.id} className="p-2 rounded-lg bg-[var(--surface-container)] flex items-center justify-between">
+                          <div>
+                            <span className="font-bold">{formatCurrency(p.amount, p.currency)}</span>
+                            <span className="text-[10px] text-[var(--outline)] block">
+                              Channel: {disp.fullLabel} {p.transaction_ref && `• Ref/UTR: ${p.transaction_ref}`}
+                            </span>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${p.is_verified ? 'bg-emerald-500/15 text-emerald-600' : 'bg-amber-500/15 text-amber-600'}`}>
+                            {p.is_verified ? 'Verified' : 'Pending'}
                           </span>
                         </div>
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${p.is_verified ? 'bg-emerald-500/15 text-emerald-600' : 'bg-amber-500/15 text-amber-600'}`}>
-                          {p.is_verified ? 'Verified' : 'Pending'}
-                        </span>
-                      </div>
-                    ))
+                      );
+                    })
                 )}
               </div>
             </div>

@@ -8,7 +8,15 @@ import { formatCurrency } from '@/lib/utils/currency';
 import { round2 } from '@/lib/utils/interest';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { sendNotificationEmail } from '@/lib/utils/email-notifier';
-import { generateUPILink, generateUPIQRCodeDataURL, PAYMENT_METHOD_LABELS } from '@/lib/utils/upi-link';
+import {
+  generateUPILink,
+  generateUPIQRCodeDataURL,
+  PAYMENT_METHOD_LABELS,
+  detectUPIApp,
+  PRIMARY_PAYMENT_METHODS,
+  UPI_SUB_APPS,
+  isUPIMethod,
+} from '@/lib/utils/upi-link';
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -39,9 +47,11 @@ export function PaymentModal({
   const [lenderProfile, setLenderProfile] = useState<{ id: string; full_name?: string; email?: string; upi_id?: string | null } | null>(null);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
   const [showQrCode, setShowQrCode] = useState(false);
+  const [selectedUpiApp, setSelectedUpiApp] = useState<string>('auto');
   const [generatingQr, setGeneratingQr] = useState(false);
 
   const supabase = createClient();
+  const detectedLenderApp = detectUPIApp(lenderProfile?.upi_id);
 
   const handleAmountChange = (val: string) => {
     const sanitized = val.replace(/^0+(?=\d)/, '');
@@ -244,9 +254,21 @@ export function PaymentModal({
               .single();
 
             if (lenderData?.email && !lenderData.email.endsWith('@phone.debtsync.local')) {
-              const methodLabel = PAYMENT_METHOD_LABELS[paymentMethod]?.label || paymentMethod.toUpperCase();
+              const effectiveUpiApp = isUPIMethod(paymentMethod)
+                ? (selectedUpiApp !== 'auto'
+                    ? selectedUpiApp
+                    : detectedLenderApp.isKnownApp
+                    ? detectedLenderApp.appId
+                    : null)
+                : null;
+
+              const methodLabel = isUPIMethod(paymentMethod) && effectiveUpiApp
+                ? `UPI (${effectiveUpiApp.toUpperCase()})`
+                : PAYMENT_METHOD_LABELS[paymentMethod]?.label || paymentMethod.toUpperCase();
+
               const fullNotes = [
                 note.trim(),
+                effectiveUpiApp ? `[UPI App: ${effectiveUpiApp.toUpperCase()}]` : null,
                 transactionRef.trim() ? `[${methodLabel}] Ref/UTR: ${transactionRef.trim()}` : null,
               ]
                 .filter(Boolean)
@@ -279,15 +301,7 @@ export function PaymentModal({
     }
   };
 
-  const paymentMethodsList: PaymentMethod[] = [
-    'upi',
-    'gpay',
-    'phonepe',
-    'paytm',
-    'bank_transfer',
-    'cash',
-    'other',
-  ];
+  const paymentMethodsList = PRIMARY_PAYMENT_METHODS;
 
   return (
     <Modal
@@ -319,8 +333,16 @@ export function PaymentModal({
               </span>
             </div>
 
-            <div className="flex items-center justify-between text-xs font-mono bg-[var(--surface-container-lowest)] p-2 rounded-xl border border-[var(--outline-variant)]/20">
-              <span className="text-[var(--on-surface-variant)] truncate">Payee: {lenderProfile.upi_id}</span>
+            <div className="flex items-center justify-between text-xs font-mono bg-[var(--surface-container-lowest)] p-2.5 rounded-xl border border-[var(--outline-variant)]/20">
+              <div className="min-w-0 flex items-center gap-1.5 flex-wrap">
+                <span className="text-[var(--on-surface-variant)] truncate">Payee: {lenderProfile.upi_id}</span>
+                {detectedLenderApp.isKnownApp && (
+                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${detectedLenderApp.badgeClass} flex items-center gap-1 shrink-0`}>
+                    <span className="material-symbols-outlined text-[12px]">{detectedLenderApp.icon}</span>
+                    <span>{detectedLenderApp.name}{detectedLenderApp.bank ? ` (${detectedLenderApp.bank})` : ''}</span>
+                  </span>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => {
@@ -328,7 +350,7 @@ export function PaymentModal({
                     navigator.clipboard.writeText(lenderProfile.upi_id);
                   }
                 }}
-                className="text-[var(--primary)] hover:underline shrink-0 ml-2 font-bold flex items-center gap-1"
+                className="text-[var(--primary)] hover:underline shrink-0 ml-2 font-bold flex items-center gap-1 cursor-pointer"
                 title="Copy UPI ID"
               >
                 <span className="material-symbols-outlined text-[14px]">content_copy</span>
@@ -343,13 +365,13 @@ export function PaymentModal({
                 className="flex-1 py-2 px-3 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold text-center flex items-center justify-center gap-1.5 hover:brightness-110 active:scale-[0.98] transition-all shadow-xs"
               >
                 <span className="material-symbols-outlined text-[16px]">open_in_new</span>
-                <span>Pay in UPI App</span>
+                <span>Pay via {detectedLenderApp.isKnownApp ? detectedLenderApp.name : 'UPI App'}</span>
               </a>
 
               <button
                 type="button"
                 onClick={() => setShowQrCode(!showQrCode)}
-                className="py-2 px-3 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-xs font-semibold flex items-center gap-1.5 hover:bg-[var(--surface-container)] transition-colors"
+                className="py-2 px-3 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-xs font-semibold flex items-center gap-1.5 hover:bg-[var(--surface-container)] transition-colors cursor-pointer"
               >
                 <span className="material-symbols-outlined text-[16px]">qr_code</span>
                 <span>{showQrCode ? 'Hide QR' : 'Show QR'}</span>
@@ -462,10 +484,17 @@ export function PaymentModal({
 
         {/* Payment Method Selector */}
         <div>
-          <label className="font-mono text-xs tracking-wider uppercase text-[var(--on-surface-variant)] block mb-1.5">
-            Payment Mode
-          </label>
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="font-mono text-xs tracking-wider uppercase text-[var(--on-surface-variant)] block">
+              Payment Mode
+            </label>
+            {paymentMethod === 'upi' && (
+              <span className="font-mono text-[10px] text-[var(--primary)] font-semibold">
+                Unified Payments Interface
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
             {paymentMethodsList.map((m) => {
               const meta = PAYMENT_METHOD_LABELS[m];
               const isSelected = paymentMethod === m;
@@ -474,26 +503,76 @@ export function PaymentModal({
                   key={m}
                   type="button"
                   onClick={() => setPaymentMethod(m)}
-                  className={`px-3 py-1.5 rounded-xl font-mono text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  className={`px-3 py-2 rounded-xl font-mono text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                     isSelected
                       ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-xs'
                       : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-high)]'
                   }`}
                 >
-                  <span className="material-symbols-outlined text-[15px]">{meta?.icon || 'payment'}</span>
+                  <span className="material-symbols-outlined text-[16px]">{meta?.icon || 'payment'}</span>
                   <span>{meta?.label || m}</span>
                 </button>
               );
             })}
           </div>
+          {paymentMethod === 'upi' && (
+            <p className="text-[11px] font-mono text-[var(--on-surface-variant)] mt-1.5">
+              Supports Google Pay, PhonePe, Paytm, BHIM, CRED, Navi, and all Indian Bank UPI apps.
+            </p>
+          )}
         </div>
+
+        {/* When UPI is chosen: App specification / auto-detection */}
+        {paymentMethod === 'upi' && (
+          <div className="p-2.5 rounded-xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/20 space-y-1.5 animate-in fade-in duration-150">
+            <div className="flex items-center justify-between text-[11px] font-mono">
+              <span className="text-[var(--on-surface-variant)] font-semibold">
+                Which UPI App was used?
+              </span>
+              {detectedLenderApp.isKnownApp && selectedUpiApp === 'auto' && (
+                <span className="text-[10px] text-[var(--primary)] font-semibold">
+                  Detected from payee: {detectedLenderApp.name}
+                </span>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => setSelectedUpiApp('auto')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-medium transition-colors cursor-pointer ${
+                  selectedUpiApp === 'auto'
+                    ? 'bg-[var(--primary)] text-[var(--on-primary)] font-bold'
+                    : 'bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                }`}
+              >
+                {detectedLenderApp.isKnownApp ? `Auto (${detectedLenderApp.shortName})` : 'Auto-detect'}
+              </button>
+              {UPI_SUB_APPS.map((app) => (
+                <button
+                  key={app.id}
+                  type="button"
+                  onClick={() => setSelectedUpiApp(app.id)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-medium transition-colors cursor-pointer ${
+                    selectedUpiApp === app.id
+                      ? 'bg-[var(--primary)] text-[var(--on-primary)] font-bold'
+                      : 'bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                  }`}
+                >
+                  {app.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Transaction Reference ID Input (Compulsory for non-cash) */}
         {paymentMethod !== 'cash' ? (
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="font-mono text-xs tracking-wider uppercase text-[var(--on-surface-variant)] flex items-center gap-1 font-bold">
-                <span>Transaction Ref / UTR ID</span>
+                <span>
+                  {paymentMethod === 'upi' ? 'UPI UTR / 12-Digit Reference' : 'Transaction Ref / ID'}
+                </span>
                 <span className="text-[var(--error)]">*</span>
               </label>
               <span className="font-mono text-[10px] text-[var(--primary)] uppercase font-semibold">
@@ -507,7 +586,13 @@ export function PaymentModal({
               value={transactionRef}
               onChange={(e) => setTransactionRef(e.target.value)}
               placeholder={
-                PAYMENT_METHOD_LABELS[paymentMethod]?.placeholder || 'Enter 12-digit UTR or transaction ID'
+                paymentMethod === 'upi'
+                  ? selectedUpiApp !== 'auto' && selectedUpiApp !== 'other'
+                    ? `12-digit UTR from ${selectedUpiApp === 'gpay' ? 'Google Pay' : selectedUpiApp === 'phonepe' ? 'PhonePe' : selectedUpiApp === 'paytm' ? 'Paytm' : selectedUpiApp.toUpperCase()}`
+                    : detectedLenderApp.isKnownApp
+                    ? `12-digit UTR from ${detectedLenderApp.name}`
+                    : '12-digit UPI UTR number (e.g. 412345678901)'
+                  : PAYMENT_METHOD_LABELS[paymentMethod]?.placeholder || 'Enter transaction reference'
               }
               className="w-full px-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-sm outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)]/30"
             />

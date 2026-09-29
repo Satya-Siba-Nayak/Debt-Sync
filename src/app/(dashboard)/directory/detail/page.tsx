@@ -18,6 +18,7 @@ import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { PersonAnalyticsChart } from '@/components/directory/PersonAnalyticsChart';
 import { SkeletonBalanceCards, SkeletonTableRows } from '@/components/ui/Skeleton';
 import { calculateTrustScore } from '@/lib/utils/trust-score';
+import { detectUPIApp, formatPaymentMethodDisplay } from '@/lib/utils/upi-link';
 import Link from 'next/link';
 
 function PersonDebtDetailContent() {
@@ -436,15 +437,23 @@ function PersonDebtDetailContent() {
                 <span className="font-bold text-[var(--on-surface)]">{contactTrust.score}</span>
                 <span className={`text-[10px] font-semibold ${contactTrust.ratingColor}`}>• {contactTrust.rating}</span>
               </div>
-              {person?.upi_id && (
-                <div
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--primary)]/10 border border-[var(--primary)]/20 font-mono text-xs text-[var(--primary)]"
-                  title={`Saved UPI ID: ${person.upi_id}`}
-                >
-                  <span className="material-symbols-outlined text-[14px]">qr_code_2</span>
-                  <span className="font-semibold text-[11px] truncate max-w-[140px]">{person.upi_id}</span>
-                </div>
-              )}
+              {person?.upi_id && (() => {
+                const detected = detectUPIApp(person.upi_id);
+                return (
+                  <div
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--primary)]/10 border border-[var(--primary)]/20 font-mono text-xs text-[var(--primary)] shadow-2xs"
+                    title={`UPI ID: ${person.upi_id} (${detected.name})`}
+                  >
+                    <span className="material-symbols-outlined text-[14px]">{detected.icon}</span>
+                    <span className="font-semibold text-[11px] truncate max-w-[150px]">{person.upi_id}</span>
+                    {detected.isKnownApp && (
+                      <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded border ${detected.badgeClass}`}>
+                        {detected.shortName}
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
             <p className="font-mono text-xs text-on-surface-variant mt-1">
               {person?.email} {person?.phone && `• ${person?.phone}`}
@@ -975,6 +984,20 @@ function PersonDebtDetailContent() {
 
                     <div className="text-xs text-on-surface-variant mt-1 flex items-center gap-3 flex-wrap">
                       <span>{new Date(p.created_at).toLocaleString()}</span>
+                      {p.payment_method && (() => {
+                        const disp = formatPaymentMethodDisplay(p.payment_method, p.transaction_ref);
+                        return (
+                          <span className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded border ${disp.badgeClass} flex items-center gap-1`}>
+                            <span className="material-symbols-outlined text-[12px]">{disp.icon}</span>
+                            <span>{disp.fullLabel}</span>
+                          </span>
+                        );
+                      })()}
+                      {p.transaction_ref && (
+                        <span className="font-mono text-[11px] text-primary flex items-center gap-1">
+                          <span>UTR: {p.transaction_ref}</span>
+                        </span>
+                      )}
                       {p.note && <span className="font-mono text-[11px] italic">"{p.note}"</span>}
                     </div>
                   </div>

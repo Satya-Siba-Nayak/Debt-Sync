@@ -11,6 +11,7 @@ import { Avatar } from '../ui/Avatar';
 import { getDueDateInfo } from '@/lib/utils/due-date';
 import { PaymentModal } from './PaymentModal';
 import { CounterpartyNoteModal } from './CounterpartyNoteModal';
+import { formatPaymentMethodDisplay } from '@/lib/utils/upi-link';
 
 export interface DebtDetailModalProps {
   isOpen: boolean;
@@ -445,6 +446,20 @@ export function DebtDetailModal({
 
                         <div className="text-xs text-[var(--on-surface-variant)] mt-1 flex items-center gap-3 flex-wrap">
                           <span>{new Date(p.created_at).toLocaleString()}</span>
+                          {(p as any).payment_method && (() => {
+                            const disp = formatPaymentMethodDisplay((p as any).payment_method, (p as any).transaction_ref);
+                            return (
+                              <span className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded border ${disp.badgeClass} flex items-center gap-1`}>
+                                <span className="material-symbols-outlined text-[12px]">{disp.icon}</span>
+                                <span>{disp.fullLabel}</span>
+                              </span>
+                            );
+                          })()}
+                          {(p as any).transaction_ref && (
+                            <span className="font-mono text-[11px] text-[var(--primary)] flex items-center gap-1">
+                              <span>UTR: {(p as any).transaction_ref}</span>
+                            </span>
+                          )}
                           {p.note && <span className="font-mono text-[11px] italic">"{p.note}"</span>}
                         </div>
                       </div>

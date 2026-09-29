@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { formatCurrency } from '@/lib/utils/currency';
 import { Chip } from '../ui/Chip';
 import { Avatar } from '../ui/Avatar';
+import { detectUPIApp } from '@/lib/utils/upi-link';
 
 export interface PersonSummary {
   id: string;
@@ -19,6 +20,7 @@ export interface PersonSummary {
   isShadow?: boolean;
   trustScore?: number;
   trustRating?: string;
+  upiId?: string | null;
   secondaryEmails?: string[];
   notes?: string[];
   matchingNote?: string;
@@ -75,6 +77,18 @@ export function PersonCard({ person, currency = 'inr', onRecordDebt }: PersonCar
                     <span>{person.trustScore}</span>
                   </span>
                 )}
+                {person.upiId && (() => {
+                  const detected = detectUPIApp(person.upiId);
+                  return (
+                    <span
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--primary)]/10 border border-[var(--primary)]/20 font-mono text-[10px] font-bold text-[var(--primary)]"
+                      title={`UPI ID: ${person.upiId} (${detected.name})`}
+                    >
+                      <span className="material-symbols-outlined text-[12px]">{detected.icon}</span>
+                      <span>{detected.shortName}</span>
+                    </span>
+                  );
+                })()}
               </div>
             </div>
           </div>

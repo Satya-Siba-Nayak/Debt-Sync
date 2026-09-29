@@ -24,7 +24,7 @@ import {
 } from '@/lib/utils/avatar-storage';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { triggerPWAInstallPrompt } from '@/components/ui/PWAInstallPrompt';
-import { isValidUPIId } from '@/lib/utils/upi-link';
+import { isValidUPIId, detectUPIApp } from '@/lib/utils/upi-link';
 
 export default function SettingsPage() {
   const supabase = createClient();
@@ -827,11 +827,32 @@ export default function SettingsPage() {
               type="text"
               value={upiId}
               onChange={(e) => setUpiId(e.target.value)}
-              placeholder="e.g. yourname@okhdfcbank, mobile@upi"
+              placeholder="e.g. yourname@okhdfcbank, mobile@ybl, username@paytm"
               className="w-full px-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-sm font-mono outline-none focus:border-[var(--primary)]"
             />
-            <p className="text-[11px] font-mono text-[var(--on-surface-variant)] mt-1">
-              When saved, borrowers can click a single button or scan a generated QR code to pay you directly via GPay, PhonePe, Paytm, etc.
+
+            {/* Realtime UPI App Detection */}
+            {upiId.trim().includes('@') && (() => {
+              const detected = detectUPIApp(upiId.trim());
+              return detected.isKnownApp ? (
+                <div className="mt-2 p-2 rounded-xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/20 flex items-center justify-between text-xs font-mono animate-in fade-in duration-150">
+                  <div className="flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">{detected.icon}</span>
+                    <span className="text-[var(--on-surface-variant)]">Detected Provider:</span>
+                    <span className="font-bold text-[var(--on-surface)]">{detected.name}</span>
+                    {detected.bank && (
+                      <span className="text-[11px] text-[var(--outline)]">({detected.bank})</span>
+                    )}
+                  </div>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${detected.badgeClass}`}>
+                    Auto-Detected
+                  </span>
+                </div>
+              ) : null;
+            })()}
+
+            <p className="text-[11px] font-mono text-[var(--on-surface-variant)] mt-1.5 leading-relaxed">
+              Google Pay, PhonePe, Paytm, and BHIM all run on the Unified Payments Interface (UPI). Once saved, borrowers can pay you using any UPI app or scan your generated QR code.
             </p>
           </div>
         </div>

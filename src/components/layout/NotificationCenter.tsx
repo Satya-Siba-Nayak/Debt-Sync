@@ -10,6 +10,7 @@ import {
   requestNotificationPermission,
   sendWebNotification,
 } from '@/lib/utils/web-notifications';
+import { formatPaymentMethodDisplay } from '@/lib/utils/upi-link';
 
 interface IncomingDebtRequest {
   id: string;
@@ -699,34 +700,37 @@ export function NotificationCenter() {
                           </p>
                         )}
 
-                        {rep.transaction_ref && (
-                          <div className="mt-2 p-2 rounded-lg bg-surface-container border border-outline-variant/25 flex items-center justify-between text-[11px] font-mono">
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              <span className="material-symbols-outlined text-[14px] text-primary shrink-0">
-                                {rep.payment_method === 'cash' ? 'payments' : 'tag'}
-                              </span>
-                              <span className="text-on-surface-variant uppercase text-[10px] font-semibold">
-                                {rep.payment_method || 'Ref'}:
-                              </span>
-                              <span className="font-bold text-on-surface truncate select-all">
-                                {rep.transaction_ref}
-                              </span>
+                        {rep.transaction_ref && (() => {
+                          const disp = formatPaymentMethodDisplay(rep.payment_method, rep.transaction_ref);
+                          return (
+                            <div className="mt-2 p-2 rounded-lg bg-surface-container border border-outline-variant/25 flex items-center justify-between text-[11px] font-mono">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span className="material-symbols-outlined text-[14px] text-primary shrink-0">
+                                  {disp.icon}
+                                </span>
+                                <span className="text-on-surface-variant font-semibold">
+                                  {disp.fullLabel} Ref:
+                                </span>
+                                <span className="font-bold text-on-surface truncate select-all">
+                                  {rep.transaction_ref}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (rep.transaction_ref) {
+                                    navigator.clipboard.writeText(rep.transaction_ref);
+                                  }
+                                }}
+                                className="text-primary hover:underline shrink-0 ml-1.5 flex items-center gap-0.5 text-[10px] font-bold cursor-pointer"
+                                title="Copy reference ID to check in banking app"
+                              >
+                                <span className="material-symbols-outlined text-[13px]">content_copy</span>
+                                <span>Copy</span>
+                              </button>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (rep.transaction_ref) {
-                                  navigator.clipboard.writeText(rep.transaction_ref);
-                                }
-                              }}
-                              className="text-primary hover:underline shrink-0 ml-1.5 flex items-center gap-0.5 text-[10px] font-bold cursor-pointer"
-                              title="Copy reference ID to check in banking app"
-                            >
-                              <span className="material-symbols-outlined text-[13px]">content_copy</span>
-                              <span>Copy</span>
-                            </button>
-                          </div>
-                        )}
+                          );
+                        })()}
                       </div>
                     </div>
 

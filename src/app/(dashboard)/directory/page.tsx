@@ -117,6 +117,7 @@ export default function PeopleDirectoryPage() {
             email: otherParty.email,
             phone: otherParty.phone,
             avatarUrl: (otherParty as any).avatar_url || null,
+            upiId: (otherParty as any).upi_id || null,
             secondaryEmails: (otherParty as any).secondary_emails || [],
             netBalance: 0,
             lentAmount: 0,
