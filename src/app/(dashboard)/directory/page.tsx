@@ -13,6 +13,7 @@ import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { getLedgerCache, setLedgerCache } from '@/lib/stores/ledger-store';
 import { SkeletonDirectoryGrid } from '@/components/ui/Skeleton';
+import { calculateTrustScore } from '@/lib/utils/trust-score';
 
 export default function PeopleDirectoryPage() {
   const supabase = createClient();
@@ -157,6 +158,14 @@ export default function PeopleDirectoryPage() {
       }
 
       const updatedPeople = Array.from(peopleMap.values());
+      for (const p of updatedPeople) {
+        const personDebts = allDebts.filter((d) => d.lender_id === p.id || d.borrower_id === p.id);
+        const personDebtIds = new Set(personDebts.map((d) => d.id));
+        const personPayments = allPayments.filter((pm) => personDebtIds.has(pm.debt_id));
+        const trust = calculateTrustScore(personDebts, personPayments, p.id);
+        p.trustScore = trust.score;
+        p.trustRating = trust.rating;
+      }
       setPeople(updatedPeople);
 
       const activeCurrency = settingsRes.data?.default_currency || currency;

@@ -28,6 +28,7 @@ export function Sidebar({ onNewTransaction }: SidebarProps) {
     { label: 'Directory', href: '/directory', icon: 'group' },
     { label: 'Transactions', href: '/transactions', icon: 'receipt_long' },
     { label: 'Analytics', href: '/analytics', icon: 'analytics' },
+    { label: 'Admin Hub', href: '/admin', icon: 'shield_person', badge: 'ADMIN' },
     { label: 'Settings', href: '/settings', icon: 'settings' },
   ];
 
@@ -79,19 +80,26 @@ export function Sidebar({ onNewTransaction }: SidebarProps) {
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-mono text-sm transition-all ${
+              className={`flex items-center justify-between px-3 py-2.5 rounded-xl font-mono text-sm transition-all ${
                 isActive
                   ? 'bg-[var(--surface-container-high)] text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] font-bold shadow-sm'
                   : 'text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)]/60 hover:text-[var(--on-surface)]'
               }`}
             >
-              <span
-                className="material-symbols-outlined text-[20px]"
-                style={isActive ? { fontVariationSettings: "'FILL' 1" } : undefined}
-              >
-                {item.icon}
-              </span>
-              <span>{item.label}</span>
+              <div className="flex items-center gap-3">
+                <span
+                  className="material-symbols-outlined text-[20px]"
+                  style={isActive ? { fontVariationSettings: "'FILL' 1" } : undefined}
+                >
+                  {item.icon}
+                </span>
+                <span>{item.label}</span>
+              </div>
+              {item.badge && (
+                <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)]">
+                  {item.badge}
+                </span>
+              )}
             </Link>
           );
         })}

@@ -47,6 +47,8 @@ interface PendingRepayment {
   amount: number;
   currency: string;
   note: string | null;
+  payment_method?: string | null;
+  transaction_ref?: string | null;
   created_at: string;
   payer: {
     id: string;
@@ -175,7 +177,7 @@ export function NotificationCenter() {
           const { data: unverifiedPayments } = await supabase
             .from('payments')
             .select(`
-              id, debt_id, amount, currency, note, created_at, paid_by, verified_at,
+              id, debt_id, amount, currency, note, payment_method, transaction_ref, created_at, paid_by, verified_at,
               payer:profiles!payments_paid_by_fkey(id, full_name, email, avatar_url)
             `)
             .in('debt_id', debtIds)
@@ -197,6 +199,8 @@ export function NotificationCenter() {
                 amount: Number(p.amount) || 0,
                 currency: p.currency || 'inr',
                 note: p.note,
+                payment_method: p.payment_method || null,
+                transaction_ref: p.transaction_ref || null,
                 created_at: p.created_at,
                 payer: {
                   id: p.payer?.id || '',
@@ -693,6 +697,35 @@ export function NotificationCenter() {
                           <p className="text-[11px] text-on-surface-variant/80 italic mt-1 line-clamp-2">
                             &quot;{rep.note}&quot;
                           </p>
+                        )}
+
+                        {rep.transaction_ref && (
+                          <div className="mt-2 p-2 rounded-lg bg-surface-container border border-outline-variant/25 flex items-center justify-between text-[11px] font-mono">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="material-symbols-outlined text-[14px] text-primary shrink-0">
+                                {rep.payment_method === 'cash' ? 'payments' : 'tag'}
+                              </span>
+                              <span className="text-on-surface-variant uppercase text-[10px] font-semibold">
+                                {rep.payment_method || 'Ref'}:
+                              </span>
+                              <span className="font-bold text-on-surface truncate select-all">
+                                {rep.transaction_ref}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (rep.transaction_ref) {
+                                  navigator.clipboard.writeText(rep.transaction_ref);
+                                }
+                              }}
+                              className="text-primary hover:underline shrink-0 ml-1.5 flex items-center gap-0.5 text-[10px] font-bold cursor-pointer"
+                              title="Copy reference ID to check in banking app"
+                            >
+                              <span className="material-symbols-outlined text-[13px]">content_copy</span>
+                              <span>Copy</span>
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>

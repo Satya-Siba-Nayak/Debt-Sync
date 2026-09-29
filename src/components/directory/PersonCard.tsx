@@ -17,6 +17,8 @@ export interface PersonSummary {
   owedAmount: number;
   status: 'active' | 'settled' | 'pending';
   isShadow?: boolean;
+  trustScore?: number;
+  trustRating?: string;
   secondaryEmails?: string[];
   notes?: string[];
   matchingNote?: string;
@@ -47,7 +49,7 @@ export function PersonCard({ person, currency = 'inr', onRecordDebt }: PersonCar
               >
                 {person.name}
               </Link>
-              <div className="mt-0.5">
+              <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                 <Chip
                   label={
                     person.status === 'active'
@@ -64,6 +66,15 @@ export function PersonCard({ person, currency = 'inr', onRecordDebt }: PersonCar
                       : 'settled'
                   }
                 />
+                {person.trustScore && (
+                  <span
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--surface-container)] border border-[var(--outline-variant)]/20 font-mono text-[11px] font-bold text-[var(--on-surface)]"
+                    title={`Network Trust Score: ${person.trustScore} (${person.trustRating || 'Good'})`}
+                  >
+                    <span className="material-symbols-outlined text-[13px] text-[var(--primary)]">verified_user</span>
+                    <span>{person.trustScore}</span>
+                  </span>
+                )}
               </div>
             </div>
           </div>

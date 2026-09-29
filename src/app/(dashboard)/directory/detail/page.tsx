@@ -17,6 +17,7 @@ import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { PersonAnalyticsChart } from '@/components/directory/PersonAnalyticsChart';
 import { SkeletonBalanceCards, SkeletonTableRows } from '@/components/ui/Skeleton';
+import { calculateTrustScore } from '@/lib/utils/trust-score';
 import Link from 'next/link';
 
 function PersonDebtDetailContent() {
@@ -318,6 +319,7 @@ function PersonDebtDetailContent() {
 
   const netBalance = totalOutstandingLent - totalOutstandingBorrowed;
   const isNetPositive = netBalance > 0;
+  const contactTrust = calculateTrustScore(debts, payments, person?.id);
 
   // 3-way Financial Breakdown: Remaining Principal vs Accrued Interest vs Repaid
   const totalPaid = round2(payments.reduce((s, p) => s + (Number(p.amount) || 0), 0));
@@ -426,6 +428,23 @@ function PersonDebtDetailContent() {
                 label={netBalance !== 0 ? 'Active' : 'Settled'}
                 variant={netBalance !== 0 ? 'active' : 'settled'}
               />
+              <div
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 font-mono text-xs shadow-2xs"
+                title={`Network Trust Score: ${contactTrust.score} (${contactTrust.rating})`}
+              >
+                <span className="material-symbols-outlined text-[15px] text-[var(--primary)]">verified_user</span>
+                <span className="font-bold text-[var(--on-surface)]">{contactTrust.score}</span>
+                <span className={`text-[10px] font-semibold ${contactTrust.ratingColor}`}>• {contactTrust.rating}</span>
+              </div>
+              {person?.upi_id && (
+                <div
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--primary)]/10 border border-[var(--primary)]/20 font-mono text-xs text-[var(--primary)]"
+                  title={`Saved UPI ID: ${person.upi_id}`}
+                >
+                  <span className="material-symbols-outlined text-[14px]">qr_code_2</span>
+                  <span className="font-semibold text-[11px] truncate max-w-[140px]">{person.upi_id}</span>
+                </div>
+              )}
             </div>
             <p className="font-mono text-xs text-on-surface-variant mt-1">
               {person?.email} {person?.phone && `• ${person?.phone}`}

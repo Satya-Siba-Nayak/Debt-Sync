@@ -11,6 +11,7 @@ import { checkDebtRequestCooldown, type CooldownCheckResult } from '@/lib/utils/
 import { sendNotificationEmail } from '@/lib/utils/email-notifier';
 import { PhoneInput } from '../ui/PhoneInput';
 import { Avatar } from '../ui/Avatar';
+import { calculateTrustScore } from '@/lib/utils/trust-score';
 
 interface RecordDebtModalProps {
   isOpen: boolean;
@@ -26,6 +27,8 @@ interface PersonOption {
   phone?: string | null;
   avatar_url?: string | null;
   isPlatformUser?: boolean;
+  trustScore?: number;
+  trustRating?: string;
 }
 
 export function RecordDebtModal({
@@ -176,6 +179,13 @@ export function RecordDebtModal({
       }
 
       const peopleList = Array.from(peopleMap.values());
+      const allFetchedDebts = (debtData as any[]) || [];
+      for (const p of peopleList) {
+        const pDebts = allFetchedDebts.filter((d: any) => d.lender_id === p.id || d.borrower_id === p.id);
+        const trust = calculateTrustScore(pDebts, [], p.id);
+        p.trustScore = trust.score;
+        p.trustRating = trust.rating;
+      }
       setPeople(peopleList);
 
       if (preselectedContactId) {
@@ -592,6 +602,15 @@ export function RecordDebtModal({
                             Registered
                           </span>
                         )}
+                        {selectedPerson.trustScore && (
+                          <span
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[var(--surface-container-high)] text-[var(--primary)] border border-[var(--outline-variant)]/20 shrink-0"
+                            title={`Network Trust Score: ${selectedPerson.trustScore} (${selectedPerson.trustRating || 'Good'})`}
+                          >
+                            <span className="material-symbols-outlined text-[12px]">verified_user</span>
+                            <span>{selectedPerson.trustScore}</span>
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs text-[var(--on-surface-variant)] truncate">
                         {selectedPerson.email || selectedPerson.phone || 'Contact'}
@@ -654,9 +673,17 @@ export function RecordDebtModal({
                             </div>
                           </div>
                         </div>
-                        <span className="text-[11px] font-mono text-[var(--outline)] group-hover:text-[var(--primary)]">
-                          Select
-                        </span>
+                        <div className="flex items-center gap-2 shrink-0 ml-2">
+                          {p.trustScore && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[var(--surface-container-high)] text-[var(--primary)] border border-[var(--outline-variant)]/20">
+                              <span className="material-symbols-outlined text-[11px]">verified_user</span>
+                              <span>{p.trustScore}</span>
+                            </span>
+                          )}
+                          <span className="text-[11px] font-mono text-[var(--outline)] group-hover:text-[var(--primary)]">
+                            Select
+                          </span>
+                        </div>
                       </button>
                     ))}
 

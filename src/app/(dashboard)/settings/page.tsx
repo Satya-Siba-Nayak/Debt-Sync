@@ -23,6 +23,7 @@ import {
 } from '@/lib/utils/avatar-storage';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { triggerPWAInstallPrompt } from '@/components/ui/PWAInstallPrompt';
+import { isValidUPIId } from '@/lib/utils/upi-link';
 
 export default function SettingsPage() {
   const supabase = createClient();
@@ -36,6 +37,7 @@ export default function SettingsPage() {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [upiId, setUpiId] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [recentCustomAvatars, setRecentCustomAvatars] = useState<string[]>([]);
   const [currency, setCurrency] = useState('inr');
@@ -92,14 +94,14 @@ export default function SettingsPage() {
         let profile: any = null;
         const { data: pData, error: pErr } = await supabase
           .from('profiles')
-          .select('full_name, phone, secondary_emails, avatar_url, recent_custom_avatars')
+          .select('full_name, phone, secondary_emails, avatar_url, recent_custom_avatars, upi_id')
           .eq('id', user.id)
           .single();
 
         if (!pErr && pData) {
           profile = pData;
         } else {
-          // Graceful fallback if recent_custom_avatars column is not yet migrated
+          // Graceful fallback if recent_custom_avatars or upi_id column is not yet migrated
           const { data: fallbackData } = await supabase
             .from('profiles')
             .select('full_name, phone, secondary_emails, avatar_url')
@@ -111,6 +113,7 @@ export default function SettingsPage() {
         if (profile) {
           setFullName(profile.full_name || '');
           setPhone(profile.phone || '');
+          setUpiId(profile.upi_id || '');
           setSecondaryEmails(profile.secondary_emails || []);
           setAvatarUrl(profile.avatar_url || null);
 
@@ -248,10 +251,15 @@ export default function SettingsPage() {
         throw new Error(phoneConflict.message || 'This phone number is already registered to another account.');
       }
 
+      if (upiId.trim() && !isValidUPIId(upiId.trim())) {
+        throw new Error('Please enter a valid UPI ID (e.g. username@okhdfcbank, name@upi, 9876543210@paytm)');
+      }
+
       // Update profile
       const profilePayload: any = {
         full_name: fullName.trim(),
         phone: phone.trim() || null,
+        upi_id: upiId.trim() || null,
         secondary_emails: secondaryEmails,
         avatar_url: avatarUrl,
         recent_custom_avatars: recentCustomAvatars,
@@ -262,11 +270,14 @@ export default function SettingsPage() {
         .update(profilePayload)
         .eq('id', user.id);
 
-      if (profileError && profileError.message?.includes('recent_custom_avatars')) {
-        delete profilePayload.recent_custom_avatars;
-        await supabase.from('profiles').update(profilePayload).eq('id', user.id);
-      } else if (profileError) {
-        throw profileError;
+      if (profileError) {
+        if (profileError.message?.includes('recent_custom_avatars') || profileError.message?.includes('upi_id')) {
+          delete profilePayload.recent_custom_avatars;
+          delete profilePayload.upi_id;
+          await supabase.from('profiles').update(profilePayload).eq('id', user.id);
+        } else {
+          throw profileError;
+        }
       }
 
       if (typeof window !== 'undefined') {
@@ -762,6 +773,26 @@ export default function SettingsPage() {
               defaultCountryCode={defaultCountryCode}
               required
             />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="font-mono text-xs text-[var(--on-surface-variant)] font-semibold flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">qr_code_2</span>
+                <span>UPI ID / VPA</span>
+                <span className="normal-case text-[var(--outline)] text-[11px] font-normal">(for receiving direct repayments &amp; QR)</span>
+              </label>
+            </div>
+            <input
+              type="text"
+              value={upiId}
+              onChange={(e) => setUpiId(e.target.value)}
+              placeholder="e.g. yourname@okhdfcbank, mobile@upi"
+              className="w-full px-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-sm font-mono outline-none focus:border-[var(--primary)]"
+            />
+            <p className="text-[11px] font-mono text-[var(--on-surface-variant)] mt-1">
+              When saved, borrowers can click a single button or scan a generated QR code to pay you directly via GPay, PhonePe, Paytm, etc.
+            </p>
           </div>
         </div>
 

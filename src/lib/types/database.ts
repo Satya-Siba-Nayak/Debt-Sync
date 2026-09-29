@@ -4,7 +4,9 @@ export type Profile = {
   full_name: string;
   phone: string | null;
   avatar_url: string | null;
+  upi_id: string | null;
   is_shadow: boolean;
+  is_admin: boolean;
   claimed_at: string | null;
   secondary_emails?: string[];
   recent_custom_avatars?: string[];
@@ -51,6 +53,8 @@ export type Debt = {
   borrower?: Profile;
 };
 
+export type PaymentMethod = 'cash' | 'upi' | 'bank_transfer' | 'gpay' | 'phonepe' | 'paytm' | 'other';
+
 export type Payment = {
   id: string;
   debt_id: string;
@@ -58,6 +62,8 @@ export type Payment = {
   amount: number;
   currency: string;
   note: string | null;
+  payment_method: PaymentMethod | null;
+  transaction_ref: string | null;
   is_verified?: boolean;
   verified_at?: string | null;
   verified_by?: string | null;

@@ -9,6 +9,8 @@ import { CashflowChart } from '@/components/dashboard/CashflowChart';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { getLedgerCache, setLedgerCache } from '@/lib/stores/ledger-store';
 import { SkeletonBalanceCards } from '@/components/ui/Skeleton';
+import { calculateTrustScore } from '@/lib/utils/trust-score';
+import { PAYMENT_METHOD_LABELS } from '@/lib/utils/upi-link';
 
 export default function AnalyticsPage() {
   const supabase = createClient();
@@ -19,6 +21,7 @@ export default function AnalyticsPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(initialCache?.userId || null);
   const [debts, setDebts] = useState<Debt[]>(initialCache?.debts || []);
   const [payments, setPayments] = useState<Payment[]>(initialCache?.payments || []);
+  const [showTrustDetails, setShowTrustDetails] = useState(false);
 
   const fetchAnalyticsData = useCallback(async () => {
     try {
@@ -142,12 +145,25 @@ export default function AnalyticsPage() {
     ? Math.min(100, Math.round((totalRepaymentsReceived / grandObligations) * 100))
     : debts.length === 0 ? 100 : 85;
 
-  // Real Trust Score:
-  // Baseline 720 + 20 per settled debt - 40 per declined debt
-  const declinedCount = debts.filter((d) => d.status === 'declined').length;
-  const rawScore = 720 + settledDebtsCount * 25 - declinedCount * 40 + (repaymentVelocityPercent >= 80 ? 30 : -20);
-  const trustScore = Math.min(850, Math.max(350, debts.length === 0 ? 750 : rawScore));
-  const trustRating = trustScore >= 780 ? 'Exceptional' : trustScore >= 740 ? 'Very Good' : trustScore >= 670 ? 'Good' : 'Fair';
+  // Comprehensive Network Trust Score Breakdown & Performance Factors
+  const trustBreakdown = calculateTrustScore(debts, payments, currentUserId || undefined);
+  const trustScore = trustBreakdown.score;
+  const trustRating = trustBreakdown.rating;
+  const trustRatingColor = trustBreakdown.ratingColor;
+  const trustFactors = trustBreakdown.factors;
+  const trustTips = trustBreakdown.tips;
+
+  // Payment Channel & Methods Distribution
+  const paymentMethodsStats: Record<string, { count: number; volume: number }> = {};
+  for (const p of payments) {
+    if (!p.is_verified) continue;
+    const mode = p.payment_method || 'other';
+    if (!paymentMethodsStats[mode]) {
+      paymentMethodsStats[mode] = { count: 0, volume: 0 };
+    }
+    paymentMethodsStats[mode].count += 1;
+    paymentMethodsStats[mode].volume = round2(paymentMethodsStats[mode].volume + (Number(p.amount) || 0));
+  }
 
   // Debt Age Distribution
   const ageBuckets = { '0-30d': 0, '31-60d': 0, '61-90d': 0, '91-120d': 0, '>120d': 0 };
@@ -328,11 +344,58 @@ export default function AnalyticsPage() {
               </table>
             </div>
           </div>
+
+          {/* Payment Channels & Modes Distribution */}
+          <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 md:p-8 border border-[var(--outline-variant)]/30 shadow-sm">
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h3 className="font-heading text-lg font-bold text-[var(--on-surface)]">
+                  Payment Channels &amp; Modes
+                </h3>
+                <p className="font-mono text-xs text-[var(--on-surface-variant)] mt-0.5">
+                  Repayment volumes grouped by verified transaction method
+                </p>
+              </div>
+              <span className="font-mono text-xs text-[var(--on-surface-variant)] bg-[var(--surface-container)] px-3 py-1 rounded-lg">
+                Channels
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+              {['upi', 'bank_transfer', 'cash', 'gpay', 'phonepe', 'paytm', 'other'].map((mode) => {
+                const meta = PAYMENT_METHOD_LABELS[mode];
+                const stats = paymentMethodsStats[mode] || { count: 0, volume: 0 };
+                return (
+                  <div
+                    key={mode}
+                    className="p-3.5 rounded-xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/20 flex flex-col justify-between"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="material-symbols-outlined text-[18px] text-[var(--primary)]">
+                        {meta?.icon || 'payment'}
+                      </span>
+                      <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] font-semibold">
+                        {stats.count} txns
+                      </span>
+                    </div>
+                    <div>
+                      <span className="font-mono text-[11px] text-[var(--on-surface-variant)] block">
+                        {meta?.label || mode}
+                      </span>
+                      <span className="font-mono font-bold text-sm text-[var(--on-surface)]">
+                        {formatCurrency(stats.volume, currency)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
 
         {/* Right: Trust Score & Velocity */}
         <div className="lg:col-span-4 space-y-6">
-          {/* Trust Score Card matching Stitch */}
+          {/* Trust Score Card matching Stitch with Factor Breakdown */}
           <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 md:p-8 border border-[var(--outline-variant)]/30 shadow-sm flex flex-col items-center text-center">
             <div className="w-10 h-10 rounded-xl bg-[var(--surface-container-high)] text-[var(--primary)] flex items-center justify-center mb-3">
               <span className="material-symbols-outlined text-[22px]">verified_user</span>
@@ -348,15 +411,96 @@ export default function AnalyticsPage() {
                 <span className="font-numeric-ticker text-4xl font-bold text-[var(--on-surface)]">
                   {trustScore}
                 </span>
-                <span className="font-mono text-xs font-bold text-[var(--secondary)] uppercase mt-0.5">
+                <span className={`font-mono text-xs font-bold uppercase mt-0.5 ${trustRatingColor}`}>
                   {trustRating}
                 </span>
               </div>
             </div>
 
-            <p className="font-mono text-xs text-[var(--on-surface-variant)] leading-relaxed">
-              Calculated dynamically based on {settledDebtsCount} settled cycles, {repaymentVelocityPercent}% repayment velocity, and active peer endorsements.
+            <p className="font-mono text-xs text-[var(--on-surface-variant)] leading-relaxed mb-4">
+              Calculated dynamically from {settledDebtsCount} settled cycles, {repaymentVelocityPercent}% repayment velocity, and on-time records.
             </p>
+
+            {/* Factor breakdown toggle button */}
+            <button
+              type="button"
+              onClick={() => setShowTrustDetails(!showTrustDetails)}
+              className="w-full py-2 px-3 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--primary)] font-mono text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+            >
+              <span className="material-symbols-outlined text-[16px]">tune</span>
+              <span>{showTrustDetails ? 'Hide Score Breakdown' : 'Why this score? (Factors & Tips)'}</span>
+            </button>
+
+            {/* Expandable Breakdown Panel */}
+            {showTrustDetails && (
+              <div className="w-full mt-4 text-left space-y-4 pt-4 border-t border-[var(--outline-variant)]/20 animate-in fade-in duration-200">
+                {/* Contributing Factors */}
+                <div>
+                  <span className="font-mono text-[11px] uppercase tracking-wider font-bold text-[var(--on-surface)] block mb-2">
+                    Score Contributions
+                  </span>
+                  <div className="space-y-1.5">
+                    {trustFactors.map((f) => (
+                      <div
+                        key={f.name}
+                        className="p-2 rounded-xl bg-[var(--surface-container)] flex items-center justify-between text-xs"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="material-symbols-outlined text-[16px] text-[var(--primary)] shrink-0">
+                            {f.icon}
+                          </span>
+                          <div className="min-w-0">
+                            <span className="font-bold text-[var(--on-surface)] block truncate text-[11px]">
+                              {f.name}
+                            </span>
+                            <span className="text-[10px] text-[var(--on-surface-variant)] block leading-tight">
+                              {f.description}
+                            </span>
+                          </div>
+                        </div>
+                        <span
+                          className={`font-mono font-bold text-xs shrink-0 ml-2 ${
+                            f.points > 0
+                              ? 'text-emerald-600 dark:text-emerald-400'
+                              : f.points < 0
+                              ? 'text-[var(--error)]'
+                              : 'text-[var(--on-surface-variant)]'
+                          }`}
+                        >
+                          {f.points > 0 ? `+${f.points}` : f.points}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* How to Increase */}
+                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/25 space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-mono text-[11px] font-bold uppercase tracking-wider">
+                    <span className="material-symbols-outlined text-[15px]">trending_up</span>
+                    <span>How to Increase Score</span>
+                  </div>
+                  <ul className="text-[11px] font-mono text-[var(--on-surface)] space-y-1 pl-4 list-disc marker:text-emerald-500">
+                    <li>Settle active debts to earn +25 points per debt.</li>
+                    <li>Settle on or before the due date for a +15 point on-time bonus.</li>
+                    <li>Maintain repayment velocity ≥ 80% to retain the +30 velocity bonus.</li>
+                  </ul>
+                </div>
+
+                {/* Actions that Lower Score */}
+                <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/25 space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-red-700 dark:text-red-400 font-mono text-[11px] font-bold uppercase tracking-wider">
+                    <span className="material-symbols-outlined text-[15px]">warning</span>
+                    <span>What Lowers Your Score</span>
+                  </div>
+                  <ul className="text-[11px] font-mono text-[var(--on-surface)] space-y-1 pl-4 list-disc marker:text-red-500">
+                    <li>Declining debt requests incurs a -40 point penalty each.</li>
+                    <li>Unresolved disputed payments penalize -20 points.</li>
+                    <li>Settling past the agreed due date costs -10 points.</li>
+                  </ul>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Repayment Velocity Card */}
