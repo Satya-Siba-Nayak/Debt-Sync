@@ -12,28 +12,70 @@ interface BottomNavProps {
 export function BottomNav({ onNewTransaction, isAdmin }: BottomNavProps) {
   const pathname = usePathname();
   const [viewMode, setViewMode] = React.useState<'admin' | 'user'>('admin');
+  const [adminTab, setAdminTab] = React.useState<string>('overview');
 
   React.useEffect(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('debtsync_view_mode') as 'admin' | 'user' | null;
       if (saved) setViewMode(saved);
 
+      const params = new URLSearchParams(window.location.search);
+      const initialTab = params.get('tab') || 'overview';
+      setAdminTab(initialTab === 'live' ? 'overview' : initialTab);
+
       const handleModeChange = (e: any) => {
-        if (e.detail?.mode) {
-          setViewMode(e.detail.mode);
+        if (e.detail?.mode) setViewMode(e.detail.mode);
+      };
+      const handleTabChange = (e: any) => {
+        if (e.detail?.tab) {
+          const t = e.detail.tab;
+          setAdminTab(t === 'live' ? 'overview' : t);
         }
       };
+
       window.addEventListener('debtsync:view_mode_changed', handleModeChange);
-      return () => window.removeEventListener('debtsync:view_mode_changed', handleModeChange);
+      window.addEventListener('debtsync:admin_tab_changed', handleTabChange);
+      return () => {
+        window.removeEventListener('debtsync:view_mode_changed', handleModeChange);
+        window.removeEventListener('debtsync:admin_tab_changed', handleTabChange);
+      };
     }
-  }, []);
+  }, [pathname]);
 
   const inAdminMode = Boolean(isAdmin && viewMode === 'admin');
 
+  const checkIsActive = (href: string) => {
+    if (inAdminMode) {
+      if (href === '/settings') return pathname === '/settings';
+      if (pathname !== '/admin') return false;
+      const targetTab = href.includes('tab=')
+        ? new URLSearchParams(href.split('?')[1]).get('tab')
+        : 'overview';
+      const effectiveTarget = targetTab === 'live' ? 'overview' : targetTab;
+      return adminTab === effectiveTarget;
+    }
+    if (href === '/') return pathname === '/';
+    return pathname.startsWith(href);
+  };
+
+  const handleNavClick = (href: string) => {
+    if (href.includes('tab=')) {
+      const t = new URLSearchParams(href.split('?')[1]).get('tab');
+      if (t) {
+        const resolvedTab = t === 'live' ? 'overview' : t;
+        setAdminTab(resolvedTab);
+        window.dispatchEvent(new CustomEvent('debtsync:admin_tab_changed', { detail: { tab: resolvedTab } }));
+      }
+    } else if (href === '/admin') {
+      setAdminTab('overview');
+      window.dispatchEvent(new CustomEvent('debtsync:admin_tab_changed', { detail: { tab: 'overview' } }));
+    }
+  };
+
   const leftItems = inAdminMode
     ? [
-        { label: 'Admin Hub', href: '/admin', icon: 'admin_panel_settings' },
-        { label: 'Live Stream', href: '/admin?tab=live', icon: 'sensors' },
+        { label: 'Live View', href: '/admin?tab=overview', icon: 'sensors' },
+        { label: 'Users', href: '/admin?tab=users', icon: 'manage_accounts' },
       ]
     : [
         { label: 'Dashboard', href: '/', icon: 'dashboard' },
@@ -42,7 +84,7 @@ export function BottomNav({ onNewTransaction, isAdmin }: BottomNavProps) {
 
   const rightItems = inAdminMode
     ? [
-        { label: 'Users', href: '/admin?tab=users', icon: 'manage_accounts' },
+        { label: 'Ledgers', href: '/admin?tab=transactions', icon: 'receipt_long' },
         { label: 'Settings', href: '/settings', icon: 'settings' },
       ]
     : [
@@ -55,17 +97,13 @@ export function BottomNav({ onNewTransaction, isAdmin }: BottomNavProps) {
       {/* Left Navigation Group */}
       <div className="flex items-center justify-around flex-1">
         {leftItems.map((item) => {
-          const isActive =
-            item.href === '/'
-              ? pathname === '/'
-              : item.href.startsWith('/admin')
-              ? pathname === '/admin'
-              : pathname.startsWith(item.href);
+          const isActive = checkIsActive(item.href);
 
           return (
             <Link
               key={item.href}
               href={item.href}
+              onClick={() => handleNavClick(item.href)}
               className={`flex flex-col items-center justify-center py-1 transition-all active:scale-95 ${
                 isActive
                   ? 'text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] font-bold'
@@ -89,6 +127,7 @@ export function BottomNav({ onNewTransaction, isAdmin }: BottomNavProps) {
         {inAdminMode ? (
           <Link
             href="/admin"
+            onClick={() => handleNavClick('/admin')}
             className="w-13 h-13 rounded-2xl bg-[var(--primary)] text-[var(--on-primary)] shadow-lg hover:shadow-xl shadow-[var(--primary)]/25 flex flex-col items-center justify-center border-4 border-[var(--surface-container-lowest)] active:scale-90 transition-all cursor-pointer"
             title="Admin Observatory"
           >
@@ -108,15 +147,13 @@ export function BottomNav({ onNewTransaction, isAdmin }: BottomNavProps) {
       {/* Right Navigation Group */}
       <div className="flex items-center justify-around flex-1">
         {rightItems.map((item) => {
-          const isActive =
-            item.href.startsWith('/admin')
-              ? pathname === '/admin'
-              : pathname.startsWith(item.href);
+          const isActive = checkIsActive(item.href);
 
           return (
             <Link
               key={item.href}
               href={item.href}
+              onClick={() => handleNavClick(item.href)}
               className={`flex flex-col items-center justify-center py-1 transition-all active:scale-95 ${
                 isActive
                   ? 'text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] font-bold'

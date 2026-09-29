@@ -60,10 +60,6 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
 
   const adminNavItems: NavItem[] = [
     { label: 'Admin Hub', href: '/admin', icon: 'admin_panel_settings', badge: 'ROOT' },
-    { label: 'Live Stream', href: '/admin?tab=live', icon: 'sensors', badge: 'LIVE' },
-    { label: 'User Controls', href: '/admin?tab=users', icon: 'manage_accounts' },
-    { label: 'Platform Ledgers', href: '/admin?tab=transactions', icon: 'receipt_long' },
-    { label: 'System Analytics', href: '/admin?tab=analytics', icon: 'monitoring' },
     { label: 'Settings', href: '/settings', icon: 'settings' },
   ];
 
@@ -96,14 +92,26 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
 
       {/* Transaction Button or Admin Console Pill */}
       {inAdminMode ? (
-        <div className="p-3 rounded-2xl bg-[var(--primary)]/10 border border-[var(--primary)]/20 mb-5 flex items-center justify-between shadow-2xs">
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="font-mono text-xs font-bold text-[var(--primary)]">Admin Active</span>
+        <div className="space-y-2 mb-5">
+          <div className="p-3 rounded-2xl bg-[var(--primary)]/10 border border-[var(--primary)]/20 flex items-center justify-between shadow-2xs">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="font-mono text-xs font-bold text-[var(--primary)]">Admin Active</span>
+            </div>
+            <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-bold bg-[var(--primary)] text-[var(--on-primary)]">
+              SUPERUSER
+            </span>
           </div>
-          <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-bold bg-[var(--primary)] text-[var(--on-primary)]">
-            SUPERUSER
-          </span>
+
+          <button
+            type="button"
+            onClick={handleToggleMode}
+            className="w-full py-2 px-3 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-high)]/60 hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+            title="Switch to Normal User View"
+          >
+            <span className="material-symbols-outlined text-[16px]">swap_horiz</span>
+            <span>Switch to User View</span>
+          </button>
         </div>
       ) : onNewTransaction ? (
         <button
@@ -129,9 +137,8 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
           const isActive =
             item.href === '/'
               ? pathname === '/'
-              : item.href.startsWith('/admin')
-              ? pathname === '/admin'
-              : pathname.startsWith(item.href);
+              : pathname === item.href ||
+                (item.href !== '/' && pathname.startsWith(item.href) && !item.href.includes('?'));
 
           return (
             <Link

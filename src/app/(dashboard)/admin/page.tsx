@@ -18,7 +18,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Modal } from '@/components/ui/Modal';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
 
-export type AdminTab = 'overview' | 'live' | 'users' | 'transactions' | 'analytics';
+export type AdminTab = 'overview' | 'users' | 'transactions' | 'analytics';
 
 export interface TelemetryEvent {
   id: string;
@@ -74,14 +74,26 @@ export default function AdminDashboardPage() {
   const [txnMethodFilter, setTxnMethodFilter] = useState<string>('all');
   const [selectedDebtDetail, setSelectedDebtDetail] = useState<Debt | null>(null);
 
-  // URL synchronization for direct tab linking
+  // URL synchronization for direct tab linking & external tab dispatching
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      const tabParam = params.get('tab') as AdminTab | null;
-      if (tabParam && ['overview', 'live', 'users', 'transactions', 'analytics'].includes(tabParam)) {
-        setActiveTab(tabParam);
+      const tabParam = params.get('tab') as AdminTab | 'live' | null;
+      if (tabParam === 'live' || tabParam === 'overview') {
+        setActiveTab('overview');
+      } else if (tabParam && ['users', 'transactions', 'analytics'].includes(tabParam)) {
+        setActiveTab(tabParam as AdminTab);
       }
+
+      const handleTabEvent = (e: any) => {
+        if (e.detail?.tab) {
+          const t = e.detail.tab;
+          if (t === 'live' || t === 'overview') setActiveTab('overview');
+          else if (['users', 'transactions', 'analytics'].includes(t)) setActiveTab(t);
+        }
+      };
+      window.addEventListener('debtsync:admin_tab_changed', handleTabEvent);
+      return () => window.removeEventListener('debtsync:admin_tab_changed', handleTabEvent);
     }
   }, []);
 
@@ -95,6 +107,7 @@ export default function AdminDashboardPage() {
         url.searchParams.set('tab', tab);
       }
       window.history.replaceState({}, '', url.toString());
+      window.dispatchEvent(new CustomEvent('debtsync:admin_tab_changed', { detail: { tab } }));
     }
   };
 
@@ -720,11 +733,30 @@ export default function AdminDashboardPage() {
       <div className="flex items-center gap-1.5 border-b border-[var(--outline-variant)]/20 pb-2 overflow-x-auto">
         {(
           [
-            { id: 'overview' as AdminTab, label: 'Platform Overview', icon: 'dashboard', badge: undefined },
-            { id: 'live' as AdminTab, label: `Live Stream (${liveEvents.length})`, icon: 'sensors', badge: isWebSocketActive ? 'LIVE' : 'CONN' },
-            { id: 'users' as AdminTab, label: `Users (${allProfiles.length})`, icon: 'manage_accounts', badge: metrics.isolatedUsers > 0 ? `${metrics.isolatedUsers} ISOLATED` : undefined },
-            { id: 'transactions' as AdminTab, label: `All Ledgers (${allDebts.length})`, icon: 'receipt_long', badge: undefined },
-            { id: 'analytics' as AdminTab, label: 'System Analytics', icon: 'monitoring', badge: undefined },
+            {
+              id: 'overview' as AdminTab,
+              label: `Platform Live View (${liveEvents.length})`,
+              icon: 'sensors',
+              badge: isWebSocketActive ? 'LIVE' : 'CONN',
+            },
+            {
+              id: 'users' as AdminTab,
+              label: `Users (${allProfiles.length})`,
+              icon: 'manage_accounts',
+              badge: metrics.isolatedUsers > 0 ? `${metrics.isolatedUsers} ISOLATED` : undefined,
+            },
+            {
+              id: 'transactions' as AdminTab,
+              label: `All Ledgers (${allDebts.length})`,
+              icon: 'receipt_long',
+              badge: undefined,
+            },
+            {
+              id: 'analytics' as AdminTab,
+              label: 'System Analytics',
+              icon: 'monitoring',
+              badge: undefined,
+            },
           ] as Array<{ id: AdminTab; label: string; icon: string; badge?: string }>
         ).map((t) => (
           <button
@@ -756,7 +788,7 @@ export default function AdminDashboardPage() {
         ))}
       </div>
 
-      {/* TAB 1: PLATFORM OVERVIEW */}
+      {/* TAB 1: PLATFORM LIVE VIEW & TELEMETRY STREAM */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
           {/* Top Key Metrics */}
@@ -822,190 +854,132 @@ export default function AdminDashboardPage() {
             </div>
           </div>
 
-          {/* Real-Time Live Ticker Card */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                <h3 className="font-mono text-xs uppercase tracking-wider font-bold text-[var(--on-surface)]">
-                  Live Platform Telemetry Stream
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => handleSelectTab('live')}
-                className="text-[11px] font-mono text-[var(--primary)] hover:underline flex items-center gap-1 font-bold"
-              >
-                <span>Open Full Stream Console</span>
-                <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
-              </button>
-            </div>
-
-            <div className="divide-y divide-[var(--outline-variant)]/10 font-mono text-xs">
-              {liveEvents.length === 0 ? (
-                <div className="py-6 text-center text-[var(--on-surface-variant)] space-y-1">
-                  <span className="material-symbols-outlined text-[28px] text-[var(--outline)] animate-pulse block">
-                    sensors
+          {/* Real-Time Live Telemetry Stream Console */}
+          <div className="space-y-4">
+            {/* Controls Bar */}
+            <div className="p-4 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/20 font-mono text-xs">
+                  <span className={`w-2.5 h-2.5 rounded-full ${isWebSocketActive ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                  <span className="font-bold text-[var(--on-surface)]">
+                    {isWebSocketActive ? 'WebSocket Connected' : 'Connecting WebSocket...'}
                   </span>
-                  <p>Listening for real-time transactions and audit events...</p>
+                  <span className="text-[10px] text-[var(--outline)]">• {liveEvents.length} events captured</span>
                 </div>
-              ) : (
-                liveEvents.slice(0, 5).map((evt) => (
-                  <div
-                    key={evt.id}
-                    onClick={() => setSelectedTelemetryEvent(evt)}
-                    className="py-2.5 flex items-center justify-between gap-3 hover:bg-[var(--surface-container-high)]/50 px-2 rounded-xl cursor-pointer transition-colors"
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="material-symbols-outlined text-[17px] text-[var(--primary)] shrink-0">
-                        {evt.icon}
-                      </span>
-                      <div className="min-w-0">
-                        <span className="font-bold text-[var(--on-surface)] truncate block sm:inline">
-                          {evt.title}
-                        </span>
-                        <span className="text-[11px] text-[var(--on-surface-variant)] truncate block">
-                          {evt.description}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${evt.badgeClass}`}>
-                        {evt.eventType}
-                      </span>
-                      <span className="text-[10px] text-[var(--outline)]">{evt.relativeTime}</span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* TAB 2: LIVE STREAM CONSOLE */}
-      {activeTab === 'live' && (
-        <div className="space-y-4">
-          {/* Controls Bar */}
-          <div className="p-4 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/20 font-mono text-xs">
-                <span className={`w-2.5 h-2.5 rounded-full ${isWebSocketActive ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-                <span className="font-bold text-[var(--on-surface)]">
-                  {isWebSocketActive ? 'WebSocket Connected' : 'Connecting WebSocket...'}
-                </span>
-                <span className="text-[10px] text-[var(--outline)]">• {liveEvents.length} events captured</span>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setIsLivePaused(!isLivePaused)}
-                className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
-                  isLivePaused
-                    ? 'bg-amber-500 text-white'
-                    : 'bg-[var(--surface-container-high)] text-[var(--on-surface)] hover:bg-[var(--surface-container-highest)]'
-                }`}
-              >
-                <span className="material-symbols-outlined text-[16px]">
-                  {isLivePaused ? 'play_arrow' : 'pause'}
-                </span>
-                <span>{isLivePaused ? 'Resume Stream' : 'Pause Stream'}</span>
-              </button>
-            </div>
-
-            <div className="flex items-center gap-2 overflow-x-auto">
-              {(
-                [
-                  { id: 'all', label: 'All Events' },
-                  { id: 'payments', label: 'Payments' },
-                  { id: 'debts', label: 'Debts' },
-                  { id: 'profiles', label: 'Users' },
-                  { id: 'admin', label: 'Admin Logs' },
-                ] as const
-              ).map((f) => (
                 <button
-                  key={f.id}
                   type="button"
-                  onClick={() => setLiveFilter(f.id)}
-                  className={`px-3 py-1.5 rounded-lg font-mono text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-                    liveFilter === f.id
-                      ? 'bg-[var(--primary)] text-[var(--on-primary)]'
-                      : 'bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                  onClick={() => setIsLivePaused(!isLivePaused)}
+                  className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
+                    isLivePaused
+                      ? 'bg-amber-500 text-white'
+                      : 'bg-[var(--surface-container-high)] text-[var(--on-surface)] hover:bg-[var(--surface-container-highest)]'
                   }`}
                 >
-                  {f.label}
-                </button>
-              ))}
-
-              <button
-                type="button"
-                onClick={() => setLiveEvents([])}
-                className="px-2.5 py-1.5 rounded-lg border border-[var(--outline-variant)]/40 hover:bg-red-500/10 text-red-500 font-mono text-xs font-bold transition-colors cursor-pointer"
-                title="Clear current event buffer"
-              >
-                Clear
-              </button>
-            </div>
-          </div>
-
-          {/* Stream Logs List */}
-          <div className="bg-[var(--surface-container-lowest)] rounded-2xl border border-[var(--outline-variant)]/30 overflow-hidden shadow-sm">
-            <div className="p-3 bg-[var(--surface-container)] border-b border-[var(--outline-variant)]/20 font-mono text-xs flex items-center justify-between">
-              <span className="font-bold text-[var(--on-surface)] uppercase tracking-wider">
-                Telemetry Packet Feed
-              </span>
-              <span className="text-[11px] text-[var(--on-surface-variant)]">Click any entry to inspect payload JSON</span>
-            </div>
-
-            <div className="divide-y divide-[var(--outline-variant)]/10 font-mono text-xs max-h-[65vh] overflow-y-auto overscroll-contain">
-              {filteredLiveEvents.length === 0 ? (
-                <div className="py-16 text-center text-[var(--on-surface-variant)] space-y-2">
-                  <span className="material-symbols-outlined text-[36px] text-[var(--outline)] animate-pulse block">
-                    wifi_tethering
+                  <span className="material-symbols-outlined text-[16px]">
+                    {isLivePaused ? 'play_arrow' : 'pause'}
                   </span>
-                  <p className="font-bold">Awaiting Telemetry Signals</p>
-                  <p className="text-[11px] text-[var(--outline)]">
-                    Perform a transaction, submit a payment, or alter profile data in another window to see packets live.
-                  </p>
-                </div>
-              ) : (
-                filteredLiveEvents.map((evt) => (
-                  <div
-                    key={evt.id}
-                    onClick={() => setSelectedTelemetryEvent(evt)}
-                    className="p-3.5 flex items-start justify-between gap-4 hover:bg-[var(--surface-container-low)] transition-colors cursor-pointer"
+                  <span>{isLivePaused ? 'Resume Stream' : 'Pause Stream'}</span>
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2 overflow-x-auto">
+                {(
+                  [
+                    { id: 'all', label: 'All Events' },
+                    { id: 'payments', label: 'Payments' },
+                    { id: 'debts', label: 'Debts' },
+                    { id: 'profiles', label: 'Users' },
+                    { id: 'admin', label: 'Admin Logs' },
+                  ] as const
+                ).map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setLiveFilter(f.id)}
+                    className={`px-3 py-1.5 rounded-lg font-mono text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                      liveFilter === f.id
+                        ? 'bg-[var(--primary)] text-[var(--on-primary)]'
+                        : 'bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                    }`}
                   >
-                    <div className="flex items-start gap-3 min-w-0">
-                      <div className="w-8 h-8 rounded-xl bg-[var(--surface-container)] flex items-center justify-center shrink-0 mt-0.5">
-                        <span className="material-symbols-outlined text-[18px] text-[var(--primary)]">
-                          {evt.icon}
-                        </span>
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-[var(--on-surface)]">
-                            {evt.title}
-                          </span>
-                          <span className={`px-2 py-0.2 rounded text-[9px] font-bold border ${evt.badgeClass}`}>
-                            {evt.table.toUpperCase()} • {evt.eventType}
+                    {f.label}
+                  </button>
+                ))}
+
+                <button
+                  type="button"
+                  onClick={() => setLiveEvents([])}
+                  className="px-2.5 py-1.5 rounded-lg border border-[var(--outline-variant)]/40 hover:bg-red-500/10 text-red-500 font-mono text-xs font-bold transition-colors cursor-pointer"
+                  title="Clear current event buffer"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            {/* Stream Logs List */}
+            <div className="bg-[var(--surface-container-lowest)] rounded-2xl border border-[var(--outline-variant)]/30 overflow-hidden shadow-sm">
+              <div className="p-3 bg-[var(--surface-container)] border-b border-[var(--outline-variant)]/20 font-mono text-xs flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="font-bold text-[var(--on-surface)] uppercase tracking-wider">
+                    Live Telemetry Packet Stream
+                  </span>
+                </div>
+                <span className="text-[11px] text-[var(--on-surface-variant)]">Click any entry to inspect payload JSON</span>
+              </div>
+
+              <div className="divide-y divide-[var(--outline-variant)]/10 font-mono text-xs max-h-[60vh] overflow-y-auto overscroll-contain">
+                {filteredLiveEvents.length === 0 ? (
+                  <div className="py-14 text-center text-[var(--on-surface-variant)] space-y-2">
+                    <span className="material-symbols-outlined text-[36px] text-[var(--outline)] animate-pulse block">
+                      wifi_tethering
+                    </span>
+                    <p className="font-bold">Awaiting Telemetry Signals</p>
+                    <p className="text-[11px] text-[var(--outline)]">
+                      Perform a transaction, submit a payment, or alter profile data in another window to see packets live.
+                    </p>
+                  </div>
+                ) : (
+                  filteredLiveEvents.map((evt) => (
+                    <div
+                      key={evt.id}
+                      onClick={() => setSelectedTelemetryEvent(evt)}
+                      className="p-3.5 flex items-start justify-between gap-4 hover:bg-[var(--surface-container-low)] transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className="w-8 h-8 rounded-xl bg-[var(--surface-container)] flex items-center justify-center shrink-0 mt-0.5">
+                          <span className="material-symbols-outlined text-[18px] text-[var(--primary)]">
+                            {evt.icon}
                           </span>
                         </div>
-                        <p className="text-[11px] text-[var(--on-surface-variant)] mt-0.5 truncate">
-                          {evt.description}
-                        </p>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-[var(--on-surface)]">
+                              {evt.title}
+                            </span>
+                            <span className={`px-2 py-0.2 rounded text-[9px] font-bold border ${evt.badgeClass}`}>
+                              {evt.table.toUpperCase()} • {evt.eventType}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-[var(--on-surface-variant)] mt-0.5 truncate">
+                            {evt.description}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span className="text-[11px] text-[var(--outline)] block">
+                          {evt.relativeTime}
+                        </span>
+                        <span className="text-[10px] text-[var(--primary)] hover:underline">
+                          Inspect
+                        </span>
                       </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <span className="text-[11px] text-[var(--outline)] block">
-                        {evt.relativeTime}
-                      </span>
-                      <span className="text-[10px] text-[var(--primary)] hover:underline">
-                        Inspect
-                      </span>
-                    </div>
-                  </div>
-                ))
-              )}
+                  ))
+                )}
+              </div>
             </div>
           </div>
         </div>
