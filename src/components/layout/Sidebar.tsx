@@ -159,19 +159,6 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
         </Link>
       )}
 
-      {/* Restore Admin View Button when in User Mode Preview */}
-      {effectiveIsAdmin && !inAdminMode && (
-        <button
-          type="button"
-          onClick={handleToggleMode}
-          className="w-full -mt-3 mb-5 py-1.5 px-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 font-mono text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-amber-500/20 transition-all cursor-pointer shadow-2xs"
-          title="Click to restore Administrator View"
-        >
-          <span className="material-symbols-outlined text-[15px]">swap_horiz</span>
-          <span>Restore Admin View</span>
-        </button>
-      )}
-
       {/* Main Nav Links */}
       <nav className="flex-1 flex flex-col gap-1.5">
         {navItems.map((item) => {
@@ -212,16 +199,16 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
 
       {/* Bottom Footer Area */}
       <div className="mt-auto flex flex-col gap-2 border-t border-[var(--outline-variant)]/20 pt-4">
-        {effectiveIsAdmin && (
+        {effectiveIsAdmin && !inAdminMode && (
           <div className="flex items-center justify-between px-1 mb-1">
             <span className="font-mono text-xs text-[var(--on-surface-variant)]">View Mode</span>
             <button
               type="button"
               onClick={handleToggleMode}
-              className="px-2 py-0.5 rounded-lg border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container-high)] text-[10px] font-mono font-bold transition-all cursor-pointer flex items-center gap-1 text-[var(--primary)]"
-              title={viewMode === 'admin' ? 'Currently Admin View. Click to preview normal user view' : 'Currently Normal User View. Click to restore admin view'}
+              className="px-2 py-0.5 rounded-lg border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-[10px] font-mono font-bold transition-all cursor-pointer flex items-center gap-1 text-amber-700 dark:text-amber-300"
+              title="Click to restore Administrator View"
             >
-              <span>{viewMode === 'admin' ? '⚡ Admin' : '👤 User'}</span>
+              <span>👤 User Mode</span>
               <span className="material-symbols-outlined text-[12px]">swap_horiz</span>
             </button>
           </div>

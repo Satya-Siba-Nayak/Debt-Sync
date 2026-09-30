@@ -190,27 +190,6 @@ export function TopBar({
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Desktop View Mode Switcher Pill */}
-          {effectiveIsAdmin && (
-            <button
-              type="button"
-              onClick={handleToggleMode}
-              className={`px-3 py-1.5 rounded-xl border font-mono text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs ${
-                viewMode === 'admin'
-                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20'
-                  : 'bg-[var(--primary)]/10 border-[var(--primary)]/30 text-[var(--primary)] hover:bg-[var(--primary)]/20'
-              }`}
-              title={
-                viewMode === 'admin'
-                  ? 'Currently in Admin View. Click to preview normal User View'
-                  : 'Currently in User View. Click to restore Admin View'
-              }
-            >
-              <span className="material-symbols-outlined text-[16px]">swap_horiz</span>
-              <span>{viewMode === 'admin' ? '⚡ Admin Mode' : '👤 User Mode'}</span>
-            </button>
-          )}
-
           <NotificationCenter />
 
           <button
