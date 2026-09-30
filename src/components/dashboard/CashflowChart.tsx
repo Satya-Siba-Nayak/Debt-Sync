@@ -173,7 +173,14 @@ export function CashflowChart({
           scales: {
             x: {
               grid: { color: gridColor },
-              ticks: { color: textColor, font: { family: 'JetBrains Mono', size: 11 } },
+              ticks: {
+                color: textColor,
+                font: { family: 'JetBrains Mono', size: 10 },
+                maxRotation: 0,
+                autoSkip: true,
+                maxTicksLimit: 7,
+                autoSkipPadding: 16,
+              },
             },
             y: {
               grid: { color: gridColor },
@@ -237,7 +244,14 @@ export function CashflowChart({
           scales: {
             x: {
               grid: { color: gridColor },
-              ticks: { color: textColor, font: { family: 'JetBrains Mono', size: 11 } },
+              ticks: {
+                color: textColor,
+                font: { family: 'JetBrains Mono', size: 10 },
+                maxRotation: 0,
+                autoSkip: true,
+                maxTicksLimit: 7,
+                autoSkipPadding: 16,
+              },
             },
             y: {
               grid: { color: gridColor },

@@ -95,22 +95,22 @@ export function LiveTicker({
       />
 
       {/* Header */}
-      <div className="flex items-center justify-between w-full z-10">
-        <div className="flex items-center gap-2 text-[var(--on-primary-container)]">
-          <span className="material-symbols-outlined text-[20px]">timelapse</span>
-          <span className="font-mono text-xs uppercase tracking-widest font-semibold">
-            Interest Accrual Engine
+      <div className="flex items-center justify-between w-full z-10 gap-2 min-w-0">
+        <div className="flex items-center gap-1.5 text-[var(--on-primary-container)] min-w-0">
+          <span className="material-symbols-outlined text-[18px] shrink-0">timelapse</span>
+          <span className="font-mono text-xs uppercase tracking-wider font-semibold truncate">
+            Interest Engine
           </span>
         </div>
 
         {dailyRate > 0 ? (
-          <span className="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-emerald-400/20 text-emerald-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-400/20 text-emerald-300 font-bold uppercase tracking-wider flex items-center gap-1 shrink-0">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
             Compounding
           </span>
         ) : (
-          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/10 text-[var(--on-primary-container)] font-semibold">
-            Static Baseline
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/10 text-[var(--on-primary-container)] font-semibold shrink-0">
+            Static
           </span>
         )}
       </div>

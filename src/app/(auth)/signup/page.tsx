@@ -219,8 +219,21 @@ function SignupContent() {
           </form>
 
           {message && (
-            <div className="mt-4 p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-mono">
-              {message}
+            <div className="mt-4 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-mono space-y-2.5">
+              <div className="flex items-center gap-2 font-bold text-sm">
+                <span className="material-symbols-outlined text-emerald-500 text-[18px]">mark_email_read</span>
+                <span>Verification Email Dispatched</span>
+              </div>
+              <p>{message}</p>
+              <div className="p-3 rounded-lg bg-[var(--surface-container-high)]/70 border border-amber-500/30 text-amber-800 dark:text-amber-200 space-y-1.5 text-[11px] leading-relaxed">
+                <div className="flex items-center gap-1.5 font-bold">
+                  <span className="material-symbols-outlined text-[16px] text-amber-500">mark_email_unread</span>
+                  <span>Didn&apos;t receive the email yet?</span>
+                </div>
+                <p>
+                  Please check your <strong>Spam / Junk folder</strong>. If the email arrived there, be sure to select <strong>&quot;Report Not Spam&quot;</strong> or move it to your primary inbox so future payment receipts, interest notifications, and security alerts reach you reliably.
+                </p>
+              </div>
             </div>
           )}
           {error && (

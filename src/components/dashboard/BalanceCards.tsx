@@ -48,12 +48,23 @@ export function BalanceCards({
         </div>
 
         <div className="mt-8 flex items-end justify-between border-t border-[var(--outline-variant)]/20 pt-4">
-          <div className="text-[var(--secondary)] font-mono text-xs flex items-center gap-1 font-semibold">
-            <span className="material-symbols-outlined text-[16px]">trending_up</span>
-            <span>
-              {monthlyGrowth >= 0 ? '+' : ''}
-              {formatCurrency(monthlyGrowth, currency)} this month
-            </span>
+          <div className="font-mono text-xs flex items-center gap-1 font-semibold">
+            {monthlyGrowth > 0 ? (
+              <span className="text-[var(--secondary)] flex items-center gap-1">
+                <span className="material-symbols-outlined text-[16px]">trending_up</span>
+                <span>+{formatCurrency(monthlyGrowth, currency)} this month</span>
+              </span>
+            ) : monthlyGrowth < 0 ? (
+              <span className="text-[var(--error)] flex items-center gap-1">
+                <span className="material-symbols-outlined text-[16px]">trending_down</span>
+                <span>{formatCurrency(monthlyGrowth, currency)} this month</span>
+              </span>
+            ) : (
+              <span className="text-[var(--on-surface-variant)] flex items-center gap-1">
+                <span className="material-symbols-outlined text-[16px]">trending_flat</span>
+                <span>0% Baseline Net Change</span>
+              </span>
+            )}
           </div>
           <span className="text-[11px] font-mono text-[var(--on-surface-variant)]">
             {activeLentCount + activeOwedCount} Total Active Ledgers

@@ -163,14 +163,6 @@ export function TopBar({
         <div className="flex items-center gap-3">
           <NotificationCenter />
 
-          <Link
-            href="/settings"
-            className="p-2 text-[var(--on-surface-variant)] hover:text-[var(--primary)] rounded-lg hover:bg-[var(--surface-container)] transition-colors"
-            title="Settings"
-          >
-            <span className="material-symbols-outlined text-[22px]">settings</span>
-          </Link>
-
           <button
             ref={triggerDesktopRef}
             type="button"
@@ -329,8 +321,8 @@ export function TopBar({
               onClick={() => setIsDropdownOpen(false)}
               className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl font-mono text-xs text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors"
             >
-              <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">settings</span>
-              <span>Account Settings</span>
+              <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">manage_accounts</span>
+              <span>Profile &amp; Preferences</span>
             </Link>
             <button
               type="button"

@@ -132,7 +132,14 @@ export function PersonAnalyticsChart({
         scales: {
           x: {
             grid: { color: gridColor },
-            ticks: { color: textColor, font: { family: 'JetBrains Mono', size: 11 } },
+            ticks: {
+              color: textColor,
+              font: { family: 'JetBrains Mono', size: 10 },
+              maxRotation: 0,
+              autoSkip: true,
+              maxTicksLimit: 6,
+              autoSkipPadding: 16,
+            },
           },
           y: {
             grid: { color: gridColor },
