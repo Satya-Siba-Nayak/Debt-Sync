@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { ThemeToggle } from '../ui/ThemeToggle';
 
-import { clearAuthSessionData } from '@/lib/utils/auth-session';
+import { clearAuthSessionData, getCachedUserProfile } from '@/lib/utils/auth-session';
 
 interface SidebarProps {
   onNewTransaction?: () => void;
@@ -18,6 +18,23 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
   const router = useRouter();
   const supabase = createClient();
   const [viewMode, setViewMode] = React.useState<'admin' | 'user'>('admin');
+  const [isAdminState, setIsAdminState] = React.useState<boolean>(() => {
+    if (isAdmin !== undefined) return Boolean(isAdmin);
+    if (typeof window !== 'undefined') {
+      const cached = getCachedUserProfile();
+      if (cached?.is_admin) return true;
+    }
+    return false;
+  });
+
+  React.useEffect(() => {
+    if (isAdmin !== undefined) {
+      setIsAdminState(Boolean(isAdmin));
+    } else if (typeof window !== 'undefined') {
+      const cached = getCachedUserProfile();
+      if (cached?.is_admin) setIsAdminState(true);
+    }
+  }, [isAdmin]);
 
   React.useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -29,8 +46,18 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
           setViewMode(e.detail.mode);
         }
       };
+      const handleUserUpdated = (e: any) => {
+        if (e.detail?.isAdmin !== undefined) {
+          setIsAdminState(Boolean(e.detail.isAdmin));
+        }
+      };
+
       window.addEventListener('debtsync:view_mode_changed', handleModeChange);
-      return () => window.removeEventListener('debtsync:view_mode_changed', handleModeChange);
+      window.addEventListener('debtsync:user_updated', handleUserUpdated);
+      return () => {
+        window.removeEventListener('debtsync:view_mode_changed', handleModeChange);
+        window.removeEventListener('debtsync:user_updated', handleUserUpdated);
+      };
     }
   }, []);
 
@@ -49,7 +76,8 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
     router.push('/login');
   };
 
-  const inAdminMode = Boolean(isAdmin && viewMode === 'admin');
+  const effectiveIsAdmin = Boolean(isAdminState || isAdmin || viewMode === 'admin');
+  const inAdminMode = Boolean(effectiveIsAdmin && viewMode === 'admin');
 
   interface NavItem {
     label: string;
@@ -131,6 +159,19 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
         </Link>
       )}
 
+      {/* Restore Admin View Button when in User Mode Preview */}
+      {effectiveIsAdmin && !inAdminMode && (
+        <button
+          type="button"
+          onClick={handleToggleMode}
+          className="w-full -mt-3 mb-5 py-1.5 px-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 font-mono text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-amber-500/20 transition-all cursor-pointer shadow-2xs"
+          title="Click to restore Administrator View"
+        >
+          <span className="material-symbols-outlined text-[15px]">swap_horiz</span>
+          <span>Restore Admin View</span>
+        </button>
+      )}
+
       {/* Main Nav Links */}
       <nav className="flex-1 flex flex-col gap-1.5">
         {navItems.map((item) => {
@@ -171,7 +212,7 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
 
       {/* Bottom Footer Area */}
       <div className="mt-auto flex flex-col gap-2 border-t border-[var(--outline-variant)]/20 pt-4">
-        {isAdmin && (
+        {effectiveIsAdmin && (
           <div className="flex items-center justify-between px-1 mb-1">
             <span className="font-mono text-xs text-[var(--on-surface-variant)]">View Mode</span>
             <button

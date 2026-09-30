@@ -3,6 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { getCachedUserProfile } from '@/lib/utils/auth-session';
 
 interface BottomNavProps {
   onNewTransaction?: () => void;
@@ -13,6 +14,23 @@ export function BottomNav({ onNewTransaction, isAdmin }: BottomNavProps) {
   const pathname = usePathname();
   const [viewMode, setViewMode] = React.useState<'admin' | 'user'>('admin');
   const [adminTab, setAdminTab] = React.useState<string>('overview');
+  const [isAdminState, setIsAdminState] = React.useState<boolean>(() => {
+    if (isAdmin !== undefined) return Boolean(isAdmin);
+    if (typeof window !== 'undefined') {
+      const cached = getCachedUserProfile();
+      if (cached?.is_admin) return true;
+    }
+    return false;
+  });
+
+  React.useEffect(() => {
+    if (isAdmin !== undefined) {
+      setIsAdminState(Boolean(isAdmin));
+    } else if (typeof window !== 'undefined') {
+      const cached = getCachedUserProfile();
+      if (cached?.is_admin) setIsAdminState(true);
+    }
+  }, [isAdmin]);
 
   React.useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -32,17 +50,25 @@ export function BottomNav({ onNewTransaction, isAdmin }: BottomNavProps) {
           setAdminTab(t === 'live' ? 'overview' : t);
         }
       };
+      const handleUserUpdated = (e: any) => {
+        if (e.detail?.isAdmin !== undefined) {
+          setIsAdminState(Boolean(e.detail.isAdmin));
+        }
+      };
 
       window.addEventListener('debtsync:view_mode_changed', handleModeChange);
       window.addEventListener('debtsync:admin_tab_changed', handleTabChange);
+      window.addEventListener('debtsync:user_updated', handleUserUpdated);
       return () => {
         window.removeEventListener('debtsync:view_mode_changed', handleModeChange);
         window.removeEventListener('debtsync:admin_tab_changed', handleTabChange);
+        window.removeEventListener('debtsync:user_updated', handleUserUpdated);
       };
     }
   }, [pathname]);
 
-  const inAdminMode = Boolean(isAdmin && viewMode === 'admin');
+  const effectiveIsAdmin = Boolean(isAdminState || isAdmin || viewMode === 'admin');
+  const inAdminMode = Boolean(effectiveIsAdmin && viewMode === 'admin');
 
   const checkIsActive = (href: string) => {
     if (inAdminMode) {

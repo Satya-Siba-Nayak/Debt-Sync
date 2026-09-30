@@ -7,7 +7,7 @@ import { ThemeToggle } from '../ui/ThemeToggle';
 import { Avatar, AVATAR_PRESETS } from '../ui/Avatar';
 import { NotificationCenter } from './NotificationCenter';
 import { createClient } from '@/lib/supabase/client';
-import { clearAuthSessionData } from '@/lib/utils/auth-session';
+import { clearAuthSessionData, getCachedUserProfile } from '@/lib/utils/auth-session';
 
 interface TopBarProps {
   title?: string;
@@ -32,11 +32,28 @@ export function TopBar({
 }: TopBarProps) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'admin' | 'user'>('admin');
+  const [isAdminState, setIsAdminState] = useState<boolean>(() => {
+    if (isAdmin !== undefined) return Boolean(isAdmin);
+    if (typeof window !== 'undefined') {
+      const cached = getCachedUserProfile();
+      if (cached?.is_admin) return true;
+    }
+    return false;
+  });
   const dropdownRef = useRef<HTMLDivElement>(null);
   const triggerMobileRef = useRef<HTMLButtonElement>(null);
   const triggerDesktopRef = useRef<HTMLButtonElement>(null);
   const supabase = createClient();
   const router = useRouter();
+
+  useEffect(() => {
+    if (isAdmin !== undefined) {
+      setIsAdminState(Boolean(isAdmin));
+    } else if (typeof window !== 'undefined') {
+      const cached = getCachedUserProfile();
+      if (cached?.is_admin) setIsAdminState(true);
+    }
+  }, [isAdmin]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -46,8 +63,18 @@ export function TopBar({
       const handleModeChange = (e: any) => {
         if (e.detail?.mode) setViewMode(e.detail.mode);
       };
+      const handleUserUpdated = (e: any) => {
+        if (e.detail?.isAdmin !== undefined) {
+          setIsAdminState(Boolean(e.detail.isAdmin));
+        }
+      };
+
       window.addEventListener('debtsync:view_mode_changed', handleModeChange);
-      return () => window.removeEventListener('debtsync:view_mode_changed', handleModeChange);
+      window.addEventListener('debtsync:user_updated', handleUserUpdated);
+      return () => {
+        window.removeEventListener('debtsync:view_mode_changed', handleModeChange);
+        window.removeEventListener('debtsync:user_updated', handleUserUpdated);
+      };
     }
   }, []);
 
@@ -59,6 +86,8 @@ export function TopBar({
       window.dispatchEvent(new CustomEvent('debtsync:view_mode_changed', { detail: { mode: nextMode } }));
     }
   };
+
+  const effectiveIsAdmin = Boolean(isAdminState || isAdmin || viewMode === 'admin');
 
   // Close dropdown on outside click or escape
   useEffect(() => {
@@ -161,6 +190,27 @@ export function TopBar({
         </div>
 
         <div className="flex items-center gap-3">
+          {/* Desktop View Mode Switcher Pill */}
+          {effectiveIsAdmin && (
+            <button
+              type="button"
+              onClick={handleToggleMode}
+              className={`px-3 py-1.5 rounded-xl border font-mono text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs ${
+                viewMode === 'admin'
+                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20'
+                  : 'bg-[var(--primary)]/10 border-[var(--primary)]/30 text-[var(--primary)] hover:bg-[var(--primary)]/20'
+              }`}
+              title={
+                viewMode === 'admin'
+                  ? 'Currently in Admin View. Click to preview normal User View'
+                  : 'Currently in User View. Click to restore Admin View'
+              }
+            >
+              <span className="material-symbols-outlined text-[16px]">swap_horiz</span>
+              <span>{viewMode === 'admin' ? '⚡ Admin Mode' : '👤 User Mode'}</span>
+            </button>
+          )}
+
           <NotificationCenter />
 
           <button
@@ -288,7 +338,7 @@ export function TopBar({
 
           {/* Menu Actions */}
           <div className="pt-2 border-t border-[var(--outline-variant)]/20 space-y-1">
-            {isAdmin && (
+            {effectiveIsAdmin && (
               <>
                 <Link
                   href="/admin"
