@@ -82,6 +82,10 @@ export function getLedgerCache(userId?: string | null): LedgerCacheData | null {
 }
 
 export function setLedgerCache(data: LedgerCacheData): void {
+  // Preserve cached people list if new data doesn't supply it
+  if (!data.people && memoryCache?.people && memoryCache.userId === data.userId) {
+    data.people = memoryCache.people;
+  }
   memoryCache = data;
   if (typeof window === 'undefined') return;
 

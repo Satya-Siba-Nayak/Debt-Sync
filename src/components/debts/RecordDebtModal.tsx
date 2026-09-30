@@ -7,20 +7,15 @@ import { Contact, Profile } from '@/lib/types/database';
 import { formatCurrency, SUPPORTED_CURRENCIES } from '@/lib/utils/currency';
 import { projectDebtGrowth, round2, calculateDebtBalance } from '@/lib/utils/interest';
 import { findProfileByIdentifier, searchProfiles } from '@/lib/utils/profile-lookup';
-import { checkDebtRequestCooldown, type CooldownCheckResult } from '@/lib/utils/debt-cooldown';
+import { checkDebtRequestCooldown, invalidateCooldownCache, type CooldownCheckResult } from '@/lib/utils/debt-cooldown';
 import { sendNotificationEmail } from '@/lib/utils/email-notifier';
 import { PhoneInput } from '../ui/PhoneInput';
 import { Avatar } from '../ui/Avatar';
 import { calculateTrustScore } from '@/lib/utils/trust-score';
+import { getCurrentUserFast } from '@/lib/utils/auth-session';
+import { getLedgerCache, invalidateLedgerCache } from '@/lib/stores/ledger-store';
 
-interface RecordDebtModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onDebtCreated?: () => void;
-  preselectedContactId?: string;
-}
-
-interface PersonOption {
+export interface PersonOption {
   id: string;
   name: string;
   email: string;
@@ -31,17 +26,64 @@ interface PersonOption {
   trustRating?: string;
 }
 
+export interface RecordDebtModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onDebtCreated?: () => void;
+  preselectedContactId?: string;
+  preselectedPerson?: PersonOption | null;
+}
+
+// Module-level hot caches for 0ms frame-0 rendering
+let cachedPeopleList: PersonOption[] = [];
+let cachedPeopleTimestamp = 0;
+let cachedIsolationStatus: { userId: string; isIsolated: boolean; timestamp: number } | null = null;
+const platformSearchCache = new Map<string, PersonOption[]>();
+
+function getInitialPeople(preselected?: PersonOption | null): PersonOption[] {
+  const map = new Map<string, PersonOption>();
+  if (preselected) {
+    map.set(preselected.id, preselected);
+  }
+  if (cachedPeopleList.length > 0) {
+    for (const p of cachedPeopleList) {
+      if (!map.has(p.id)) map.set(p.id, p);
+    }
+  } else {
+    const ledger = getLedgerCache();
+    if (ledger?.people && ledger.people.length > 0) {
+      for (const p of ledger.people) {
+        if (!map.has(p.id)) {
+          map.set(p.id, {
+            id: p.id,
+            name: p.name || p.full_name || p.email || 'Contact',
+            email: p.email || '',
+            phone: p.phone || null,
+            avatar_url: p.avatarUrl || p.avatar_url || null,
+            trustScore: p.trustScore,
+            trustRating: p.trustRating,
+          });
+        }
+      }
+    }
+  }
+  return Array.from(map.values());
+}
+
 export function RecordDebtModal({
   isOpen,
   onClose,
   onDebtCreated,
   preselectedContactId,
+  preselectedPerson,
 }: RecordDebtModalProps) {
   const supabase = createClient();
 
-  // Form states
-  const [people, setPeople] = useState<PersonOption[]>([]);
-  const [selectedPersonId, setSelectedPersonId] = useState(preselectedContactId || '');
+  // Form states initialized instantly from cache and props
+  const [people, setPeople] = useState<PersonOption[]>(() => getInitialPeople(preselectedPerson));
+  const [selectedPersonId, setSelectedPersonId] = useState<string>(
+    () => preselectedContactId || (preselectedPerson ? preselectedPerson.id : '')
+  );
   const [personSearch, setPersonSearch] = useState('');
   const [platformSearchResults, setPlatformSearchResults] = useState<PersonOption[]>([]);
   const [isSearchingPlatform, setIsSearchingPlatform] = useState(false);
@@ -72,18 +114,33 @@ export function RecordDebtModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Keep selectedPersonId synchronized when preselectedContactId or isOpen changes
+  // Synchronize recipient state whenever modal opens or preselected props change
   useEffect(() => {
-    if (preselectedContactId) {
+    if (!isOpen) return;
+
+    if (preselectedPerson) {
+      setSelectedPersonId(preselectedPerson.id);
+      setIsAddingNewPerson(false);
+      setPersonSearch('');
+      setPeople((prev) => {
+        if (prev.some((p) => p.id === preselectedPerson.id)) return prev;
+        return [preselectedPerson, ...prev];
+      });
+    } else if (preselectedContactId) {
       setSelectedPersonId(preselectedContactId);
       setIsAddingNewPerson(false);
+      setPersonSearch('');
+    } else {
+      setSelectedPersonId('');
+      setPersonSearch('');
+      setIsAddingNewPerson(false);
     }
-  }, [preselectedContactId, isOpen]);
+  }, [isOpen, preselectedContactId, preselectedPerson]);
 
   // Verify anti-harassment cooldown when selected contact changes
   useEffect(() => {
     async function verifyCooldown() {
-      const targetId = selectedPersonId || preselectedContactId;
+      const targetId = selectedPersonId;
       if (!targetId || isAddingNewPerson) {
         setCooldown(null);
         return;
@@ -102,32 +159,66 @@ export function RecordDebtModal({
     if (isOpen) {
       verifyCooldown();
     }
-  }, [selectedPersonId, preselectedContactId, isAddingNewPerson, isOpen, supabase]);
+  }, [selectedPersonId, isAddingNewPerson, isOpen, supabase]);
 
-  // Load contacts and counterparties
+  // Load contacts and counterparties with background revalidation
   useEffect(() => {
+    if (!isOpen) return;
+
     async function loadContacts() {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await getCurrentUserFast(supabase);
       if (!user) return;
 
-      const { data: myProf } = await supabase.from('profiles').select('is_isolated').eq('id', user.id).single();
-      if (myProf?.is_isolated) {
-        setIsCurrentUserIsolated(true);
+      // Check cached isolation status (60s TTL)
+      if (
+        cachedIsolationStatus &&
+        cachedIsolationStatus.userId === user.id &&
+        Date.now() - cachedIsolationStatus.timestamp < 60_000
+      ) {
+        setIsCurrentUserIsolated(cachedIsolationStatus.isIsolated);
       } else {
-        setIsCurrentUserIsolated(false);
+        const { data: myProf } = await supabase
+          .from('profiles')
+          .select('is_isolated')
+          .eq('id', user.id)
+          .single();
+        const isolated = Boolean(myProf?.is_isolated);
+        cachedIsolationStatus = { userId: user.id, isIsolated: isolated, timestamp: Date.now() };
+        setIsCurrentUserIsolated(isolated);
+      }
+
+      // If cache is fresh within 30s, keep current contacts and skip heavy roundtrips
+      if (cachedPeopleList.length > 0 && Date.now() - cachedPeopleTimestamp < 30_000) {
+        return;
       }
 
       const peopleMap = new Map<string, PersonOption>();
 
-      // 1. Fetch from contacts table
-      const { data: contactData } = await supabase
-        .from('contacts')
-        .select(`
-          contact_id, nickname,
-          profile:profiles!contacts_contact_id_fkey(id, email, full_name, phone)
-        `)
-        .eq('owner_id', user.id);
+      // Fetch contacts and debts concurrently
+      const [contactDataRes, debtDataRes] = await Promise.all([
+        supabase
+          .from('contacts')
+          .select(`
+            contact_id, nickname,
+            profile:profiles!contacts_contact_id_fkey(id, email, full_name, phone, avatar_url)
+          `)
+          .eq('owner_id', user.id),
+        supabase
+          .from('debts')
+          .select(`
+            status,
+            lender_id, borrower_id,
+            lender:profiles!debts_lender_id_fkey(id, email, full_name, phone, avatar_url),
+            borrower:profiles!debts_borrower_id_fkey(id, email, full_name, phone, avatar_url)
+          `)
+          .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`)
+          .neq('status', 'declined'),
+      ]);
 
+      const contactData = contactDataRes.data;
+      const debtData = debtDataRes.data;
+
+      // 1. Map contacts
       if (contactData) {
         for (const c of contactData as any[]) {
           if (c.profile) {
@@ -136,23 +227,13 @@ export function RecordDebtModal({
               name: c.nickname || c.profile.full_name || c.profile.email,
               email: c.profile.email,
               phone: c.profile.phone,
+              avatar_url: c.profile.avatar_url,
             });
           }
         }
       }
 
-      // 2. Fetch counterparties from existing debts (excluding declined debts to respect privacy)
-      const { data: debtData } = await supabase
-        .from('debts')
-        .select(`
-          status,
-          lender_id, borrower_id,
-          lender:profiles!debts_lender_id_fkey(id, email, full_name, phone),
-          borrower:profiles!debts_borrower_id_fkey(id, email, full_name, phone)
-        `)
-        .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`)
-        .neq('status', 'declined');
-
+      // 2. Map existing counterparties
       if (debtData) {
         for (const d of debtData as any[]) {
           const isLender = d.lender_id === user.id;
@@ -163,16 +244,19 @@ export function RecordDebtModal({
               name: otherParty.full_name || otherParty.email,
               email: otherParty.email,
               phone: otherParty.phone,
+              avatar_url: otherParty.avatar_url,
             });
           }
         }
       }
 
-      // 3. If preselectedContactId was passed, ensure their profile is fetched if not yet present
-      if (preselectedContactId && !peopleMap.has(preselectedContactId)) {
+      // 3. If preselected was passed, ensure they are present in the map
+      if (preselectedPerson && !peopleMap.has(preselectedPerson.id)) {
+        peopleMap.set(preselectedPerson.id, preselectedPerson);
+      } else if (preselectedContactId && !peopleMap.has(preselectedContactId)) {
         const { data: profile } = await supabase
           .from('profiles')
-          .select('id, email, full_name, phone')
+          .select('id, email, full_name, phone, avatar_url')
           .eq('id', preselectedContactId)
           .single();
 
@@ -182,6 +266,7 @@ export function RecordDebtModal({
             name: profile.full_name || profile.email,
             email: profile.email,
             phone: profile.phone,
+            avatar_url: profile.avatar_url,
           });
         }
       }
@@ -194,29 +279,45 @@ export function RecordDebtModal({
         p.trustScore = trust.score;
         p.trustRating = trust.rating;
       }
-      setPeople(peopleList);
 
-      if (preselectedContactId) {
+      cachedPeopleList = peopleList;
+      cachedPeopleTimestamp = Date.now();
+
+      setPeople((prev) => {
+        const map = new Map<string, PersonOption>();
+        for (const p of peopleList) map.set(p.id, p);
+        for (const p of prev) {
+          if (!map.has(p.id)) map.set(p.id, p);
+        }
+        return Array.from(map.values());
+      });
+
+      if (preselectedPerson) {
+        setSelectedPersonId(preselectedPerson.id);
+      } else if (preselectedContactId) {
         setSelectedPersonId(preselectedContactId);
-      } else if (!selectedPersonId && peopleList.length > 0) {
-        setSelectedPersonId(peopleList[0].id);
       }
     }
 
-    if (isOpen) {
-      if (typeof window !== 'undefined') {
-        const saved = localStorage.getItem('debtsync_default_country_code');
-        if (saved) setDefaultCountryCode(saved);
-      }
-      loadContacts();
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('debtsync_default_country_code');
+      if (saved) setDefaultCountryCode(saved);
     }
-  }, [isOpen, preselectedContactId, supabase]);
+    loadContacts();
+  }, [isOpen, preselectedContactId, preselectedPerson, supabase]);
 
-  // Live platform profile search with debouncing
+  // Live platform profile search with debouncing & in-memory cache
   useEffect(() => {
     const term = personSearch.trim();
     if (term.length < 2) {
       setPlatformSearchResults([]);
+      setIsSearchingPlatform(false);
+      return;
+    }
+
+    const cleanLower = term.toLowerCase();
+    if (platformSearchCache.has(cleanLower)) {
+      setPlatformSearchResults(platformSearchCache.get(cleanLower)!);
       setIsSearchingPlatform(false);
       return;
     }
@@ -238,36 +339,17 @@ export function RecordDebtModal({
             });
           }
         }
+        platformSearchCache.set(cleanLower, newResults);
         setPlatformSearchResults(newResults);
-
-        // Auto-select if an exact email or exact phone matches an existing account
-        const cleanTerm = term.toLowerCase();
-        const cleanDigits = term.replace(/[^\d]/g, '');
-        const exactMatch =
-          people.find(
-            (p) =>
-              (p.email && p.email.toLowerCase() === cleanTerm) ||
-              (p.phone && cleanDigits.length >= 10 && p.phone.replace(/[^\d]/g, '').slice(-10) === cleanDigits.slice(-10))
-          ) ||
-          newResults.find(
-            (p) =>
-              (p.email && p.email.toLowerCase() === cleanTerm) ||
-              (p.phone && cleanDigits.length >= 10 && p.phone.replace(/[^\d]/g, '').slice(-10) === cleanDigits.slice(-10))
-          );
-
-        if (exactMatch && !selectedPersonId) {
-          setSelectedPersonId(exactMatch.id);
-          setIsAddingNewPerson(false);
-        }
       } catch (err) {
         console.error('Failed to search platform profiles:', err);
       } finally {
         setIsSearchingPlatform(false);
       }
-    }, 250);
+    }, 200);
 
     return () => clearTimeout(timer);
-  }, [personSearch, people, selectedPersonId]);
+  }, [personSearch, people]);
 
   // Handlers to eliminate leading-zero typing glitches
   const handlePrincipalChange = (val: string) => {
@@ -298,9 +380,13 @@ export function RecordDebtModal({
     );
   });
 
-  const selectedPerson =
-    people.find((p) => p.id === (selectedPersonId || preselectedContactId)) ||
-    platformSearchResults.find((p) => p.id === (selectedPersonId || preselectedContactId));
+  const selectedPerson = selectedPersonId
+    ? people.find((p) => p.id === selectedPersonId) ||
+      platformSearchResults.find((p) => p.id === selectedPersonId) ||
+      (preselectedPerson && preselectedPerson.id === selectedPersonId
+        ? preselectedPerson
+        : undefined)
+    : undefined;
 
   // Projected growth preview (12 months)
   const projection = projectDebtGrowth(
@@ -337,7 +423,7 @@ export function RecordDebtModal({
     setError('');
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await getCurrentUserFast(supabase);
       if (!user) throw new Error('User not logged in');
 
       if (isCurrentUserIsolated) {
@@ -346,7 +432,7 @@ export function RecordDebtModal({
         return;
       }
 
-      let targetUserId = selectedPersonId || preselectedContactId || '';
+      let targetUserId = selectedPersonId || '';
 
       // If user wants to add a new person inline
       if (isAddingNewPerson) {
@@ -394,12 +480,10 @@ export function RecordDebtModal({
             });
           }
         }
-      } else if (!targetUserId && people.length > 0) {
-        targetUserId = people[0].id;
       }
 
       if (!targetUserId) {
-        throw new Error('Please select or add a person');
+        throw new Error('Please select or add a recipient');
       }
 
       // Check anti-harassment cooldown before submitting
@@ -474,6 +558,9 @@ export function RecordDebtModal({
       setNewPersonPhone('');
       setDueDate('');
       setIsAddingNewPerson(false);
+      invalidateCooldownCache(targetUserId);
+      invalidateLedgerCache();
+      cachedPeopleTimestamp = 0;
       onDebtCreated?.();
       window.dispatchEvent(new CustomEvent('debtsync:refresh'));
       onClose();

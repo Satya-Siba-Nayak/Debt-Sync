@@ -20,10 +20,23 @@ import {
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
+  const [recordModalParams, setRecordModalParams] = useState<{
+    contactId?: string;
+    person?: any;
+  } | null>(null);
   // Instant frame-0 hydration from local cache
   const [userProfile, setUserProfile] = useState<CachedProfile | null>(() => getCachedUserProfile());
   const supabase = createClient();
   const router = useRouter();
+
+  useEffect(() => {
+    const handleOpenRecordModal = (e: any) => {
+      setRecordModalParams(e.detail || null);
+      setIsRecordModalOpen(true);
+    };
+    window.addEventListener('debtsync:open_record_modal', handleOpenRecordModal);
+    return () => window.removeEventListener('debtsync:open_record_modal', handleOpenRecordModal);
+  }, []);
 
   useEffect(() => {
     async function loadUser() {
@@ -96,7 +109,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       {/* Desktop Sidebar */}
       <Sidebar
         isAdmin={userProfile?.is_admin}
-        onNewTransaction={() => setIsRecordModalOpen(true)}
+        onNewTransaction={() => {
+          setRecordModalParams(null);
+          setIsRecordModalOpen(true);
+        }}
       />
 
       {/* Main Content Area */}
@@ -108,7 +124,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           avatarUrl={userProfile?.avatar_url}
           recentCustomAvatars={userProfile?.recent_custom_avatars}
           isAdmin={userProfile?.is_admin}
-          onNewTransaction={() => setIsRecordModalOpen(true)}
+          onNewTransaction={() => {
+            setRecordModalParams(null);
+            setIsRecordModalOpen(true);
+          }}
         />
 
         <main className="flex-1 p-4 md:p-8 max-w-7xl mx-auto w-full">
@@ -119,13 +138,21 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       {/* Mobile Bottom Navigation */}
       <BottomNav
         isAdmin={userProfile?.is_admin}
-        onNewTransaction={() => setIsRecordModalOpen(true)}
+        onNewTransaction={() => {
+          setRecordModalParams(null);
+          setIsRecordModalOpen(true);
+        }}
       />
 
       {/* Global Record New Debt Modal */}
       <RecordDebtModal
         isOpen={isRecordModalOpen}
-        onClose={() => setIsRecordModalOpen(false)}
+        preselectedContactId={recordModalParams?.contactId}
+        preselectedPerson={recordModalParams?.person}
+        onClose={() => {
+          setIsRecordModalOpen(false);
+          setRecordModalParams(null);
+        }}
         onDebtCreated={() => {
           // Trigger page reload or custom event
           window.dispatchEvent(new CustomEvent('debtsync:refresh'));

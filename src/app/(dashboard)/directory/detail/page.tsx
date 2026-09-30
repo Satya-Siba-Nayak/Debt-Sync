@@ -19,6 +19,7 @@ import { PersonAnalyticsChart } from '@/components/directory/PersonAnalyticsChar
 import { SkeletonBalanceCards, SkeletonTableRows } from '@/components/ui/Skeleton';
 import { calculateTrustScore } from '@/lib/utils/trust-score';
 import { detectUPIApp, formatPaymentMethodDisplay } from '@/lib/utils/upi-link';
+import { getLedgerCache } from '@/lib/stores/ledger-store';
 import Link from 'next/link';
 
 function PersonDebtDetailContent() {
@@ -27,13 +28,40 @@ function PersonDebtDetailContent() {
 
   const supabase = createClient();
 
-  const [loading, setLoading] = useState(true);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [person, setPerson] = useState<Profile | null>(null);
-  const [debts, setDebts] = useState<Debt[]>([]);
-  const [payments, setPayments] = useState<Payment[]>([]);
+  const initialCache = getLedgerCache();
+  const cachedPerson = initialCache?.people?.find((p: any) => p.id === personId);
+  const cachedDebts = initialCache?.debts
+    ? initialCache.debts.filter(
+        (d: Debt) =>
+          (d.lender_id === initialCache.userId && d.borrower_id === personId) ||
+          (d.borrower_id === initialCache.userId && d.lender_id === personId)
+      )
+    : [];
+  const cachedDebtIds = new Set(cachedDebts.map((d: Debt) => d.id));
+  const cachedPayments = initialCache?.payments
+    ? initialCache.payments.filter((p: Payment) => cachedDebtIds.has(p.debt_id))
+    : [];
+
+  const [loading, setLoading] = useState(!cachedPerson && cachedDebts.length === 0);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(initialCache?.userId || null);
+  const [person, setPerson] = useState<Profile | null>(() => {
+    if (cachedPerson) {
+      return {
+        id: cachedPerson.id,
+        email: cachedPerson.email || '',
+        full_name: cachedPerson.name || '',
+        phone: cachedPerson.phone || null,
+        avatar_url: cachedPerson.avatarUrl || cachedPerson.avatar_url || null,
+        upi_id: cachedPerson.upiId || null,
+        is_shadow: cachedPerson.isShadow || false,
+      } as Profile;
+    }
+    return null;
+  });
+  const [debts, setDebts] = useState<Debt[]>(cachedDebts);
+  const [payments, setPayments] = useState<Payment[]>(cachedPayments);
   const [activityLogs, setActivityLogs] = useState<ActivityLogEntry[]>([]);
-  const [currency, setCurrency] = useState('inr');
+  const [currency, setCurrency] = useState(initialCache?.currency || 'inr');
 
   // Search, Directional filter & Modals
   const [searchQuery, setSearchQuery] = useState('');
@@ -50,7 +78,9 @@ function PersonDebtDetailContent() {
       return;
     }
 
-    setLoading(true);
+    if (!person && debts.length === 0) {
+      setLoading(true);
+    }
     try {
       const user = await getCurrentUserFast(supabase);
       if (!user) return;
@@ -1146,6 +1176,18 @@ function PersonDebtDetailContent() {
       <RecordDebtModal
         isOpen={isRecordDebtOpen}
         preselectedContactId={personId}
+        preselectedPerson={
+          person
+            ? {
+                id: person.id,
+                name: person.full_name || person.email || 'Contact',
+                email: person.email || '',
+                phone: person.phone,
+                avatar_url: person.avatar_url,
+                isPlatformUser: true,
+              }
+            : null
+        }
         onClose={() => setIsRecordDebtOpen(false)}
         onDebtCreated={fetchDetails}
       />

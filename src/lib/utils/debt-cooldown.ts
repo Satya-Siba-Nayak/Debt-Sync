@@ -1,5 +1,6 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { ERROR_CODES, formatErrorWithCode } from '@/lib/constants/error-codes';
+import { getCurrentUserFast } from '@/lib/utils/auth-session';
 
 export interface CooldownCheckResult {
   allowed: boolean;
@@ -10,6 +11,22 @@ export interface CooldownCheckResult {
   reason?: string;
   code?: string;
   message?: string;
+}
+
+interface CooldownCacheEntry {
+  result: CooldownCheckResult;
+  timestamp: number;
+}
+
+const cooldownCache = new Map<string, CooldownCacheEntry>();
+const COOLDOWN_CACHE_TTL = 30 * 1000; // 30 seconds
+
+export function invalidateCooldownCache(targetUserId?: string): void {
+  if (targetUserId) {
+    cooldownCache.delete(targetUserId);
+  } else {
+    cooldownCache.clear();
+  }
 }
 
 /**
@@ -44,8 +61,30 @@ export async function checkDebtRequestCooldown(
 ): Promise<CooldownCheckResult> {
   if (!targetUserId) return { allowed: true, declinedCount: 0 };
 
+  const cached = cooldownCache.get(targetUserId);
+  if (cached && Date.now() - cached.timestamp < COOLDOWN_CACHE_TTL) {
+    if (!cached.result.allowed && cached.result.cooldownUntil) {
+      const remainingMs = Math.max(0, cached.result.cooldownUntil.getTime() - Date.now());
+      if (remainingMs <= 0) {
+        cooldownCache.delete(targetUserId);
+      } else {
+        return {
+          ...cached.result,
+          cooldownRemainingFormatted: formatTimeRemaining(remainingMs),
+        };
+      }
+    } else {
+      return cached.result;
+    }
+  }
+
+  const setAndReturn = (result: CooldownCheckResult): CooldownCheckResult => {
+    cooldownCache.set(targetUserId, { result, timestamp: Date.now() });
+    return result;
+  };
+
   try {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getCurrentUserFast(supabase);
     if (!user) return { allowed: true, declinedCount: 0 };
 
     // 1. Try secure RPC function
@@ -62,7 +101,7 @@ export async function checkDebtRequestCooldown(
           const formattedTime = formatTimeRemaining(remainingMs);
           const code = rpcRes.code || (rpcRes.reason === 'cooldown_30d' ? ERROR_CODES.DEBT_REQUEST_COOLDOWN_30D : ERROR_CODES.DEBT_REQUEST_COOLDOWN_3D);
 
-          return {
+          return setAndReturn({
             allowed: false,
             declinedCount: rpcRes.declined_count || 3,
             cooldownUntil,
@@ -73,14 +112,14 @@ export async function checkDebtRequestCooldown(
               rpcRes.message || `Requesting this person is paused for ${formattedTime}.`,
               code
             ),
-          };
+          });
         }
 
-        return {
+        return setAndReturn({
           allowed: true,
           declinedCount: rpcRes.declined_count || 0,
           remainingAttempts: rpcRes.remaining_attempts,
-        };
+        });
       }
     } catch (_) {
       // Fall through to client query fallback
@@ -97,7 +136,7 @@ export async function checkDebtRequestCooldown(
       .order('created_at', { ascending: false });
 
     if (debtsErr || !debts) {
-      return { allowed: true, declinedCount: 0 };
+      return setAndReturn({ allowed: true, declinedCount: 0 });
     }
 
     let declinedCount = 0;
@@ -121,7 +160,7 @@ export async function checkDebtRequestCooldown(
       if (remainingMs > 0) {
         const formatted = formatTimeRemaining(remainingMs);
         const code = ERROR_CODES.DEBT_REQUEST_COOLDOWN_30D;
-        return {
+        return setAndReturn({
           allowed: false,
           declinedCount,
           cooldownUntil: cooldownEnd,
@@ -132,7 +171,7 @@ export async function checkDebtRequestCooldown(
             `This user has declined your requests multiple times. For privacy, you cannot request them again for ${formatted} (1-month cooldown).`,
             code
           ),
-        };
+        });
       }
     } else if (declinedCount === 3 && lastDeclinedAt) {
       const cooldownEnd = new Date(lastDeclinedAt.getTime() + 3 * 24 * 60 * 60 * 1000);
@@ -140,7 +179,7 @@ export async function checkDebtRequestCooldown(
       if (remainingMs > 0) {
         const formatted = formatTimeRemaining(remainingMs);
         const code = ERROR_CODES.DEBT_REQUEST_COOLDOWN_3D;
-        return {
+        return setAndReturn({
           allowed: false,
           declinedCount,
           cooldownUntil: cooldownEnd,
@@ -151,15 +190,15 @@ export async function checkDebtRequestCooldown(
             `This user declined your previous 3 requests. For privacy, you cannot request them again for ${formatted} (3-day cooldown).`,
             code
           ),
-        };
+        });
       }
     }
 
-    return {
+    return setAndReturn({
       allowed: true,
       declinedCount,
       remainingAttempts: declinedCount < 3 ? 3 - declinedCount : 1,
-    };
+    });
   } catch (err) {
     console.warn('Debt request cooldown check notice:', err);
     return { allowed: true, declinedCount: 0 };

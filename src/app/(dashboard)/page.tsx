@@ -108,11 +108,28 @@ export default function GlobalDashboardPage() {
       setBorrowingInterestAccrued(stats.borrowingInterestAccrued);
       setDailyAccrualRate(stats.dailyAccrualRate);
 
+      // Extract unique counterparties to prime the recipient cache for new transactions
+      const peopleMap = new Map<string, any>();
+      for (const d of allDebts) {
+        const isLender = d.lender_id === user.id;
+        const otherParty = isLender ? d.borrower : d.lender;
+        if (otherParty && otherParty.id && !peopleMap.has(otherParty.id)) {
+          peopleMap.set(otherParty.id, {
+            id: otherParty.id,
+            name: otherParty.full_name || otherParty.email,
+            email: otherParty.email,
+            phone: (otherParty as any).phone || null,
+            avatar_url: otherParty.avatar_url,
+          });
+        }
+      }
+
       // Update hot client cache
       setLedgerCache({
         userId: user.id,
         debts: allDebts,
         payments: allPayments,
+        people: peopleMap.size > 0 ? Array.from(peopleMap.values()) : undefined,
         currency: activeCurrency,
         timestamp: Date.now(),
       });

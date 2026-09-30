@@ -397,6 +397,25 @@ export default function PeopleDirectoryPage() {
       <RecordDebtModal
         isOpen={!!selectedPersonForDebt}
         preselectedContactId={selectedPersonForDebt || undefined}
+        preselectedPerson={
+          selectedPersonForDebt
+            ? (() => {
+                const p = people.find((item) => item.id === selectedPersonForDebt);
+                return p
+                  ? {
+                      id: p.id,
+                      name: p.name,
+                      email: p.email,
+                      phone: p.phone,
+                      avatar_url: p.avatarUrl,
+                      trustScore: p.trustScore,
+                      trustRating: p.trustRating,
+                      isPlatformUser: !p.isShadow,
+                    }
+                  : null;
+              })()
+            : null
+        }
         onClose={() => setSelectedPersonForDebt(null)}
         onDebtCreated={fetchDirectoryData}
       />
