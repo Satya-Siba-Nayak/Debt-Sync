@@ -3,7 +3,10 @@ import "./globals.css";
 import { ThemeInitializer } from "@/components/ui/ThemeInitializer";
 
 export const viewport: Viewport = {
-  themeColor: "#006a67",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f8f9ff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0d1117" },
+  ],
   width: "device-width",
   initialScale: 1,
   maximumScale: 5,
@@ -17,7 +20,7 @@ export const metadata: Metadata = {
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "default",
+    statusBarStyle: "black-translucent",
     title: "DebtSync",
   },
   icons: {
@@ -37,13 +40,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className="w-full max-w-full overflow-x-hidden" suppressHydrationWarning>
       <head>
         <link rel="manifest" href="/manifest.json" />
         <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="DebtSync" />
         <script
           dangerouslySetInnerHTML={{
@@ -143,7 +146,7 @@ export default function RootLayout({
           href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
         />
       </head>
-      <body className="min-h-screen bg-[var(--surface)] text-[var(--on-surface)] antialiased">
+      <body className="min-h-[100dvh] bg-[var(--surface)] text-[var(--on-surface)] antialiased w-full max-w-full overflow-x-hidden">
         <ThemeInitializer />
         {children}
       </body>

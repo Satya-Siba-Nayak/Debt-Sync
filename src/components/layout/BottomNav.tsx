@@ -117,10 +117,10 @@ export function BottomNav({ onNewTransaction, isAdmin }: BottomNavProps) {
 
   return (
     <nav
-      className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[var(--surface-container-lowest)]/95 backdrop-blur-lg border-t border-[var(--outline-variant)]/30 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] pb-[env(safe-area-inset-bottom,0px)]"
+      className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[var(--surface-container-lowest)]/95 backdrop-blur-lg border-t border-[var(--outline-variant)]/30 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] pb-[env(safe-area-inset-bottom,0px)] pl-[max(0.25rem,env(safe-area-inset-left,0px))] pr-[max(0.25rem,env(safe-area-inset-right,0px))]"
       aria-label="Primary"
     >
-      <div className="h-16 px-2 flex items-center">
+      <div className="h-16 px-1 flex items-center">
         <div className="flex items-center flex-1">{leftItems.map(renderItem)}</div>
 
         {/* Center Floating Action Button (+ Record or Admin Shield) */}

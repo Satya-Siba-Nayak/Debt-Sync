@@ -1,13 +1,14 @@
-﻿{
+{
   "name": "DebtSync — Trust and Precision",
   "short_name": "DebtSync",
   "description": "Smart peer-to-peer ledger, interest engine, and debt management portal",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
   "orientation": "portrait",
-  "background_color": "#0d1b1a",
-  "theme_color": "#006a67",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
   "categories": ["finance", "productivity", "utilities"],
   "icons": [
     {

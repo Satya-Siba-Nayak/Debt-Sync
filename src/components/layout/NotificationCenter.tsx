@@ -430,15 +430,15 @@ export function NotificationCenter() {
         ref={triggerRef}
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="relative p-2 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20"
+        className="relative w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors cursor-pointer shrink-0 focus:outline-none focus:ring-2 focus:ring-primary/20 active:scale-90"
         title="Notifications & pending requests"
         aria-label="Notifications"
       >
-        <span className="material-symbols-outlined text-[22px]">
+        <span className="material-symbols-outlined text-[20px]">
           {totalNotifications > 0 ? 'notifications_active' : 'notifications'}
         </span>
         {totalNotifications > 0 && (
-          <span className="absolute top-1 right-1 flex items-center justify-center min-w-[18px] h-[18px] px-1 bg-primary text-on-primary text-[10px] font-mono font-bold rounded-full shadow-sm animate-pulse">
+          <span className="absolute top-0.5 right-0.5 flex items-center justify-center min-w-[16px] h-[16px] px-0.5 bg-primary text-on-primary text-[9px] font-mono font-bold rounded-full shadow-sm animate-pulse">
             {totalNotifications}
           </span>
         )}
@@ -448,7 +448,7 @@ export function NotificationCenter() {
       {isOpen && (
         <div
           ref={containerRef}
-          className="fixed inset-x-3 top-16 md:absolute md:inset-auto md:right-0 md:top-12 md:w-96 bg-surface-container-lowest rounded-2xl border border-outline-variant/30 shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[80vh]"
+          className="fixed left-[max(0.75rem,env(safe-area-inset-left,0px))] right-[max(0.75rem,env(safe-area-inset-right,0px))] top-[calc(3.5rem+env(safe-area-inset-top,0px)+0.5rem)] md:left-auto md:right-0 md:top-12 md:w-96 bg-surface-container-lowest rounded-2xl border border-outline-variant/30 shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[80vh]"
         >
           {/* Header */}
           <div className="p-4 border-b border-outline-variant/20 flex items-center justify-between bg-surface-container-low">

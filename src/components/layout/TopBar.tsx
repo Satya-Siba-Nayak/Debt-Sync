@@ -101,36 +101,38 @@ export function TopBar({
 
   return (
     <>
-      {/* Mobile Header */}
-      <header className="bg-[var(--surface)]/90 flex justify-between items-center w-full px-4 h-14 sticky top-0 z-30 md:hidden border-b border-[var(--outline-variant)]/30 backdrop-blur-md pt-[env(safe-area-inset-top,0px)] box-content">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--primary)] to-[var(--primary-container)] text-[var(--on-primary)] flex items-center justify-center font-bold text-sm shadow-sm shrink-0">
-            D
-          </div>
-          <span className="font-heading text-lg font-bold text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] truncate">
-            DebtSync
-          </span>
-          {inAdminMode && (
-            <span className="px-1.5 py-0.5 rounded-md text-[9px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)] shrink-0">
-              ADMIN
+      {/* Mobile Header (True Edge-to-Edge with Safe Areas) */}
+      <header className="bg-[var(--surface)]/95 w-full sticky top-0 z-30 md:hidden border-b border-[var(--outline-variant)]/30 backdrop-blur-md pt-[env(safe-area-inset-top,0px)] pl-[max(0.75rem,env(safe-area-inset-left,0px))] pr-[max(0.75rem,env(safe-area-inset-right,0px))] transition-colors">
+        <div className="flex justify-between items-center w-full h-14 min-w-0">
+          <div className="flex items-center gap-2 min-w-0 pr-2">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--primary)] to-[var(--primary-container)] text-[var(--on-primary)] flex items-center justify-center font-bold text-sm shadow-sm shrink-0">
+              D
+            </div>
+            <span className="font-heading text-lg font-bold text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] truncate">
+              DebtSync
             </span>
-          )}
-        </div>
+            {inAdminMode && (
+              <span className="px-1.5 py-0.5 rounded-md text-[9px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)] shrink-0">
+                ADMIN
+              </span>
+            )}
+          </div>
 
-        <div className="flex items-center gap-1.5">
-          <NotificationCenter />
-          <ThemeToggle />
-          <button
-            ref={triggerMobileRef}
-            type="button"
-            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-            className="w-11 h-11 -mr-1.5 flex items-center justify-center rounded-full cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]/40"
-            title="Profile menu"
-            aria-label="Open profile menu"
-            aria-expanded={isDropdownOpen}
-          >
-            <Avatar src={avatarUrl} name={userName || userEmail} size="sm" className="rounded-full" />
-          </button>
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+            <NotificationCenter />
+            <ThemeToggle compact />
+            <button
+              ref={triggerMobileRef}
+              type="button"
+              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+              className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-full cursor-pointer shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]/40 active:scale-95 transition-transform"
+              title="Profile menu"
+              aria-label="Open profile menu"
+              aria-expanded={isDropdownOpen}
+            >
+              <Avatar src={avatarUrl} name={userName || userEmail} size="sm" className="rounded-full ring-2 ring-[var(--outline-variant)]/30" />
+            </button>
+          </div>
         </div>
       </header>
 
@@ -174,7 +176,7 @@ export function TopBar({
       {isDropdownOpen && (
         <div
           ref={dropdownRef}
-          className="fixed right-3 top-[calc(3.5rem+env(safe-area-inset-top,0px)+0.5rem)] md:right-8 md:top-16 w-[min(18rem,calc(100vw-1.5rem))] max-h-[calc(100dvh-6rem)] overflow-y-auto overscroll-contain bg-[var(--surface-container-lowest)] rounded-2xl p-3.5 border border-[var(--outline-variant)]/30 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150 space-y-3"
+          className="fixed right-[max(0.75rem,env(safe-area-inset-right,0px))] top-[calc(3.5rem+env(safe-area-inset-top,0px)+0.5rem)] md:right-8 md:top-16 w-[min(18rem,calc(100vw-1.5rem))] max-h-[calc(100dvh-6rem)] overflow-y-auto overscroll-contain bg-[var(--surface-container-lowest)] rounded-2xl p-3.5 border border-[var(--outline-variant)]/30 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150 space-y-3"
           role="menu"
         >
           {/* User Details */}

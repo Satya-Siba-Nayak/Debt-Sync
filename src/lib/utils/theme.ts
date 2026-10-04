@@ -107,7 +107,18 @@ export function applyTheme(theme: Theme) {
     root.style.colorScheme = 'light';
   }
 
-  // 4. Broadcast to all ThemeToggle instances and charts across the UI
+  // 4. Update mobile browser chrome theme-color dynamically
+  try {
+    let themeMeta = document.querySelector('meta[name="theme-color"]');
+    if (!themeMeta) {
+      themeMeta = document.createElement('meta');
+      themeMeta.setAttribute('name', 'theme-color');
+      document.head.appendChild(themeMeta);
+    }
+    themeMeta.setAttribute('content', isDark ? '#0d1117' : '#f8f9ff');
+  } catch (_) {}
+
+  // 5. Broadcast to all ThemeToggle instances and charts across the UI
   try {
     window.dispatchEvent(
       new CustomEvent('debtsync:theme_change', {

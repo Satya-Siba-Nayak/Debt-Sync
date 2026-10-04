@@ -3,13 +3,23 @@
 import { useEffect, useState } from 'react';
 import { applyTheme, getStoredTheme, Theme } from '@/lib/utils/theme';
 
-export function ThemeToggle() {
+interface ThemeToggleProps {
+  compact?: boolean;
+}
+
+export function ThemeToggle({ compact = false }: ThemeToggleProps) {
   const [currentTheme, setCurrentTheme] = useState<Theme>(() => getStoredTheme());
+  const [isSystemDark, setIsSystemDark] = useState<boolean>(false);
 
   useEffect(() => {
     const stored = getStoredTheme();
     setCurrentTheme(stored);
     applyTheme(stored);
+
+    // Initial check for system dark
+    if (typeof window !== 'undefined') {
+      setIsSystemDark(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    }
 
     // Listen for theme updates triggered from other ThemeToggle instances or settings
     const handleThemeChange = (e: any) => {
@@ -21,7 +31,8 @@ export function ThemeToggle() {
 
     // Listen for OS system theme changes
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const handleMediaChange = () => {
+    const handleMediaChange = (e: MediaQueryListEvent) => {
+      setIsSystemDark(e.matches);
       if (getStoredTheme() === 'system') {
         applyTheme('system');
       }
@@ -38,6 +49,24 @@ export function ThemeToggle() {
     setCurrentTheme(theme);
     applyTheme(theme);
   };
+
+  const effectiveIsDark = currentTheme === 'dark' || (currentTheme === 'system' && isSystemDark);
+
+  if (compact) {
+    return (
+      <button
+        type="button"
+        onClick={() => handleToggle(effectiveIsDark ? 'light' : 'dark')}
+        className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors cursor-pointer shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]/40 active:scale-90"
+        title={effectiveIsDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+        aria-label="Toggle theme"
+      >
+        <span className="material-symbols-outlined text-[20px]">
+          {effectiveIsDark ? 'light_mode' : 'dark_mode'}
+        </span>
+      </button>
+    );
+  }
 
   return (
     <div className="flex items-center bg-[var(--surface-container-high)] p-1 rounded-lg border border-[var(--outline-variant)]/30 text-xs">

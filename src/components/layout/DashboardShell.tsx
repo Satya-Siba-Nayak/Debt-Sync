@@ -112,7 +112,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   }, [router]);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[var(--background)] text-[var(--on-background)] font-body-md">
+    <div className="flex h-[100dvh] max-h-[100dvh] w-full max-w-full overflow-hidden bg-[var(--background)] text-[var(--on-background)] font-body-md">
       {/* Desktop Sidebar */}
       <Sidebar
         isAdmin={userProfile?.is_admin}
@@ -123,7 +123,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col md:ml-60 h-screen overflow-y-auto pb-24 md:pb-8">
+      <div className="flex-1 flex flex-col md:ml-60 h-[100dvh] max-h-[100dvh] overflow-y-auto overflow-x-hidden min-w-0 max-w-full pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] md:pb-8">
         <TopBar
           userId={userProfile?.id}
           userName={userProfile?.full_name}
@@ -137,7 +137,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           }}
         />
 
-        <main className="flex-1 p-4 md:p-8 max-w-7xl mx-auto w-full">
+        <main className="flex-1 p-3.5 sm:p-4 md:p-8 max-w-7xl mx-auto w-full min-w-0">
           {children}
         </main>
       </div>

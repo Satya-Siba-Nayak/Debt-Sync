@@ -275,7 +275,7 @@ export function CashflowChart({
   }, [viewMode, projDays, cashflowPeriod, growthData, cashflowData, currency, themeKey]);
 
   return (
-    <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 md:p-8 border border-[var(--outline-variant)]/30 flex flex-col h-[400px] shadow-sm">
+    <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-4 sm:p-6 md:p-8 border border-[var(--outline-variant)]/30 flex flex-col h-[400px] shadow-sm overflow-hidden">
       {/* Header with Title, Mode Switcher & Timeframe Buttons */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <div>
@@ -297,7 +297,7 @@ export function CashflowChart({
           </p>
         </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 self-start sm:self-auto">
           {/* Mode Selector */}
           <div className="flex bg-[var(--surface-container)] p-0.5 rounded-xl border border-[var(--outline-variant)]/20">
             <button
