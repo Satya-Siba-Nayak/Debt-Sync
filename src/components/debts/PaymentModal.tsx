@@ -65,14 +65,24 @@ export function PaymentModal({
     setAmountStr(val > 0 ? String(val) : '');
   };
 
-  // Generate UPI deeplink whenever amount or lender UPI changes
+  // Generate standard NPCI compliant UPI deeplinks
   const upiLink = lenderProfile?.upi_id
     ? generateUPILink(
         lenderProfile.upi_id,
         lenderProfile.full_name || 'Lender',
         amount > 0 ? amount : undefined,
         debt.currency || 'INR',
-        `Repayment for Debt #${debt.id.slice(0, 6)}`
+        `DebtSync Repayment ${debt.id.slice(0, 6)}`
+      )
+    : '';
+
+  const upiLinkWithoutAmount = lenderProfile?.upi_id
+    ? generateUPILink(
+        lenderProfile.upi_id,
+        lenderProfile.full_name || 'Lender',
+        undefined,
+        debt.currency || 'INR',
+        `DebtSync Repayment ${debt.id.slice(0, 6)}`
       )
     : '';
 
@@ -374,23 +384,40 @@ export function PaymentModal({
             </div>
 
             {/* UPI Deeplink CTA & QR Toggle */}
-            <div className="flex gap-2 pt-1">
-              <a
-                href={upiLink}
-                className="flex-1 py-2 px-3 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold text-center flex items-center justify-center gap-1.5 hover:brightness-110 active:scale-[0.98] transition-all shadow-xs"
-              >
-                <span className="material-symbols-outlined text-[16px]">open_in_new</span>
-                <span>Pay via {detectedLenderApp.isKnownApp ? detectedLenderApp.name : 'UPI App'}</span>
-              </a>
+            <div className="flex flex-col gap-2 pt-1">
+              <div className="flex gap-2">
+                <a
+                  href={upiLink}
+                  className="flex-1 py-2 px-3 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold text-center flex items-center justify-center gap-1.5 hover:brightness-110 active:scale-[0.98] transition-all shadow-xs"
+                >
+                  <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                  <span>Pay {amount > 0 ? formatCurrency(amount, debt.currency || 'inr') : ''} via {detectedLenderApp.isKnownApp ? detectedLenderApp.name : 'UPI App'}</span>
+                </a>
 
-              <button
-                type="button"
-                onClick={() => setShowQrCode(!showQrCode)}
-                className="py-2 px-3 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-xs font-semibold flex items-center gap-1.5 hover:bg-[var(--surface-container)] transition-colors cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[16px]">qr_code</span>
-                <span>{showQrCode ? 'Hide QR' : 'Show QR'}</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setShowQrCode(!showQrCode)}
+                  className="py-2 px-3 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-xs font-semibold flex items-center gap-1.5 hover:bg-[var(--surface-container)] transition-colors cursor-pointer shrink-0"
+                >
+                  <span className="material-symbols-outlined text-[16px]">qr_code</span>
+                  <span>{showQrCode ? 'Hide QR' : 'Show QR'}</span>
+                </button>
+              </div>
+
+              {/* Bank Intent Compatibility Fallback */}
+              {upiLinkWithoutAmount && (
+                <div className="flex items-center justify-between text-[11px] font-mono text-[var(--on-surface-variant)] px-1 pt-0.5">
+                  <span className="truncate">If bank blocks pre-filled amount:</span>
+                  <a
+                    href={upiLinkWithoutAmount}
+                    className="text-[var(--primary)] hover:underline font-bold flex items-center gap-0.5 ml-1 shrink-0"
+                    title="Open app directly without pre-filled amount"
+                  >
+                    <span>Open App (Manual Amt)</span>
+                    <span className="material-symbols-outlined text-[12px]">launch</span>
+                  </a>
+                </div>
+              )}
             </div>
 
             {/* Generated QR Code View */}

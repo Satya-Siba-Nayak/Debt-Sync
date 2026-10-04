@@ -16,14 +16,14 @@ export function isValidUPIId(upiId: string): boolean {
 }
 
 /**
- * Generate a UPI deeplink URL.
+ * Generate a compliant, standard NPCI P2P UPI deeplink URL.
  *
  * @param upiId - Payee's UPI VPA (e.g. "satya@upi")
  * @param payeeName - Payee's display name
- * @param amount - Payment amount (optional, can be left for user to fill)
+ * @param amount - Payment amount (optional, formatted to 2 decimals)
  * @param currency - Currency code (default: INR)
- * @param transactionNote - Payment note/reference
- * @returns UPI deeplink string (e.g. "upi://pay?pa=satya@upi&pn=Satya&am=500.00&cu=INR&tn=DebtSync Payment")
+ * @param transactionNote - Payment note/reference (clean alphanumeric and spaces)
+ * @returns Standard NPCI UPI deeplink string
  */
 export function generateUPILink(
   upiId: string,
@@ -32,21 +32,48 @@ export function generateUPILink(
   currency: string = 'INR',
   transactionNote?: string
 ): string {
-  const params = new URLSearchParams();
-  params.set('pa', upiId.trim());
-  params.set('pn', payeeName.trim());
-  if (amount && amount > 0) {
-    params.set('am', amount.toFixed(2));
-  }
-  params.set('cu', currency.toUpperCase());
-  if (transactionNote) {
-    params.set('tn', transactionNote.trim().substring(0, 50));
-  }
-  // Set merchant code for person-to-person transfers
-  params.set('mc', '0000');
-  params.set('mode', '02'); // UPI Collect mode
+  if (!upiId) return '';
 
-  return `upi://pay?${params.toString()}`;
+  const cleanVpa = upiId.trim();
+  // Clean payee name (alphanumeric and spaces only, max 50 chars)
+  const cleanName = (payeeName || 'Counterparty')
+    .replace(/[^a-zA-Z0-9\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .substring(0, 50);
+
+  const parts: string[] = [];
+  parts.push(`pa=${encodeURIComponent(cleanVpa)}`);
+  if (cleanName) {
+    parts.push(`pn=${encodeURIComponent(cleanName)}`);
+  }
+
+  if (amount && amount > 0) {
+    parts.push(`am=${amount.toFixed(2)}`);
+  }
+
+  parts.push(`cu=${encodeURIComponent(currency.toUpperCase() || 'INR')}`);
+
+  if (transactionNote) {
+    // Clean note: alphanumeric and spaces only, strictly no #, %, &, ?, /
+    const cleanNote = transactionNote
+      .replace(/[^a-zA-Z0-9\s]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .substring(0, 50);
+
+    if (cleanNote) {
+      parts.push(`tn=${encodeURIComponent(cleanNote)}`);
+    }
+  }
+
+  // CRITICAL NPCI P2P RULE:
+  // Strictly omit 'mc' (Merchant Category Code) and 'mode' (Collect/Mandate).
+  // Including mc='0000' or mode='02' causes bank switches (SBI, HDFC, ICICI, etc.)
+  // to reject the transaction with "Declined by bank" or "Invalid Merchant / Unsigned Mandate"
+  // because personal savings accounts cannot process merchant codes or unsigned mandates.
+
+  return `upi://pay?${parts.join('&')}`;
 }
 
 import QRCode from 'qrcode';
