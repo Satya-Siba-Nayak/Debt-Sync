@@ -26,7 +26,7 @@ import {
 } from '@/lib/utils/avatar-storage';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { triggerPWAInstallPrompt } from '@/components/ui/PWAInstallPrompt';
-import { isValidUPIId, detectUPIApp } from '@/lib/utils/upi-link';
+import { isValidUPIId, detectUPIApp, isValidIFSC, isValidBankAccount, normalizeIFSC } from '@/lib/utils/upi-link';
 
 export default function SettingsPage() {
   const supabase = createClient();
@@ -48,6 +48,12 @@ export default function SettingsPage() {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [upiId, setUpiId] = useState('');
+  const [preferredRepaymentMethod, setPreferredRepaymentMethod] = useState<'upi' | 'bank_transfer'>('upi');
+  const [bankName, setBankName] = useState('');
+  const [bankAccountNumber, setBankAccountNumber] = useState('');
+  const [bankIfsc, setBankIfsc] = useState('');
+  const [bankAccountHolderName, setBankAccountHolderName] = useState('');
+  const [showAccountNumber, setShowAccountNumber] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [recentCustomAvatars, setRecentCustomAvatars] = useState<string[]>([]);
   const [currency, setCurrency] = useState('inr');
@@ -86,6 +92,11 @@ export default function SettingsPage() {
     fullName: string;
     phone: string;
     upiId: string;
+    preferredRepaymentMethod: 'upi' | 'bank_transfer';
+    bankName: string;
+    bankAccountNumber: string;
+    bankIfsc: string;
+    bankAccountHolderName: string;
     avatarUrl: string | null;
     currency: string;
     defaultCountryCode: string;
@@ -100,6 +111,11 @@ export default function SettingsPage() {
       fullName !== initialSettings.fullName ||
       phone !== initialSettings.phone ||
       upiId !== initialSettings.upiId ||
+      preferredRepaymentMethod !== initialSettings.preferredRepaymentMethod ||
+      bankName !== initialSettings.bankName ||
+      bankAccountNumber !== initialSettings.bankAccountNumber ||
+      bankIfsc !== initialSettings.bankIfsc ||
+      bankAccountHolderName !== initialSettings.bankAccountHolderName ||
       avatarUrl !== initialSettings.avatarUrl ||
       currency !== initialSettings.currency ||
       defaultCountryCode !== initialSettings.defaultCountryCode ||
@@ -114,6 +130,11 @@ export default function SettingsPage() {
     fullName,
     phone,
     upiId,
+    preferredRepaymentMethod,
+    bankName,
+    bankAccountNumber,
+    bankIfsc,
+    bankAccountHolderName,
     avatarUrl,
     currency,
     defaultCountryCode,
@@ -131,6 +152,11 @@ export default function SettingsPage() {
     setFullName(initialSettings.fullName);
     setPhone(initialSettings.phone);
     setUpiId(initialSettings.upiId);
+    setPreferredRepaymentMethod(initialSettings.preferredRepaymentMethod);
+    setBankName(initialSettings.bankName);
+    setBankAccountNumber(initialSettings.bankAccountNumber);
+    setBankIfsc(initialSettings.bankIfsc);
+    setBankAccountHolderName(initialSettings.bankAccountHolderName);
     setAvatarUrl(initialSettings.avatarUrl);
     setCurrency(initialSettings.currency);
     setDefaultCountryCode(initialSettings.defaultCountryCode);
@@ -185,6 +211,11 @@ export default function SettingsPage() {
         fullName,
         phone,
         upiId,
+        preferredRepaymentMethod,
+        bankName,
+        bankAccountNumber,
+        bankIfsc,
+        bankAccountHolderName,
         avatarUrl,
         currency,
         defaultCountryCode,
@@ -205,6 +236,11 @@ export default function SettingsPage() {
     fullName,
     phone,
     upiId,
+    preferredRepaymentMethod,
+    bankName,
+    bankAccountNumber,
+    bankIfsc,
+    bankAccountHolderName,
     avatarUrl,
     currency,
     defaultCountryCode,
@@ -320,7 +356,7 @@ export default function SettingsPage() {
         let profile: any = null;
         const { data: pData, error: pErr } = await supabase
           .from('profiles')
-          .select('full_name, phone, secondary_emails, avatar_url, recent_custom_avatars, upi_id, is_admin')
+          .select('full_name, phone, secondary_emails, avatar_url, recent_custom_avatars, upi_id, is_admin, preferred_repayment_method, bank_name, bank_account_number, bank_ifsc, bank_account_holder_name')
           .eq('id', user.id)
           .single();
 
@@ -330,7 +366,7 @@ export default function SettingsPage() {
           // Graceful fallback if columns are not yet migrated
           const { data: fallbackData } = await supabase
             .from('profiles')
-            .select('full_name, phone, secondary_emails, avatar_url')
+            .select('full_name, phone, secondary_emails, avatar_url, upi_id, is_admin')
             .eq('id', user.id)
             .single();
           profile = fallbackData;
@@ -340,6 +376,11 @@ export default function SettingsPage() {
           setFullName(profile.full_name || '');
           setPhone(profile.phone || '');
           setUpiId(profile.upi_id || '');
+          setPreferredRepaymentMethod(profile.preferred_repayment_method || 'upi');
+          setBankName(profile.bank_name || '');
+          setBankAccountNumber(profile.bank_account_number || '');
+          setBankIfsc(profile.bank_ifsc || '');
+          setBankAccountHolderName(profile.bank_account_holder_name || profile.full_name || '');
           setIsAdmin(Boolean(profile.is_admin));
           setSecondaryEmails(profile.secondary_emails || []);
           setAvatarUrl(profile.avatar_url || null);
@@ -451,6 +492,11 @@ export default function SettingsPage() {
           fullName: profile?.full_name || '',
           phone: profile?.phone || '',
           upiId: profile?.upi_id || '',
+          preferredRepaymentMethod: profile?.preferred_repayment_method || 'upi',
+          bankName: profile?.bank_name || '',
+          bankAccountNumber: profile?.bank_account_number || '',
+          bankIfsc: profile?.bank_ifsc || '',
+          bankAccountHolderName: profile?.bank_account_holder_name || profile?.full_name || '',
           avatarUrl: profile?.avatar_url || null,
           currency: userSettings?.default_currency || 'inr',
           defaultCountryCode: userSettings?.default_country_code || localCode || '+91',
@@ -469,6 +515,11 @@ export default function SettingsPage() {
               if (draft.fullName !== undefined) setFullName(draft.fullName);
               if (draft.phone !== undefined) setPhone(draft.phone);
               if (draft.upiId !== undefined) setUpiId(draft.upiId);
+              if (draft.preferredRepaymentMethod !== undefined) setPreferredRepaymentMethod(draft.preferredRepaymentMethod);
+              if (draft.bankName !== undefined) setBankName(draft.bankName);
+              if (draft.bankAccountNumber !== undefined) setBankAccountNumber(draft.bankAccountNumber);
+              if (draft.bankIfsc !== undefined) setBankIfsc(draft.bankIfsc);
+              if (draft.bankAccountHolderName !== undefined) setBankAccountHolderName(draft.bankAccountHolderName);
               if (draft.avatarUrl !== undefined) setAvatarUrl(draft.avatarUrl);
               if (draft.currency !== undefined) setCurrency(draft.currency);
               if (draft.defaultCountryCode !== undefined) setDefaultCountryCode(draft.defaultCountryCode);
@@ -543,32 +594,57 @@ export default function SettingsPage() {
         throw new Error('Please enter a valid UPI ID (e.g. username@okhdfcbank, name@upi, 9876543210@paytm)');
       }
 
+      const cleanIfsc = normalizeIFSC(bankIfsc.trim());
+      if (cleanIfsc && !isValidIFSC(cleanIfsc)) {
+        throw new Error('Please enter a valid 11-character Indian IFSC code (e.g. HDFC0001234, SBIN0000456)');
+      }
+
+      const cleanBankAcc = bankAccountNumber.trim().replace(/[\s-]/g, '');
+      if (cleanBankAcc && !isValidBankAccount(cleanBankAcc)) {
+        throw new Error('Please enter a valid Bank Account Number (9 to 18 digits)');
+      }
+
+      if (preferredRepaymentMethod === 'bank_transfer' && !cleanBankAcc) {
+        throw new Error('You selected Bank Account as your preferred receiving method. Please enter your Bank Account Number.');
+      }
+
       // Update profile
       const profilePayload: any = {
         full_name: fullName.trim(),
         phone: phone.trim() || null,
         upi_id: upiId.trim() || null,
+        preferred_repayment_method: preferredRepaymentMethod,
+        bank_name: bankName.trim() || null,
+        bank_account_number: cleanBankAcc || null,
+        bank_ifsc: cleanIfsc || null,
+        bank_account_holder_name: bankAccountHolderName.trim() || fullName.trim() || null,
         secondary_emails: secondaryEmails,
         avatar_url: avatarUrl,
         recent_custom_avatars: recentCustomAvatars,
       };
 
-      const { error: profileError } = await supabase
+      let { error: profileError } = await supabase
         .from('profiles')
         .update(profilePayload)
         .eq('id', user.id);
 
       if (profileError) {
-        if (profileError.message?.includes('recent_custom_avatars') || profileError.message?.includes('upi_id')) {
-          delete profilePayload.recent_custom_avatars;
-          delete profilePayload.upi_id;
-          await supabase.from('profiles').update(profilePayload).eq('id', user.id);
-        } else {
-          throw profileError;
-        }
+        // Fallback retry if newer columns aren't in database yet
+        delete profilePayload.preferred_repayment_method;
+        delete profilePayload.bank_name;
+        delete profilePayload.bank_account_number;
+        delete profilePayload.bank_ifsc;
+        delete profilePayload.bank_account_holder_name;
+        delete profilePayload.recent_custom_avatars;
+        delete profilePayload.upi_id;
+        const retryRes = await supabase.from('profiles').update(profilePayload).eq('id', user.id);
+        profileError = retryRes.error;
       }
 
+      if (profileError) throw profileError;
+
       if (typeof window !== 'undefined') {
+        localStorage.setItem('debtsync_preferred_repayment_method', preferredRepaymentMethod);
         window.dispatchEvent(
           new CustomEvent('debtsync:user_updated', {
             detail: {
@@ -616,6 +692,7 @@ export default function SettingsPage() {
         default_interest_type: defaultInterestType,
         default_interest_rate: defaultInterestType === 'none' ? 0 : defaultInterestRate,
         default_compound_freq: defaultCompoundFreq,
+        preferred_repayment_method: preferredRepaymentMethod,
         updated_at: new Date().toISOString(),
       };
 
@@ -625,6 +702,7 @@ export default function SettingsPage() {
 
       if (settingsError) {
         // Fallback retry if newer columns aren't in database yet
+        delete settingsPayload.preferred_repayment_method;
         delete settingsPayload.default_interest_type;
         delete settingsPayload.default_interest_rate;
         delete settingsPayload.default_compound_freq;
@@ -648,6 +726,11 @@ export default function SettingsPage() {
         fullName,
         phone,
         upiId,
+        preferredRepaymentMethod,
+        bankName,
+        bankAccountNumber: cleanBankAcc,
+        bankIfsc: cleanIfsc,
+        bankAccountHolderName: bankAccountHolderName.trim() || fullName.trim(),
         avatarUrl,
         currency,
         defaultCountryCode,
@@ -1094,47 +1177,250 @@ export default function SettingsPage() {
             />
           </div>
 
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="font-mono text-xs text-[var(--on-surface-variant)] font-semibold flex items-center gap-1.5">
-                <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">qr_code_2</span>
-                <span>UPI ID / VPA</span>
-                <span className="normal-case text-[var(--outline)] text-[11px] font-normal">(for receiving direct repayments &amp; QR)</span>
-              </label>
-            </div>
-            <input
-              type="text"
-              value={upiId}
-              onChange={(e) => setUpiId(e.target.value)}
-              placeholder="e.g. yourname@okhdfcbank, mobile@ybl, username@paytm"
-              className="w-full px-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-sm font-mono outline-none focus:border-[var(--primary)]"
-            />
+          </div>
 
-            {/* Realtime UPI App Detection */}
-            {upiId.trim().includes('@') && (() => {
-              const detected = detectUPIApp(upiId.trim());
-              return detected.isKnownApp ? (
-                <div className="mt-2 p-2 rounded-xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/20 flex items-center justify-between text-xs font-mono animate-in fade-in duration-150">
-                  <div className="flex items-center gap-1.5">
-                    <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">{detected.icon}</span>
-                    <span className="text-[var(--on-surface-variant)]">Detected Provider:</span>
-                    <span className="font-bold text-[var(--on-surface)]">{detected.name}</span>
-                    {detected.bank && (
-                      <span className="text-[11px] text-[var(--outline)]">({detected.bank})</span>
+          {/* Repayment Receiving Preferences */}
+          <div className="pt-6 border-t border-[var(--outline-variant)]/20 space-y-4">
+            <div>
+              <div className="flex items-center justify-between">
+                <h3 className="font-mono text-xs uppercase tracking-wider font-semibold text-[var(--on-surface-variant)] flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">payments</span>
+                  <span>Repayment Receiving Preferences</span>
+                </h3>
+                <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md bg-[var(--primary)]/10 text-[var(--primary)] border border-[var(--primary)]/20">
+                  {preferredRepaymentMethod === 'upi' ? 'UPI & QR Mode' : 'Bank Account Mode'}
+                </span>
+              </div>
+              <p className="text-[11px] font-mono text-[var(--on-surface-variant)] mt-1">
+                Configure how you prefer borrowers to settle debts with you. DebtSync dynamically presents your preferred settlement destination.
+              </p>
+            </div>
+
+            {/* Mode Selector Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setPreferredRepaymentMethod('upi')}
+                className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2.5 ${
+                  preferredRepaymentMethod === 'upi'
+                    ? 'bg-[var(--primary)]/10 border-[var(--primary)] text-[var(--on-surface)] shadow-xs ring-1 ring-[var(--primary)]/30'
+                    : 'bg-[var(--surface)] hover:bg-[var(--surface-container)] border-[var(--outline-variant)]/30 text-[var(--on-surface-variant)]'
+                }`}
+              >
+                <div className="flex items-center justify-between w-full">
+                  <div className="flex items-center gap-2">
+                    <span className={`material-symbols-outlined text-[20px] ${
+                      preferredRepaymentMethod === 'upi' ? 'text-[var(--primary)]' : 'text-[var(--outline)]'
+                    }`}>
+                      qr_code_2
+                    </span>
+                    <span className="font-mono text-xs font-bold text-[var(--on-surface)]">
+                      UPI &amp; QR Code
+                    </span>
+                  </div>
+                  {preferredRepaymentMethod === 'upi' && (
+                    <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded-md bg-[var(--primary)] text-[var(--on-primary)] shrink-0">
+                      Active
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] font-mono text-[var(--on-surface-variant)] leading-relaxed">
+                  Borrowers scan your generated QR code or pay to your UPI ID via GPay, PhonePe, Paytm, or Slice.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPreferredRepaymentMethod('bank_transfer')}
+                className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2.5 ${
+                  preferredRepaymentMethod === 'bank_transfer'
+                    ? 'bg-[var(--primary)]/10 border-[var(--primary)] text-[var(--on-surface)] shadow-xs ring-1 ring-[var(--primary)]/30'
+                    : 'bg-[var(--surface)] hover:bg-[var(--surface-container)] border-[var(--outline-variant)]/30 text-[var(--on-surface-variant)]'
+                }`}
+              >
+                <div className="flex items-center justify-between w-full">
+                  <div className="flex items-center gap-2">
+                    <span className={`material-symbols-outlined text-[20px] ${
+                      preferredRepaymentMethod === 'bank_transfer' ? 'text-[var(--primary)]' : 'text-[var(--outline)]'
+                    }`}>
+                      account_balance
+                    </span>
+                    <span className="font-mono text-xs font-bold text-[var(--on-surface)]">
+                      Direct Bank Account
+                    </span>
+                  </div>
+                  {preferredRepaymentMethod === 'bank_transfer' && (
+                    <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded-md bg-[var(--primary)] text-[var(--on-primary)] shrink-0">
+                      Active
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] font-mono text-[var(--on-surface-variant)] leading-relaxed">
+                  Borrowers receive your bank name, account number, and IFSC with 1-tap copy buttons. QR code is hidden.
+                </p>
+              </button>
+            </div>
+
+            {/* UPI ID Config Section */}
+            <div className={`p-4 rounded-2xl border space-y-3 transition-all ${
+              preferredRepaymentMethod === 'upi'
+                ? 'bg-[var(--surface-container-lowest)] border-[var(--primary)]/35 shadow-2xs'
+                : 'bg-[var(--surface-container-lowest)]/50 border-[var(--outline-variant)]/20'
+            }`}>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <label className="font-mono text-xs text-[var(--on-surface)] font-semibold flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">qr_code_2</span>
+                  <span>UPI ID / VPA</span>
+                  {preferredRepaymentMethod !== 'upi' && (
+                    <span className="text-[10px] text-[var(--outline)] font-normal">(Optional Backup)</span>
+                  )}
+                </label>
+                {preferredRepaymentMethod === 'upi' && (
+                  <span className="text-[10px] font-mono font-semibold text-[var(--primary)] bg-[var(--primary)]/10 px-2 py-0.5 rounded-md border border-[var(--primary)]/20">
+                    QR Generated Only If Set
+                  </span>
+                )}
+              </div>
+
+              <input
+                type="text"
+                value={upiId}
+                onChange={(e) => setUpiId(e.target.value)}
+                placeholder="e.g. yourname@okhdfcbank, mobile@ybl, username@paytm"
+                className="w-full px-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-base md:text-sm font-mono outline-none focus:border-[var(--primary)]"
+              />
+
+              {/* Realtime UPI App Detection */}
+              {upiId.trim().includes('@') && (() => {
+                const detected = detectUPIApp(upiId.trim());
+                return detected.isKnownApp ? (
+                  <div className="p-2.5 rounded-xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/20 flex items-center justify-between text-xs font-mono animate-in fade-in duration-150">
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">{detected.icon}</span>
+                      <span className="text-[var(--on-surface-variant)]">Detected Provider:</span>
+                      <span className="font-bold text-[var(--on-surface)]">{detected.name}</span>
+                      {detected.bank && (
+                        <span className="text-[11px] text-[var(--outline)]">({detected.bank})</span>
+                      )}
+                    </div>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${detected.badgeClass}`}>
+                      Auto-Detected
+                    </span>
+                  </div>
+                ) : null;
+              })()}
+
+              <p className="text-[11px] font-mono text-[var(--on-surface-variant)] leading-relaxed">
+                {preferredRepaymentMethod === 'upi'
+                  ? 'Only users who select UPI as their preferred receiving method AND have a valid UPI ID configured will have a QR code presented to borrowers.'
+                  : 'Counterparties will primarily see your bank details. If you also specify a UPI ID, they can fall back to UPI if desired.'}
+              </p>
+            </div>
+
+            {/* Bank Account Config Section */}
+            <div className={`p-4 rounded-2xl border space-y-3.5 transition-all ${
+              preferredRepaymentMethod === 'bank_transfer'
+                ? 'bg-[var(--surface-container-lowest)] border-[var(--primary)]/35 shadow-2xs'
+                : 'bg-[var(--surface-container-lowest)]/50 border-[var(--outline-variant)]/20'
+            }`}>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <label className="font-mono text-xs text-[var(--on-surface)] font-semibold flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">account_balance</span>
+                  <span>Bank Account Details</span>
+                  {preferredRepaymentMethod !== 'bank_transfer' && (
+                    <span className="text-[10px] text-[var(--outline)] font-normal">(Optional Backup)</span>
+                  )}
+                </label>
+                {preferredRepaymentMethod === 'bank_transfer' && (
+                  <span className="text-[10px] font-mono font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                    Presented to Borrowers
+                  </span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-mono text-[11px] text-[var(--on-surface-variant)] block mb-1">
+                    Account Holder Name
+                  </label>
+                  <input
+                    type="text"
+                    value={bankAccountHolderName}
+                    onChange={(e) => setBankAccountHolderName(e.target.value)}
+                    placeholder={fullName || 'Name as on bank passbook'}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-base md:text-sm font-mono outline-none focus:border-[var(--primary)]"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-mono text-[11px] text-[var(--on-surface-variant)] block mb-1">
+                    Bank Name
+                  </label>
+                  <input
+                    type="text"
+                    value={bankName}
+                    onChange={(e) => setBankName(e.target.value)}
+                    placeholder="e.g. HDFC Bank, SBI, ICICI Bank"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-base md:text-sm font-mono outline-none focus:border-[var(--primary)]"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-mono text-[11px] text-[var(--on-surface-variant)]">
+                      Account Number
+                    </label>
+                    {bankAccountNumber && (
+                      <button
+                        type="button"
+                        onClick={() => setShowAccountNumber(!showAccountNumber)}
+                        className="text-[10px] font-mono text-[var(--primary)] hover:underline flex items-center gap-0.5 cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[13px]">
+                          {showAccountNumber ? 'visibility_off' : 'visibility'}
+                        </span>
+                        <span>{showAccountNumber ? 'Mask' : 'Reveal'}</span>
+                      </button>
                     )}
                   </div>
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${detected.badgeClass}`}>
-                    Auto-Detected
-                  </span>
+                  <input
+                    type={showAccountNumber ? 'text' : 'password'}
+                    value={bankAccountNumber}
+                    onChange={(e) => setBankAccountNumber(e.target.value.replace(/[^\d]/g, ''))}
+                    placeholder="9 to 18 digits numeric"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-base md:text-sm font-mono outline-none focus:border-[var(--primary)]"
+                  />
                 </div>
-              ) : null;
-            })()}
 
-            <p className="text-[11px] font-mono text-[var(--on-surface-variant)] mt-1.5 leading-relaxed">
-              Google Pay, PhonePe, Paytm, and BHIM all run on the Unified Payments Interface (UPI). Once saved, borrowers can pay you using any UPI app or scan your generated QR code.
-            </p>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-mono text-[11px] text-[var(--on-surface-variant)]">
+                      IFSC Code
+                    </label>
+                    {bankIfsc && (
+                      <span className={`text-[10px] font-mono font-semibold ${
+                        isValidIFSC(bankIfsc) ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'
+                      }`}>
+                        {isValidIFSC(bankIfsc) ? '✓ Valid IFSC' : '11 chars (e.g. HDFC0001234)'}
+                      </span>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    value={bankIfsc}
+                    onChange={(e) => setBankIfsc(normalizeIFSC(e.target.value))}
+                    placeholder="e.g. HDFC0001234, SBIN0000456"
+                    maxLength={11}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-base md:text-sm font-mono uppercase outline-none focus:border-[var(--primary)]"
+                  />
+                </div>
+              </div>
+
+              <p className="text-[11px] font-mono text-[var(--on-surface-variant)] leading-relaxed">
+                When Bank Account is selected, borrowers will be presented with your verified bank details and 1-tap copy buttons. No QR code will be generated.
+              </p>
+            </div>
           </div>
-        </div>
 
         {/* Preferences */}
         <div className="pt-6 border-t border-[var(--outline-variant)]/20 space-y-4">

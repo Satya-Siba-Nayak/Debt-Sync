@@ -5,6 +5,11 @@ export type Profile = {
   phone: string | null;
   avatar_url: string | null;
   upi_id: string | null;
+  preferred_repayment_method?: 'upi' | 'bank_transfer' | null;
+  bank_name?: string | null;
+  bank_account_number?: string | null;
+  bank_ifsc?: string | null;
+  bank_account_holder_name?: string | null;
   is_shadow: boolean;
   is_admin: boolean;
   is_isolated?: boolean;
@@ -25,6 +30,7 @@ export type UserSettings = {
   default_interest_type?: 'none' | 'simple' | 'compound';
   default_interest_rate?: number;
   default_compound_freq?: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  preferred_repayment_method?: 'upi' | 'bank_transfer';
   created_at: string;
   updated_at: string;
 };

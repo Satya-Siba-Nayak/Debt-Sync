@@ -504,14 +504,54 @@ export function formatPaymentMethodDisplay(
   };
 }
 
+/**
+ * Validate an Indian Financial System Code (IFSC).
+ * Format: 4 letters (Bank code) + 0 (Reserved) + 6 alphanumeric characters (Branch code).
+ * Example: HDFC0001234, SBIN0000456, ICIC0000001
+ */
+export function isValidIFSC(ifsc?: string | null): boolean {
+  if (!ifsc || typeof ifsc !== 'string') return false;
+  const regex = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+  return regex.test(ifsc.trim().toUpperCase());
+}
+
+/**
+ * Validate an Indian Bank Account Number.
+ * Standard formats range between 9 and 18 numeric digits.
+ */
+export function isValidBankAccount(accountNumber?: string | null): boolean {
+  if (!accountNumber || typeof accountNumber !== 'string') return false;
+  const digitsOnly = accountNumber.trim().replace(/[\s-]/g, '');
+  return /^\d{9,18}$/.test(digitsOnly);
+}
+
+/**
+ * Normalizes an IFSC string: uppercase, letters and digits only, max 11 chars.
+ */
+export function normalizeIFSC(val: string): string {
+  return (val || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 11);
+}
+
+/**
+ * Masks a bank account number for secure preview.
+ * Example: "123456789012" -> "•••• •••• 9012"
+ */
+export function maskBankAccount(accountNumber?: string | null): string {
+  if (!accountNumber) return '';
+  const clean = accountNumber.trim().replace(/[\s-]/g, '');
+  if (clean.length <= 4) return clean;
+  const last4 = clean.slice(-4);
+  return `•••• •••• ${last4}`;
+}
+
 export interface UPIAppLauncher {
   id: string;
   name: string;
   shortName: string;
   icon: string;
   badgeClass: string;
-  androidIntent: string;
-  iosScheme?: string;
+  androidScheme: string;
+  iosScheme: string;
   fallbackScheme: string;
 }
 
@@ -522,7 +562,7 @@ export const UPI_POPULAR_APPS: UPIAppLauncher[] = [
     shortName: 'GPay',
     icon: 'smartphone',
     badgeClass: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/25',
-    androidIntent: 'intent://#Intent;package=com.google.android.apps.nbu.paisa.user;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    androidScheme: 'gpay://',
     iosScheme: 'gpay://',
     fallbackScheme: 'gpay://',
   },
@@ -532,7 +572,7 @@ export const UPI_POPULAR_APPS: UPIAppLauncher[] = [
     shortName: 'PhonePe',
     icon: 'smartphone',
     badgeClass: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/25',
-    androidIntent: 'intent://#Intent;package=com.phonepe.app;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    androidScheme: 'phonepe://',
     iosScheme: 'phonepe://',
     fallbackScheme: 'phonepe://',
   },
@@ -542,7 +582,7 @@ export const UPI_POPULAR_APPS: UPIAppLauncher[] = [
     shortName: 'Paytm',
     icon: 'account_balance_wallet',
     badgeClass: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/25',
-    androidIntent: 'intent://#Intent;package=net.one97.paytm;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    androidScheme: 'paytmmp://',
     iosScheme: 'paytmmp://',
     fallbackScheme: 'paytmmp://',
   },
@@ -552,7 +592,7 @@ export const UPI_POPULAR_APPS: UPIAppLauncher[] = [
     shortName: 'Slice',
     icon: 'credit_card',
     badgeClass: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/25',
-    androidIntent: 'intent://#Intent;package=indwin.c3.shareapp;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    androidScheme: 'slice://',
     iosScheme: 'slice://',
     fallbackScheme: 'slice://',
   },
@@ -562,74 +602,90 @@ export const UPI_POPULAR_APPS: UPIAppLauncher[] = [
     shortName: 'BHIM',
     icon: 'qr_code_2',
     badgeClass: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25',
-    androidIntent: 'intent://#Intent;package=in.org.npci.upiapp;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    androidScheme: 'upi://',
     iosScheme: 'upi://',
     fallbackScheme: 'upi://',
   },
 ];
 
-const ALL_UPI_LAUNCHERS: Record<string, { androidIntent: string; iosScheme?: string; fallbackScheme: string }> = {
+const ALL_UPI_LAUNCHERS: Record<string, { androidScheme: string; iosScheme: string; fallbackScheme: string }> = {
   gpay: {
-    androidIntent: 'intent://#Intent;package=com.google.android.apps.nbu.paisa.user;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    androidScheme: 'gpay://',
     iosScheme: 'gpay://',
     fallbackScheme: 'gpay://',
   },
   phonepe: {
-    androidIntent: 'intent://#Intent;package=com.phonepe.app;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    androidScheme: 'phonepe://',
     iosScheme: 'phonepe://',
     fallbackScheme: 'phonepe://',
   },
   paytm: {
-    androidIntent: 'intent://#Intent;package=net.one97.paytm;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    androidScheme: 'paytmmp://',
     iosScheme: 'paytmmp://',
     fallbackScheme: 'paytmmp://',
   },
   slice: {
-    androidIntent: 'intent://#Intent;package=indwin.c3.shareapp;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    androidScheme: 'slice://',
     iosScheme: 'slice://',
     fallbackScheme: 'slice://',
   },
   bhim: {
-    androidIntent: 'intent://#Intent;package=in.org.npci.upiapp;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    androidScheme: 'upi://',
     iosScheme: 'upi://',
     fallbackScheme: 'upi://',
   },
   cred: {
-    androidIntent: 'intent://#Intent;package=com.dreamplug.androidapp;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    androidScheme: 'cred://',
     iosScheme: 'cred://',
     fallbackScheme: 'cred://',
   },
 };
 
 /**
- * Directly launches a UPI application on mobile via OS package launcher intent,
- * avoiding the browser-originated P2P `upi://pay` intent that bank switches decline.
+ * Directly launches a UPI application on mobile via registered custom URL schemes
+ * (e.g. phonepe://, gpay://, paytmmp://, slice://, upi://)
+ * avoiding the browser Play Store redirect bug caused by broken intent actions.
  */
 export function launchUPIApp(appId: string): boolean {
   if (typeof window === 'undefined') return false;
 
   const appMeta = ALL_UPI_LAUNCHERS[appId];
-  if (!appMeta) {
-    window.location.href = 'upi://';
-    return true;
-  }
-
   const ua = (navigator.userAgent || '').toLowerCase();
   const isAndroid = /android/i.test(ua);
   const isIOS = /iphone|ipad|ipod/i.test(ua);
 
-  try {
-    if (isAndroid && appMeta.androidIntent) {
-      window.location.href = appMeta.androidIntent;
-    } else if (isIOS && appMeta.iosScheme) {
-      window.location.href = appMeta.iosScheme;
+  let targetUrl = 'upi://';
+  if (appMeta) {
+    if (isAndroid) {
+      targetUrl = appMeta.androidScheme || appMeta.fallbackScheme;
+    } else if (isIOS) {
+      targetUrl = appMeta.iosScheme || appMeta.fallbackScheme;
     } else {
-      window.location.href = appMeta.fallbackScheme;
+      targetUrl = appMeta.fallbackScheme;
     }
+  }
+
+  try {
+    const link = document.createElement('a');
+    link.href = targetUrl;
+    link.rel = 'noopener noreferrer';
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => {
+      if (document.body.contains(link)) {
+        document.body.removeChild(link);
+      }
+    }, 1000);
     return true;
   } catch (err) {
-    console.error('Failed to launch UPI app:', err);
-    return false;
+    console.error('Failed to launch UPI app via anchor:', err);
+    try {
+      window.location.href = targetUrl;
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 

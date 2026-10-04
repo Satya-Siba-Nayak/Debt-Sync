@@ -19,6 +19,8 @@ import {
   UPI_POPULAR_APPS,
   launchUPIApp,
   getSortedUPIAppsForUser,
+  maskBankAccount,
+  isValidIFSC,
 } from '@/lib/utils/upi-link';
 
 interface PaymentModalProps {
@@ -37,7 +39,7 @@ export function PaymentModal({
   onPaymentRecorded,
 }: PaymentModalProps) {
   const initialDefault = round2(Math.min(currentBalance, 500));
-  const [amountStr, setAmountStr] = useState<string>(() => (initialDefault > 0 ? String(initialDefault) : ''));
+  const [amountStr, setAmountStr] = useState<string>(() => (initialDefault > 0 ? initialDefault.toFixed(2) : ''));
   const [amount, setAmount] = useState<number>(initialDefault);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('upi');
   const [transactionRef, setTransactionRef] = useState('');
@@ -47,7 +49,19 @@ export function PaymentModal({
   const [error, setError] = useState('');
   const [isLender, setIsLender] = useState(false);
   const [pendingAmount, setPendingAmount] = useState(0);
-  const [lenderProfile, setLenderProfile] = useState<{ id: string; full_name?: string; email?: string; upi_id?: string | null } | null>(null);
+  const [lenderProfile, setLenderProfile] = useState<{
+    id: string;
+    full_name?: string;
+    email?: string;
+    upi_id?: string | null;
+    preferred_repayment_method?: 'upi' | 'bank_transfer' | null;
+    bank_name?: string | null;
+    bank_account_number?: string | null;
+    bank_ifsc?: string | null;
+    bank_account_holder_name?: string | null;
+  } | null>(null);
+  const [repaymentChannel, setRepaymentChannel] = useState<'upi' | 'bank'>('upi');
+  const [showMaskedAccount, setShowMaskedAccount] = useState(false);
   const [currentUserUpiId, setCurrentUserUpiId] = useState<string | null>(null);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
   const [upiPayTab, setUpiPayTab] = useState<'qr' | 'app'>('qr');
@@ -67,15 +81,39 @@ export function PaymentModal({
     [currentUserUpiId]
   );
 
+  const hasUpi = Boolean(lenderProfile?.upi_id?.trim());
+  const hasBank = Boolean(
+    lenderProfile?.bank_account_number?.trim() ||
+    lenderProfile?.bank_ifsc?.trim()
+  );
+  const hasBothMethods = hasUpi && hasBank;
+
   const handleAmountChange = (val: string) => {
-    const sanitized = val.replace(/^0+(?=\d)/, '');
+    let sanitized = val.replace(/^0+(?=\d)/, '');
+    const parts = sanitized.split('.');
+    if (parts.length > 2) {
+      sanitized = parts[0] + '.' + parts.slice(1).join('');
+    }
+    if (parts.length === 2 && parts[1].length > 2) {
+      sanitized = parts[0] + '.' + parts[1].slice(0, 2);
+    }
     setAmountStr(sanitized);
     setAmount(parseFloat(sanitized) || 0);
   };
 
+  const handleAmountBlur = () => {
+    const parsed = parseFloat(amountStr);
+    if (!isNaN(parsed) && parsed > 0) {
+      const formatted = round2(parsed);
+      setAmount(formatted);
+      setAmountStr(formatted.toFixed(2));
+    }
+  };
+
   const setAmountUnified = (val: number) => {
-    setAmount(val);
-    setAmountStr(val > 0 ? String(val) : '');
+    const formatted = round2(val);
+    setAmount(formatted);
+    setAmountStr(formatted > 0 ? formatted.toFixed(2) : '');
   };
 
   const copyToClipboard = async (text: string, fieldId: string) => {
@@ -88,13 +126,11 @@ export function PaymentModal({
     }
   };
 
-  const handleLaunchApp = async (appId: string, appName: string) => {
+  const handleLaunchApp = (appId: string, appName: string) => {
     if (!lenderProfile?.upi_id) return;
-    await copyToClipboard(lenderProfile.upi_id, 'vpa');
-    setLaunchStatus(`Copied UPI ID! Opening ${appName}... In ${appName}, tap 'Pay to UPI ID' and paste.`);
-    setTimeout(() => {
-      launchUPIApp(appId);
-    }, 250);
+    copyToClipboard(lenderProfile.upi_id, 'vpa');
+    setLaunchStatus(`Copied UPI ID (${lenderProfile.upi_id})! Opening ${appName}... In ${appName}, tap 'Pay to UPI ID' and paste.`);
+    launchUPIApp(appId);
     setTimeout(() => {
       setLaunchStatus(null);
     }, 7000);
@@ -207,13 +243,49 @@ export function PaymentModal({
         setIsLender(userIsLender);
 
         if (!userIsLender) {
-          // Fetch lender profile to check for UPI ID and display name
-          const { data: lenderData } = await supabase
+          // Fetch lender profile to check for repayment method, UPI ID, and bank details
+          let lender: any = null;
+          const { data: lenderData, error: lErr } = await supabase
             .from('profiles')
-            .select('id, full_name, email, upi_id')
+            .select('id, full_name, email, upi_id, preferred_repayment_method, bank_name, bank_account_number, bank_ifsc, bank_account_holder_name')
             .eq('id', debt.lender_id)
             .single();
-          if (lenderData) setLenderProfile(lenderData);
+
+          if (!lErr && lenderData) {
+            lender = lenderData;
+          } else {
+            const { data: fallbackLender } = await supabase
+              .from('profiles')
+              .select('id, full_name, email, upi_id')
+              .eq('id', debt.lender_id)
+              .single();
+            lender = fallbackLender;
+          }
+
+          if (lender) {
+            setLenderProfile(lender);
+
+            const hasLenderUpi = Boolean(lender.upi_id?.trim());
+            const hasLenderBank = Boolean(
+              lender.bank_account_number?.trim() ||
+              lender.bank_ifsc?.trim()
+            );
+            const prefMethod = lender.preferred_repayment_method || 'upi';
+
+            if (prefMethod === 'bank_transfer' && hasLenderBank) {
+              setRepaymentChannel('bank');
+              setPaymentMethod('bank_transfer');
+            } else if (hasLenderUpi) {
+              setRepaymentChannel('upi');
+              setPaymentMethod('upi');
+            } else if (hasLenderBank) {
+              setRepaymentChannel('bank');
+              setPaymentMethod('bank_transfer');
+            } else {
+              setRepaymentChannel('upi');
+              setPaymentMethod('cash');
+            }
+          }
 
           // Calculate existing pending unverified payments for this debt
           const { data: debtPayments } = await supabase
@@ -292,9 +364,16 @@ export function PaymentModal({
         }
       }
 
+      const cleanRef = transactionRef.trim().replace(/[^\w\s-]/g, '').slice(0, 64);
+      const cleanNote = note.trim().slice(0, 200);
+
       // Digital payment verification check: Non-cash payments require a transaction ID / reference
-      if (paymentMethod !== 'cash' && !transactionRef.trim()) {
-        throw new Error('Please enter the transaction reference / UTR ID for verification.');
+      if (paymentMethod !== 'cash' && !cleanRef) {
+        throw new Error(
+          paymentMethod === 'bank_transfer'
+            ? 'Please enter the NEFT / IMPS / RTGS reference or UTR number for verification.'
+            : 'Please enter the UPI transaction reference / UTR ID for verification.'
+        );
       }
 
       // Record payment
@@ -303,9 +382,9 @@ export function PaymentModal({
         paid_by: user.id,
         amount: paymentAmount,
         currency: debt.currency || 'inr',
-        note: note.trim() || (isVerified ? 'Settlement payment' : 'Repayment reported'),
+        note: cleanNote || (isVerified ? 'Settlement payment' : 'Repayment reported'),
         payment_method: paymentMethod,
-        transaction_ref: paymentMethod === 'cash' ? null : transactionRef.trim(),
+        transaction_ref: paymentMethod === 'cash' ? null : cleanRef,
         is_verified: isVerified,
         verified_at: isVerified ? new Date().toISOString() : null,
         verified_by: isVerified ? user.id : null,
@@ -440,328 +519,485 @@ export function PaymentModal({
           </div>
         )}
 
-        {/* UPI Direct Pay & QR Card for Borrower */}
-        {!isLender && lenderProfile?.upi_id && (
-          <div className="p-3.5 rounded-2xl bg-gradient-to-br from-[var(--primary)]/10 via-[var(--surface-container)] to-[var(--surface-container-high)] border border-[var(--primary)]/25 space-y-3">
-            {/* Header: Title + Trust Badge */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[20px] text-[var(--primary)]">qr_code_scanner</span>
-                <span className="font-mono text-xs font-bold uppercase tracking-wider text-[var(--on-surface)]">
-                  Instant UPI Repayment
-                </span>
-              </div>
-              <span className="text-[11px] font-mono font-semibold px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-                <span className="material-symbols-outlined text-[13px]">verified</span>
-                <span>Bank Approved</span>
-              </span>
-            </div>
-
-            {/* Payee Info Bar */}
-            <div className="flex items-center justify-between text-xs font-mono bg-[var(--surface-container-lowest)] p-2.5 rounded-xl border border-[var(--outline-variant)]/20 gap-2">
-              <div className="min-w-0 flex items-center gap-1.5 flex-wrap">
-                <span className="text-[var(--on-surface-variant)] text-[11px]">Payee VPA:</span>
-                <span className="font-bold text-[var(--on-surface)] truncate">{lenderProfile.upi_id}</span>
-                {detectedLenderApp.isKnownApp && (
-                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${detectedLenderApp.badgeClass} flex items-center gap-1 shrink-0`}>
-                    <span className="material-symbols-outlined text-[12px]">{detectedLenderApp.icon}</span>
-                    <span>{detectedLenderApp.name}{detectedLenderApp.bank ? ` (${detectedLenderApp.bank})` : ''}</span>
-                  </span>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => copyToClipboard(lenderProfile.upi_id!, 'vpa')}
-                className="text-[var(--primary)] hover:underline shrink-0 ml-auto font-bold flex items-center gap-1 cursor-pointer text-xs"
-                title="Copy UPI ID"
-              >
-                <span className="material-symbols-outlined text-[14px]">
-                  {copiedField === 'vpa' ? 'check' : 'content_copy'}
-                </span>
-                <span>{copiedField === 'vpa' ? 'Copied' : 'Copy'}</span>
-              </button>
-            </div>
-
-            {/* Segmented Mode Selector: QR Code vs Pay in App */}
-            <div className="grid grid-cols-2 p-1 rounded-xl bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/20 text-xs font-mono font-bold">
-              <button
-                type="button"
-                onClick={() => setUpiPayTab('qr')}
-                className={`py-1.5 px-2 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                  upiPayTab === 'qr'
-                    ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-xs'
-                    : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
-                }`}
-              >
-                <span className="material-symbols-outlined text-[16px]">qr_code_2</span>
-                <span>Scan QR Code</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setUpiPayTab('app')}
-                className={`py-1.5 px-2 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                  upiPayTab === 'app'
-                    ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-xs'
-                    : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
-                }`}
-              >
-                <span className="material-symbols-outlined text-[16px]">open_in_new</span>
-                <span>Pay in UPI App</span>
-              </button>
-            </div>
-
-            {/* Mode 1: QR Code Scanner (100% immune to bank rejects) */}
-            {upiPayTab === 'qr' && (
-              <div className="space-y-2.5 animate-in fade-in duration-150">
-                <div className="p-3 bg-white rounded-2xl text-center shadow-sm border border-neutral-200 dark:border-neutral-800">
-                  {generatingQr ? (
-                    <div className="w-48 h-48 flex items-center justify-center mx-auto text-neutral-500 font-mono text-xs">
-                      Generating QR...
-                    </div>
-                  ) : qrCodeDataUrl ? (
-                    <div className="space-y-2">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={qrCodeDataUrl}
-                        alt="UPI Payment QR Code"
-                        className="w-48 h-48 mx-auto rounded-xl"
-                      />
-                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-neutral-100 text-neutral-800 text-[11px] font-mono font-bold">
-                        <span>Amount:</span>
-                        <span className="text-emerald-700">
-                          {formatCurrency(amount > 0 ? amount : currentBalance, debt.currency || 'inr', { showDecimals: true })}
-                        </span>
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-
-                {/* QR Actions: Save / Share for gallery scan, Copy UPI ID */}
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={handleShareOrSaveQR}
-                    className="flex-1 min-h-[44px] py-2 px-3 rounded-xl bg-[var(--surface)] border border-[var(--outline-variant)]/40 text-[var(--on-surface)] font-mono text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-[var(--surface-container)] active:scale-[0.98] transition-all cursor-pointer"
-                  >
-                    <span className="material-symbols-outlined text-[18px] text-[var(--primary)]">
-                      {copiedField === 'qr-download' ? 'check' : 'file_download'}
-                    </span>
-                    <span>{copiedField === 'qr-download' ? 'QR Saved!' : 'Save QR to Photos'}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => copyToClipboard(lenderProfile.upi_id!, 'vpa')}
-                    className="min-h-[44px] py-2 px-3.5 rounded-xl bg-[var(--surface)] border border-[var(--outline-variant)]/40 text-[var(--on-surface)] font-mono text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-[var(--surface-container)] active:scale-[0.98] transition-all cursor-pointer shrink-0"
-                  >
-                    <span className="material-symbols-outlined text-[18px] text-[var(--primary)]">
-                      {copiedField === 'vpa' ? 'check' : 'content_copy'}
-                    </span>
-                    <span>{copiedField === 'vpa' ? 'Copied' : 'Copy ID'}</span>
-                  </button>
-                </div>
-
-                {/* Quick direct launcher for user's own profile app if detected */}
-                {userPreferredApp && (
-                  <button
-                    type="button"
-                    onClick={() => handleLaunchApp(userPreferredApp.id, userPreferredApp.name)}
-                    className="w-full min-h-[44px] py-2 px-3 rounded-xl bg-[var(--primary)]/10 hover:bg-[var(--primary)]/15 border border-[var(--primary)]/30 text-[var(--primary)] font-mono text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-[0.98]"
-                  >
-                    <span className="material-symbols-outlined text-[16px]">{userPreferredApp.icon}</span>
-                    <span>Have {userPreferredApp.shortName}? Copy ID & Open {userPreferredApp.shortName} Directly</span>
-                  </button>
-                )}
-
-                <div className="p-2.5 rounded-xl bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)]/20 text-[11px] font-mono text-[var(--on-surface-variant)] space-y-1">
-                  <div className="flex items-center gap-1.5 text-[var(--on-surface)] font-semibold">
-                    <span className="material-symbols-outlined text-[14px] text-emerald-600">verified</span>
-                    <span>Guaranteed Bank Approval:</span>
-                  </div>
-                  <p className="leading-relaxed">
-                    • <strong>From another phone/laptop:</strong> Point your GPay, PhonePe, Paytm, or BHIM camera directly at this QR.
-                  </p>
-                  <p className="leading-relaxed">
-                    • <strong>On this phone:</strong> Tap &ldquo;Save QR to Photos&rdquo; above. In your UPI app, open camera scanner and tap the <strong>Gallery/Photos icon</strong> to select this QR.
-                  </p>
-                </div>
+        {/* Borrower Payment Information Card: Conditional on Lender's Preferred Repayment Method */}
+        {!isLender && (
+          <div className="space-y-2.5">
+            {/* If lender has configured both UPI and Bank Transfer, offer a channel switcher */}
+            {hasBothMethods && (
+              <div className="grid grid-cols-2 p-1 rounded-xl bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/20 text-xs font-mono font-bold">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRepaymentChannel('upi');
+                    setPaymentMethod('upi');
+                  }}
+                  className={`py-1.5 px-2 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    repaymentChannel === 'upi'
+                      ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-xs'
+                      : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[16px]">qr_code_2</span>
+                  <span>UPI &amp; QR {lenderProfile?.preferred_repayment_method === 'upi' ? '(Preferred)' : ''}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRepaymentChannel('bank');
+                    setPaymentMethod('bank_transfer');
+                  }}
+                  className={`py-1.5 px-2 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    repaymentChannel === 'bank'
+                      ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-xs'
+                      : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[16px]">account_balance</span>
+                  <span>Bank Account {lenderProfile?.preferred_repayment_method === 'bank_transfer' ? '(Preferred)' : ''}</span>
+                </button>
               </div>
             )}
 
-            {/* Mode 2: Pay in App (1-Tap Copy & Open) */}
-            {upiPayTab === 'app' && (
-              <div className="space-y-2.5 animate-in fade-in duration-150">
-                {/* Active Feedback Banner if user clicked an app */}
-                {launchStatus && (
-                  <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 font-mono text-xs flex items-center gap-2 animate-in fade-in zoom-in-95 duration-150">
-                    <span className="material-symbols-outlined text-[18px] text-emerald-600">check_circle</span>
-                    <span className="font-semibold">{launchStatus}</span>
+            {/* CHANNEL 1: UPI & QR Code (ONLY rendered if repaymentChannel is 'upi' AND lender has UPI ID) */}
+            {repaymentChannel === 'upi' && lenderProfile?.upi_id && (
+              <div className="p-3.5 rounded-2xl bg-gradient-to-br from-[var(--primary)]/10 via-[var(--surface-container)] to-[var(--surface-container-high)] border border-[var(--primary)]/25 space-y-3">
+                {/* Header: Title + Trust Badge */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[20px] text-[var(--primary)]">qr_code_scanner</span>
+                    <span className="font-mono text-xs font-bold uppercase tracking-wider text-[var(--on-surface)]">
+                      Instant UPI Repayment
+                    </span>
                   </div>
-                )}
-
-                <div className="p-2.5 rounded-xl bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)]/20 text-xs font-mono space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[var(--on-surface-variant)] text-[11px]">Payee UPI ID:</span>
-                    <button
-                      type="button"
-                      onClick={() => copyToClipboard(lenderProfile.upi_id!, 'vpa')}
-                      className="text-[var(--primary)] font-bold hover:underline flex items-center gap-1 cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[13px]">content_copy</span>
-                      <span>{copiedField === 'vpa' ? 'Copied!' : 'Copy ID'}</span>
-                    </button>
-                  </div>
-                  <div className="font-bold text-[var(--on-surface)] select-all break-all bg-[var(--surface-container)] px-2.5 py-1.5 rounded-lg border border-[var(--outline-variant)]/20">
-                    {lenderProfile.upi_id}
-                  </div>
-
-                  <div className="flex items-center justify-between pt-1">
-                    <span className="text-[var(--on-surface-variant)] text-[11px]">Exact Amount:</span>
-                    <button
-                      type="button"
-                      onClick={() => copyToClipboard(String(amount > 0 ? amount : currentBalance), 'amt')}
-                      className="text-[var(--primary)] font-bold hover:underline flex items-center gap-1 cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[13px]">content_copy</span>
-                      <span>{copiedField === 'amt' ? 'Copied!' : 'Copy Amount'}</span>
-                    </button>
-                  </div>
-                  <div className="font-bold text-base text-[var(--on-surface)] bg-[var(--surface-container)] px-2.5 py-1.5 rounded-lg border border-[var(--outline-variant)]/20">
-                    {formatCurrency(amount > 0 ? amount : currentBalance, debt.currency || 'inr', { showDecimals: true })}
-                  </div>
+                  <span className="text-[11px] font-mono font-semibold px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[13px]">verified</span>
+                    <span>Bank Approved</span>
+                  </span>
                 </div>
 
-                {/* 1st / Preferred App: Prominent Header Button if matched to Paying User's Profile */}
-                {userPreferredApp && (
-                  <div className="p-3 rounded-2xl bg-gradient-to-r from-[var(--primary)]/15 via-[var(--surface-container)] to-[var(--surface-container-high)] border border-[var(--primary)]/35 space-y-2 shadow-xs animate-in fade-in duration-150">
-                    <div className="flex items-center justify-between text-xs font-mono">
-                      <span className="font-bold text-[var(--primary)] flex items-center gap-1.5">
-                        <span className="material-symbols-outlined text-[16px] text-amber-500 fill-amber-500">star</span>
-                        <span>Your Primary UPI App: {userPreferredApp.name}</span>
-                      </span>
-                      <span className="text-[10px] text-[var(--on-surface-variant)] px-2 py-0.5 rounded-md bg-[var(--surface)] border border-[var(--outline-variant)]/30 truncate max-w-[150px]">
-                        {currentUserUpiId}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleLaunchApp(userPreferredApp.id, userPreferredApp.name)}
-                      className="w-full min-h-[46px] py-2.5 px-4 rounded-xl bg-[var(--primary)] hover:brightness-110 active:scale-[0.98] text-[var(--on-primary)] font-mono text-xs font-bold flex items-center justify-between transition-all cursor-pointer shadow-xs"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="material-symbols-outlined text-[18px]">{userPreferredApp.icon}</span>
-                        <span>Open {userPreferredApp.shortName} & Pay</span>
-                      </div>
-                      <div className="flex items-center gap-1 text-[11px] opacity-90 font-semibold">
-                        <span>1-Tap Copy & Open</span>
-                        <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
-                      </div>
-                    </button>
-                  </div>
-                )}
-
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between text-[11px] font-mono">
-                    <label className="font-semibold uppercase tracking-wider text-[var(--on-surface-variant)]">
-                      {userPreferredApp ? 'All Supported UPI Apps:' : 'Tap to Copy & Open Your UPI App:'}
-                    </label>
-                    {userPreferredApp && (
-                      <span className="text-[10px] text-[var(--primary)] font-semibold">
-                        {userPreferredApp.shortName} prioritized on top
+                {/* Payee Info Bar */}
+                <div className="flex items-center justify-between text-xs font-mono bg-[var(--surface-container-lowest)] p-2.5 rounded-xl border border-[var(--outline-variant)]/20 gap-2">
+                  <div className="min-w-0 flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[var(--on-surface-variant)] text-[11px]">Payee VPA:</span>
+                    <span className="font-bold text-[var(--on-surface)] truncate">{lenderProfile.upi_id}</span>
+                    {detectedLenderApp.isKnownApp && (
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${detectedLenderApp.badgeClass} flex items-center gap-1 shrink-0`}>
+                        <span className="material-symbols-outlined text-[12px]">{detectedLenderApp.icon}</span>
+                        <span>{detectedLenderApp.name}{detectedLenderApp.bank ? ` (${detectedLenderApp.bank})` : ''}</span>
                       </span>
                     )}
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                    {sortedApps.map((app) => (
-                      <button
-                        key={app.id}
-                        type="button"
-                        onClick={() => handleLaunchApp(app.id, app.name)}
-                        className={`min-h-[44px] py-2 px-2.5 rounded-xl border text-[var(--on-surface)] font-mono text-xs font-semibold flex items-center justify-between gap-1.5 transition-all cursor-pointer active:scale-[0.98] ${
-                          app.isUserPreferred
-                            ? 'border-[var(--primary)]/60 bg-[var(--primary)]/10 text-[var(--primary)] shadow-2xs font-bold ring-1 ring-[var(--primary)]/30'
-                            : 'border-[var(--outline-variant)]/30 bg-[var(--surface)] hover:bg-[var(--surface-container)]'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="material-symbols-outlined text-[16px] text-[var(--primary)] shrink-0">{app.icon}</span>
-                          <span className="truncate">{app.shortName}</span>
+                  <button
+                    type="button"
+                    onClick={() => copyToClipboard(lenderProfile.upi_id!, 'vpa')}
+                    className="text-[var(--primary)] hover:underline shrink-0 ml-auto font-bold flex items-center gap-1 cursor-pointer text-xs"
+                    title="Copy UPI ID"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">
+                      {copiedField === 'vpa' ? 'check' : 'content_copy'}
+                    </span>
+                    <span>{copiedField === 'vpa' ? 'Copied' : 'Copy'}</span>
+                  </button>
+                </div>
+
+                {/* Segmented Mode Selector: QR Code vs Pay in App */}
+                <div className="grid grid-cols-2 p-1 rounded-xl bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/20 text-xs font-mono font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setUpiPayTab('qr')}
+                    className={`py-1.5 px-2 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      upiPayTab === 'qr'
+                        ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-xs'
+                        : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-[16px]">qr_code_2</span>
+                    <span>Scan QR Code</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUpiPayTab('app')}
+                    className={`py-1.5 px-2 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      upiPayTab === 'app'
+                        ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-xs'
+                        : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                    <span>Pay in UPI App</span>
+                  </button>
+                </div>
+
+                {/* Mode 1: QR Code Scanner (100% immune to bank rejects) */}
+                {upiPayTab === 'qr' && (
+                  <div className="space-y-2.5 animate-in fade-in duration-150">
+                    <div className="p-3 bg-white rounded-2xl text-center shadow-sm border border-neutral-200 dark:border-neutral-800">
+                      {generatingQr ? (
+                        <div className="w-48 h-48 flex items-center justify-center mx-auto text-neutral-500 font-mono text-xs">
+                          Generating QR...
                         </div>
-                        {app.isUserPreferred && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[var(--primary)] text-[var(--on-primary)] shrink-0">
-                            1st
+                      ) : qrCodeDataUrl ? (
+                        <div className="space-y-2">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={qrCodeDataUrl}
+                            alt="UPI Payment QR Code"
+                            className="w-48 h-48 mx-auto rounded-xl"
+                          />
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-neutral-100 text-neutral-800 text-[11px] font-mono font-bold">
+                            <span>Amount:</span>
+                            <span className="text-emerald-700">
+                              {formatCurrency(amount > 0 ? amount : currentBalance, debt.currency || 'inr', { showDecimals: true })}
+                            </span>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {/* QR Actions: Save / Share for gallery scan, Copy UPI ID */}
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={handleShareOrSaveQR}
+                        className="flex-1 min-h-[44px] py-2 px-3 rounded-xl bg-[var(--surface)] border border-[var(--outline-variant)]/40 text-[var(--on-surface)] font-mono text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-[var(--surface-container)] active:scale-[0.98] transition-all cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[18px] text-[var(--primary)]">
+                          {copiedField === 'qr-download' ? 'check' : 'file_download'}
+                        </span>
+                        <span>{copiedField === 'qr-download' ? 'QR Saved!' : 'Save QR to Photos'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(lenderProfile.upi_id!, 'vpa')}
+                        className="min-h-[44px] py-2 px-3.5 rounded-xl bg-[var(--surface)] border border-[var(--outline-variant)]/40 text-[var(--on-surface)] font-mono text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-[var(--surface-container)] active:scale-[0.98] transition-all cursor-pointer shrink-0"
+                      >
+                        <span className="material-symbols-outlined text-[18px] text-[var(--primary)]">
+                          {copiedField === 'vpa' ? 'check' : 'content_copy'}
+                        </span>
+                        <span>{copiedField === 'vpa' ? 'Copied' : 'Copy ID'}</span>
+                      </button>
+                    </div>
+
+                    {/* Quick direct launcher for user's own profile app if detected */}
+                    {userPreferredApp && (
+                      <button
+                        type="button"
+                        onClick={() => handleLaunchApp(userPreferredApp.id, userPreferredApp.name)}
+                        className="w-full min-h-[44px] py-2 px-3 rounded-xl bg-[var(--primary)]/10 hover:bg-[var(--primary)]/15 border border-[var(--primary)]/30 text-[var(--primary)] font-mono text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-[0.98]"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">{userPreferredApp.icon}</span>
+                        <span>Have {userPreferredApp.shortName}? Copy ID &amp; Open {userPreferredApp.shortName} Directly</span>
+                      </button>
+                    )}
+
+                    <div className="p-2.5 rounded-xl bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)]/20 text-[11px] font-mono text-[var(--on-surface-variant)] space-y-1">
+                      <div className="flex items-center gap-1.5 text-[var(--on-surface)] font-semibold">
+                        <span className="material-symbols-outlined text-[14px] text-emerald-600">verified</span>
+                        <span>Guaranteed Bank Approval:</span>
+                      </div>
+                      <p className="leading-relaxed">
+                        • <strong>From another phone/laptop:</strong> Point your GPay, PhonePe, Paytm, or BHIM camera directly at this QR.
+                      </p>
+                      <p className="leading-relaxed">
+                        • <strong>On this phone:</strong> Tap &ldquo;Save QR to Photos&rdquo; above. In your UPI app, open camera scanner and tap the <strong>Gallery/Photos icon</strong> to select this QR.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Mode 2: Pay in App (1-Tap Copy & Open) */}
+                {upiPayTab === 'app' && (
+                  <div className="space-y-2.5 animate-in fade-in duration-150">
+                    {/* Active Feedback Banner if user clicked an app */}
+                    {launchStatus && (
+                      <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 font-mono text-xs flex items-center gap-2 animate-in fade-in zoom-in-95 duration-150">
+                        <span className="material-symbols-outlined text-[18px] text-emerald-600">check_circle</span>
+                        <span className="font-semibold">{launchStatus}</span>
+                      </div>
+                    )}
+
+                    <div className="p-2.5 rounded-xl bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)]/20 text-xs font-mono space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[var(--on-surface-variant)] text-[11px]">Payee UPI ID:</span>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(lenderProfile.upi_id!, 'vpa')}
+                          className="text-[var(--primary)] font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          <span className="material-symbols-outlined text-[13px]">content_copy</span>
+                          <span>{copiedField === 'vpa' ? 'Copied!' : 'Copy ID'}</span>
+                        </button>
+                      </div>
+                      <div className="font-bold text-[var(--on-surface)] select-all break-all bg-[var(--surface-container)] px-2.5 py-1.5 rounded-lg border border-[var(--outline-variant)]/20">
+                        {lenderProfile.upi_id}
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1">
+                        <span className="text-[var(--on-surface-variant)] text-[11px]">Exact Amount:</span>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(String(round2(amount > 0 ? amount : maxAllowable).toFixed(2)), 'amt')}
+                          className="text-[var(--primary)] font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          <span className="material-symbols-outlined text-[13px]">content_copy</span>
+                          <span>{copiedField === 'amt' ? 'Copied!' : 'Copy Amount'}</span>
+                        </button>
+                      </div>
+                      <div className="font-bold text-base text-[var(--on-surface)] bg-[var(--surface-container)] px-2.5 py-1.5 rounded-lg border border-[var(--outline-variant)]/20">
+                        {formatCurrency(round2(amount > 0 ? amount : maxAllowable), debt.currency || 'inr', { showDecimals: true })}
+                      </div>
+                    </div>
+
+                    {/* 1st / Preferred App: Prominent Header Button if matched to Paying User's Profile */}
+                    {userPreferredApp && (
+                      <div className="p-3 rounded-2xl bg-gradient-to-r from-[var(--primary)]/15 via-[var(--surface-container)] to-[var(--surface-container-high)] border border-[var(--primary)]/35 space-y-2 shadow-xs animate-in fade-in duration-150">
+                        <div className="flex items-center justify-between text-xs font-mono">
+                          <span className="font-bold text-[var(--primary)] flex items-center gap-1.5">
+                            <span className="material-symbols-outlined text-[16px] text-amber-500 fill-amber-500">star</span>
+                            <span>Your Primary UPI App: {userPreferredApp.name}</span>
+                          </span>
+                          <span className="text-[10px] text-[var(--on-surface-variant)] px-2 py-0.5 rounded-md bg-[var(--surface)] border border-[var(--outline-variant)]/30 truncate max-w-[150px]">
+                            {currentUserUpiId}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleLaunchApp(userPreferredApp.id, userPreferredApp.name)}
+                          className="w-full min-h-[46px] py-2.5 px-4 rounded-xl bg-[var(--primary)] hover:brightness-110 active:scale-[0.98] text-[var(--on-primary)] font-mono text-xs font-bold flex items-center justify-between transition-all cursor-pointer shadow-xs"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="material-symbols-outlined text-[18px]">{userPreferredApp.icon}</span>
+                            <span>Open {userPreferredApp.shortName} &amp; Pay</span>
+                          </div>
+                          <div className="flex items-center gap-1 text-[11px] opacity-90 font-semibold">
+                            <span>1-Tap Copy &amp; Open</span>
+                            <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+                          </div>
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] font-mono">
+                        <label className="font-semibold uppercase tracking-wider text-[var(--on-surface-variant)]">
+                          {userPreferredApp ? 'All Supported UPI Apps:' : 'Tap to Copy &amp; Open Your UPI App:'}
+                        </label>
+                        {userPreferredApp && (
+                          <span className="text-[10px] text-[var(--primary)] font-semibold">
+                            {userPreferredApp.shortName} prioritized on top
                           </span>
                         )}
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                        {sortedApps.map((app) => (
+                          <button
+                            key={app.id}
+                            type="button"
+                            onClick={() => handleLaunchApp(app.id, app.name)}
+                            className={`min-h-[44px] py-2 px-2.5 rounded-xl border text-[var(--on-surface)] font-mono text-xs font-semibold flex items-center justify-between gap-1.5 transition-all cursor-pointer active:scale-[0.98] ${
+                              app.isUserPreferred
+                                ? 'border-[var(--primary)]/60 bg-[var(--primary)]/10 text-[var(--primary)] shadow-2xs font-bold ring-1 ring-[var(--primary)]/30'
+                                : 'border-[var(--outline-variant)]/30 bg-[var(--surface)] hover:bg-[var(--surface-container)]'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="material-symbols-outlined text-[16px] text-[var(--primary)] shrink-0">{app.icon}</span>
+                              <span className="truncate">{app.shortName}</span>
+                            </div>
+                            {app.isUserPreferred && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[var(--primary)] text-[var(--on-primary)] shrink-0">
+                                1st
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="p-2.5 rounded-xl bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)]/20 text-[11px] font-mono text-[var(--on-surface-variant)] space-y-1">
+                      <div className="font-semibold text-[var(--on-surface)]">How to complete payment:</div>
+                      <p>1. Tap your app button above (UPI ID copies automatically).</p>
+                      <p>2. In your app, tap <strong>&ldquo;Pay to UPI ID&rdquo;</strong> (or &ldquo;To UPI ID / Number&rdquo;) and paste.</p>
+                      <p>3. Enter the exact amount ({formatCurrency(round2(amount > 0 ? amount : maxAllowable), debt.currency || 'inr', { showDecimals: true })}) and complete payment.</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Bank Rejection Explanation Accordion */}
+                <div className="pt-1 border-t border-[var(--outline-variant)]/20">
+                  <button
+                    type="button"
+                    onClick={() => setShowBankExplainer(!showBankExplainer)}
+                    className="w-full text-left flex items-center justify-between text-[11px] font-mono text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] transition-colors py-1 cursor-pointer"
+                  >
+                    <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
+                      <span className="material-symbols-outlined text-[14px]">help</span>
+                      <span className="font-semibold">Why do banks decline direct web links?</span>
+                    </div>
+                    <span className="material-symbols-outlined text-[14px] text-[var(--outline)]">
+                      {showBankExplainer ? 'expand_less' : 'expand_more'}
+                    </span>
+                  </button>
+
+                  {showBankExplainer && (
+                    <div className="p-2.5 mt-1.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-[11px] font-mono text-amber-900 dark:text-amber-200 space-y-2 animate-in fade-in duration-150">
+                      <p className="leading-relaxed">
+                        <strong>NPCI &amp; Bank Policy:</strong> Indian banks (SBI, HDFC, ICICI, etc.) reject direct browser links to personal UPI accounts to prevent phishing scams.
+                      </p>
+                      <p className="leading-relaxed">
+                        Scanning the QR code or pasting the UPI ID into your UPI app initiates the payment safely inside the certified banking app, guaranteeing 100% bank approval.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <p className="text-[10px] font-mono text-[var(--on-surface-variant)] leading-relaxed">
+                  💡 After completing payment in your UPI app, copy the 12-digit UPI Ref/UTR number and paste it below.
+                </p>
+              </div>
+            )}
+
+            {/* CHANNEL 2: Bank Account Transfer Details Card */}
+            {repaymentChannel === 'bank' && (lenderProfile?.bank_account_number || lenderProfile?.bank_ifsc) && (
+              <div className="p-3.5 rounded-2xl bg-gradient-to-br from-teal-500/10 via-[var(--surface-container)] to-[var(--surface-container-high)] border border-teal-500/30 space-y-3 animate-in fade-in duration-150">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[20px] text-teal-600 dark:text-teal-400">account_balance</span>
+                    <span className="font-mono text-xs font-bold uppercase tracking-wider text-[var(--on-surface)]">
+                      Direct Bank Transfer (IMPS / NEFT)
+                    </span>
+                  </div>
+                  {lenderProfile?.preferred_repayment_method === 'bank_transfer' && (
+                    <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md bg-teal-500/15 text-teal-700 dark:text-teal-300 border border-teal-500/25">
+                      Lender Preferred
+                    </span>
+                  )}
+                </div>
+
+                {/* Details Grid */}
+                <div className="p-3 rounded-xl bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)]/20 space-y-2.5 text-xs font-mono">
+                  {/* Account Holder */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-[var(--on-surface-variant)] text-[11px]">Beneficiary Name:</span>
+                    <div className="flex items-center gap-1.5 font-bold text-[var(--on-surface)]">
+                      <span>{lenderProfile.bank_account_holder_name || lenderProfile.full_name || 'Lender'}</span>
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(lenderProfile.bank_account_holder_name || lenderProfile.full_name || '', 'name')}
+                        className="text-[var(--primary)] hover:underline flex items-center gap-0.5 cursor-pointer text-[11px]"
+                      >
+                        <span className="material-symbols-outlined text-[13px]">
+                          {copiedField === 'name' ? 'check' : 'content_copy'}
+                        </span>
+                        <span>{copiedField === 'name' ? 'Copied' : 'Copy'}</span>
                       </button>
-                    ))}
+                    </div>
+                  </div>
+
+                  {/* Bank Name */}
+                  {lenderProfile.bank_name && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-[var(--on-surface-variant)] text-[11px]">Bank Name:</span>
+                      <span className="font-semibold text-[var(--on-surface)]">{lenderProfile.bank_name}</span>
+                    </div>
+                  )}
+
+                  {/* Account Number */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[var(--on-surface-variant)] text-[11px]">Account Number:</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowMaskedAccount(!showMaskedAccount)}
+                        className="text-[var(--outline)] hover:text-[var(--on-surface)] text-[10px] flex items-center"
+                        title={showMaskedAccount ? 'Hide' : 'Reveal'}
+                      >
+                        <span className="material-symbols-outlined text-[13px]">
+                          {showMaskedAccount ? 'visibility_off' : 'visibility'}
+                        </span>
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1.5 font-bold text-[var(--on-surface)]">
+                      <span className="select-all">
+                        {showMaskedAccount
+                          ? lenderProfile.bank_account_number
+                          : maskBankAccount(lenderProfile.bank_account_number)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(lenderProfile.bank_account_number || '', 'acc')}
+                        className="text-[var(--primary)] hover:underline flex items-center gap-0.5 cursor-pointer text-[11px]"
+                      >
+                        <span className="material-symbols-outlined text-[13px]">
+                          {copiedField === 'acc' ? 'check' : 'content_copy'}
+                        </span>
+                        <span>{copiedField === 'acc' ? 'Copied' : 'Copy'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* IFSC Code */}
+                  {lenderProfile.bank_ifsc && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-[var(--on-surface-variant)] text-[11px]">IFSC Code:</span>
+                      <div className="flex items-center gap-1.5 font-bold text-[var(--on-surface)]">
+                        <span className="select-all uppercase">{lenderProfile.bank_ifsc}</span>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(lenderProfile.bank_ifsc || '', 'ifsc')}
+                          className="text-[var(--primary)] hover:underline flex items-center gap-0.5 cursor-pointer text-[11px]"
+                        >
+                          <span className="material-symbols-outlined text-[13px]">
+                            {copiedField === 'ifsc' ? 'check' : 'content_copy'}
+                          </span>
+                          <span>{copiedField === 'ifsc' ? 'Copied' : 'Copy'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Transfer Amount */}
+                  <div className="flex items-center justify-between pt-1 border-t border-[var(--outline-variant)]/20">
+                    <span className="text-[var(--on-surface-variant)] text-[11px]">Exact Amount:</span>
+                    <div className="flex items-center gap-1.5 font-bold text-[var(--on-surface)] text-sm">
+                      <span>{formatCurrency(round2(amount > 0 ? amount : maxAllowable), debt.currency || 'inr', { showDecimals: true })}</span>
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(String(round2(amount > 0 ? amount : maxAllowable).toFixed(2)), 'amt')}
+                        className="text-[var(--primary)] hover:underline flex items-center gap-0.5 cursor-pointer text-[11px]"
+                      >
+                        <span className="material-symbols-outlined text-[13px]">
+                          {copiedField === 'amt' ? 'check' : 'content_copy'}
+                        </span>
+                        <span>{copiedField === 'amt' ? 'Copied' : 'Copy'}</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-
+                {/* Instructions */}
                 <div className="p-2.5 rounded-xl bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)]/20 text-[11px] font-mono text-[var(--on-surface-variant)] space-y-1">
-                  <div className="font-semibold text-[var(--on-surface)]">How to complete payment:</div>
-                  <p>1. Tap your app button above (UPI ID copies automatically).</p>
-                  <p>2. In your app, tap <strong>&ldquo;Pay to UPI ID&rdquo;</strong> (or &ldquo;To UPI ID / Number&rdquo;) and paste.</p>
-                  <p>3. Enter the amount ({formatCurrency(amount > 0 ? amount : currentBalance, debt.currency || 'inr')}) and complete payment.</p>
+                  <div className="font-semibold text-[var(--on-surface)]">How to settle via NetBanking:</div>
+                  <p>1. Copy the account number &amp; IFSC above.</p>
+                  <p>2. Open your NetBanking or mobile banking app and initiate an IMPS / NEFT transfer.</p>
+                  <p>3. Enter the UTR / transaction reference number below so the lender can verify and reconcile.</p>
                 </div>
               </div>
             )}
 
-            {/* Bank Rejection Explanation Accordion */}
-            <div className="pt-1 border-t border-[var(--outline-variant)]/20">
-              <button
-                type="button"
-                onClick={() => setShowBankExplainer(!showBankExplainer)}
-                className="w-full text-left flex items-center justify-between text-[11px] font-mono text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] transition-colors py-1 cursor-pointer"
-              >
-                <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
-                  <span className="material-symbols-outlined text-[14px]">help</span>
-                  <span className="font-semibold">Why do banks decline direct web links?</span>
+            {/* When lender has no details configured on file */}
+            {!hasUpi && !hasBank && (
+              <div className="p-3.5 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 text-xs font-mono space-y-2">
+                <div className="flex items-center gap-2 text-[var(--on-surface)] font-bold">
+                  <span className="material-symbols-outlined text-[18px] text-amber-500">info</span>
+                  <span>No UPI ID or Bank Account Configured</span>
                 </div>
-                <span className="material-symbols-outlined text-[14px] text-[var(--outline)]">
-                  {showBankExplainer ? 'expand_less' : 'expand_more'}
-                </span>
-              </button>
-
-              {showBankExplainer && (
-                <div className="p-2.5 mt-1.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-[11px] font-mono text-amber-900 dark:text-amber-200 space-y-2 animate-in fade-in duration-150">
-                  <p className="leading-relaxed">
-                    <strong>NPCI & Bank Anti-Fraud Policy:</strong> Indian banks (SBI, HDFC, ICICI, Axis, etc.) block direct payment links initiated from mobile web browsers to personal UPI IDs to prevent phishing scams and unauthorized collect requests.
-                  </p>
-                  <p className="leading-relaxed">
-                    By <strong>scanning the QR code</strong> or <strong>pasting the UPI ID into your UPI app</strong>, the payment originates directly within the certified banking app, guaranteeing 100% bank approval.
-                  </p>
-
-                  {upiLink && (
-                    <div className="pt-2 border-t border-amber-500/20 flex items-center justify-between gap-2 flex-wrap">
-                      <span className="text-[10px] text-amber-800 dark:text-amber-300">Test direct web intent anyway:</span>
-                      <div className="flex gap-2">
-                        <a
-                          href={upiLink}
-                          className="px-2 py-1 rounded-md bg-amber-500/20 hover:bg-amber-500/30 text-amber-900 dark:text-amber-100 font-bold text-[10px] flex items-center gap-1"
-                        >
-                          <span>With Amount</span>
-                          <span className="material-symbols-outlined text-[10px]">open_in_new</span>
-                        </a>
-                        {upiLinkWithoutAmount && (
-                          <a
-                            href={upiLinkWithoutAmount}
-                            className="px-2 py-1 rounded-md bg-amber-500/20 hover:bg-amber-500/30 text-amber-900 dark:text-amber-100 font-bold text-[10px] flex items-center gap-1"
-                          >
-                            <span>Manual Amt</span>
-                            <span className="material-symbols-outlined text-[10px]">open_in_new</span>
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <p className="text-[10px] font-mono text-[var(--on-surface-variant)] leading-relaxed">
-              💡 After completing payment in your UPI app, copy the 12-digit UPI Ref/UTR number and paste it below.
-            </p>
+                <p className="text-[var(--on-surface-variant)] leading-relaxed">
+                  The counterparty hasn&rsquo;t configured their payment receiving details yet. You can settle in cash or ask them to add their UPI ID or Bank Account in Settings.
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -809,35 +1045,99 @@ export function PaymentModal({
           </div>
         )}
 
-        {/* Amount Input */}
-        <div>
-          <div className="flex justify-between items-center mb-1.5">
-            <label className="font-mono text-xs tracking-wider uppercase text-[var(--on-surface-variant)]">
+        {/* Amount Input with Quick Chips & 2-Decimal Trust Guidance */}
+        <div className="space-y-2">
+          <div className="flex justify-between items-center">
+            <label className="font-mono text-xs tracking-wider uppercase text-[var(--on-surface-variant)] font-bold">
               Payment Amount
             </label>
             {maxAllowable > 0 && (
               <button
                 type="button"
                 onClick={() => setAmountUnified(round2(maxAllowable))}
-                className="font-mono text-xs text-[var(--primary)] font-bold hover:underline"
+                className="font-mono text-xs text-[var(--primary)] font-bold hover:underline cursor-pointer"
               >
                 Pay Full ({formatCurrency(round2(maxAllowable), debt.currency || 'inr', { showDecimals: true })})
               </button>
             )}
           </div>
-          <input
-            type="number"
-            min="0.01"
-            max={maxAllowable > 0 ? maxAllowable : undefined}
-            step="0.01"
-            required
-            disabled={isBlockedByPending || loading || checkingLimits}
-            value={amountStr}
-            placeholder="0.00"
-            onChange={(e) => handleAmountChange(e.target.value)}
-            onFocus={(e) => e.target.select()}
-            className="w-full px-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-lg font-bold outline-none focus:border-[var(--primary)] disabled:opacity-50 disabled:bg-[var(--surface-container-low)]"
-          />
+
+          <div className="relative">
+            <input
+              type="number"
+              min="0.01"
+              max={maxAllowable > 0 ? maxAllowable : undefined}
+              step="0.01"
+              required
+              disabled={isBlockedByPending || loading || checkingLimits}
+              value={amountStr}
+              placeholder="0.00"
+              onChange={(e) => handleAmountChange(e.target.value)}
+              onBlur={handleAmountBlur}
+              onFocus={(e) => e.target.select()}
+              className="w-full pl-4 pr-16 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-lg font-bold outline-none focus:border-[var(--primary)] disabled:opacity-50 disabled:bg-[var(--surface-container-low)]"
+            />
+            <div className="absolute right-3.5 top-1/2 -translate-y-1/2 font-mono text-xs font-bold text-[var(--on-surface-variant)] pointer-events-none uppercase">
+              {debt.currency || 'INR'}
+            </div>
+          </div>
+
+          {/* Quick Amount Chips */}
+          {maxAllowable > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+              <span className="text-[10px] font-mono text-[var(--outline)] uppercase font-semibold">
+                Quick:
+              </span>
+              <button
+                type="button"
+                onClick={() => setAmountUnified(round2(maxAllowable))}
+                className="px-2 py-1 rounded-lg bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--primary)] border border-[var(--primary)]/30 font-mono text-xs font-bold transition-all cursor-pointer"
+              >
+                Full ({formatCurrency(round2(maxAllowable), debt.currency || 'inr', { showDecimals: true })})
+              </button>
+              {maxAllowable >= 100 && (
+                <button
+                  type="button"
+                  onClick={() => setAmountUnified(round2(maxAllowable / 2))}
+                  className="px-2 py-1 rounded-lg bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] border border-[var(--outline-variant)]/30 font-mono text-xs font-semibold transition-all cursor-pointer"
+                >
+                  50% ({formatCurrency(round2(maxAllowable / 2), debt.currency || 'inr', { showDecimals: true })})
+                </button>
+              )}
+              {maxAllowable > 500 && (
+                <button
+                  type="button"
+                  onClick={() => setAmountUnified(500)}
+                  className="px-2 py-1 rounded-lg bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] border border-[var(--outline-variant)]/30 font-mono text-xs font-semibold transition-all cursor-pointer"
+                >
+                  {formatCurrency(500, debt.currency || 'inr', { showDecimals: true })}
+                </button>
+              )}
+              {maxAllowable > 1000 && (
+                <button
+                  type="button"
+                  onClick={() => setAmountUnified(1000)}
+                  className="px-2 py-1 rounded-lg bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] border border-[var(--outline-variant)]/30 font-mono text-xs font-semibold transition-all cursor-pointer"
+                >
+                  {formatCurrency(1000, debt.currency || 'inr', { showDecimals: true })}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* User Trust & Precision Guidance */}
+          <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/25 flex items-start gap-2 text-xs font-mono text-blue-900 dark:text-blue-200">
+            <span className="material-symbols-outlined text-[15px] text-blue-600 dark:text-blue-400 shrink-0 mt-0.5">
+              verified_user
+            </span>
+            <div className="leading-relaxed">
+              <strong>System Trust &amp; Precision:</strong> Please enter the exact payment amount matching your bank transfer receipt (with 2 decimal places, e.g.{' '}
+              <span className="font-bold underline">
+                {round2(amount > 0 ? amount : maxAllowable).toFixed(2)}
+              </span>
+              ) for instant ledger verification and maintaining a high borrower trust score.
+            </div>
+          </div>
         </div>
 
         {/* Payment Method Selector */}
