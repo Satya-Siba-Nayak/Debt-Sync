@@ -251,3 +251,33 @@ export function allocateBulkPayment(
 
   return allocations;
 }
+
+/**
+ * Priority order for debt statuses: active obligations always appear on top, followed by pending, disputed, settled, and declined.
+ */
+export const DEBT_STATUS_PRIORITY: Record<string, number> = {
+  active: 0,
+  pending: 1,
+  disputed: 2,
+  settled: 3,
+  declined: 4,
+};
+
+export function sortDebtsActiveFirst<T extends Pick<Debt, 'status' | 'created_at'>>(debtsList: T[]): T[] {
+  return [...debtsList].sort((a, b) => {
+    const pA = DEBT_STATUS_PRIORITY[a.status] ?? 99;
+    const pB = DEBT_STATUS_PRIORITY[b.status] ?? 99;
+    if (pA !== pB) return pA - pB;
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
+}
+
+export function sortPaymentsPendingFirst<T extends Pick<Payment, 'created_at'> & { is_verified?: boolean }>(paymentsList: T[]): T[] {
+  return [...paymentsList].sort((a, b) => {
+    const isAPending = a.is_verified === false;
+    const isBPending = b.is_verified === false;
+    if (isAPending && !isBPending) return -1;
+    if (!isAPending && isBPending) return 1;
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
+}

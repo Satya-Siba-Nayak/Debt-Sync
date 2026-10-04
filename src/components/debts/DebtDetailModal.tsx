@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Modal } from '../ui/Modal';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment, ActivityLogEntry } from '@/lib/types/database';
-import { calculateDebtBalance, round2 } from '@/lib/utils/interest';
+import { calculateDebtBalance, round2, sortPaymentsPendingFirst } from '@/lib/utils/interest';
 import { formatCurrency } from '@/lib/utils/currency';
 import { Chip } from '../ui/Chip';
 import { Avatar } from '../ui/Avatar';
@@ -174,6 +174,8 @@ export function DebtDetailModal({
       setVerifyingPaymentId(null);
     }
   };
+
+  const sortedPayments = sortPaymentsPendingFirst(payments);
 
   return (
     <>
@@ -391,13 +393,13 @@ export function DebtDetailModal({
               )}
             </div>
 
-            {payments.length === 0 ? (
+            {sortedPayments.length === 0 ? (
               <div className="p-4 rounded-xl border border-[var(--outline-variant)]/20 text-center font-mono text-xs text-[var(--on-surface-variant)]">
                 No payments or repayments recorded yet for this agreement.
               </div>
             ) : (
-              <div className="space-y-2.5">
-                {payments.map((p) => {
+              <div className="max-h-60 overflow-y-auto overscroll-contain modal-scroll-container pr-1 space-y-2.5">
+                {sortedPayments.map((p) => {
                   const isDisputed =
                     (p as any).status === 'disputed' ||
                     ((p as any).is_verified === false && (p as any).verified_at != null) ||

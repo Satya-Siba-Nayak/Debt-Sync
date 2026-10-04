@@ -387,7 +387,7 @@ export function BulkPaymentModal({
                 : 'Enter a payment amount above to preview the smart allocation breakdown'}
             </div>
           ) : (
-            <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+            <div className="space-y-2 max-h-60 overflow-y-auto overscroll-contain modal-scroll-container pr-1">
               {allocations.map((item) => {
                 const dueInfo = getDueDateInfo(item.debt.due_date, item.debt.status);
                 const isCleared = item.newBalance <= 0.01;

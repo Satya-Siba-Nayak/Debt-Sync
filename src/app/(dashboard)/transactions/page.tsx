@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment } from '@/lib/types/database';
-import { calculateDebtBalance } from '@/lib/utils/interest';
+import { calculateDebtBalance, sortDebtsActiveFirst } from '@/lib/utils/interest';
 import { formatCurrency } from '@/lib/utils/currency';
 import { Chip } from '@/components/ui/Chip';
 import { Avatar } from '@/components/ui/Avatar';
@@ -158,36 +158,38 @@ export default function TransactionsPage() {
 
   const visibleDebts = debts.filter((d) => !d.hidden_by?.includes(currentUserId || ''));
 
-  const filteredDebts = visibleDebts
-    .filter((d) => {
-      const isLender = d.lender_id === currentUserId;
-      if (filter === 'lent') return isLender && d.status !== 'declined';
-      if (filter === 'borrowed') return !isLender && d.status !== 'declined';
-      if (filter === 'settled') return d.status === 'settled';
-      if (filter === 'declined') return d.status === 'declined';
-      return true;
-    })
-    .filter((d) => {
-      if (!searchQuery.trim()) return true;
-      const q = searchQuery.toLowerCase().trim();
-      const isLender = d.lender_id === currentUserId;
-      const otherPerson = isLender ? d.borrower : d.lender;
-      const name = otherPerson?.full_name?.toLowerCase() || '';
-      const email = otherPerson?.email?.toLowerCase() || '';
-      const creatorNote = d.notes?.toLowerCase() || '';
-      const counterpartyNote = d.counterparty_notes?.toLowerCase() || '';
-      const principalStr = String(d.principal);
+  const filteredDebts = sortDebtsActiveFirst(
+    visibleDebts
+      .filter((d) => {
+        const isLender = d.lender_id === currentUserId;
+        if (filter === 'lent') return isLender && d.status !== 'declined';
+        if (filter === 'borrowed') return !isLender && d.status !== 'declined';
+        if (filter === 'settled') return d.status === 'settled';
+        if (filter === 'declined') return d.status === 'declined';
+        return true;
+      })
+      .filter((d) => {
+        if (!searchQuery.trim()) return true;
+        const q = searchQuery.toLowerCase().trim();
+        const isLender = d.lender_id === currentUserId;
+        const otherPerson = isLender ? d.borrower : d.lender;
+        const name = otherPerson?.full_name?.toLowerCase() || '';
+        const email = otherPerson?.email?.toLowerCase() || '';
+        const creatorNote = d.notes?.toLowerCase() || '';
+        const counterpartyNote = d.counterparty_notes?.toLowerCase() || '';
+        const principalStr = String(d.principal);
 
-      return (
-        name.includes(q) ||
-        email.includes(q) ||
-        creatorNote.includes(q) ||
-        counterpartyNote.includes(q) ||
-        principalStr.includes(q) ||
-        (d.status ? d.status.toLowerCase().includes(q) : false) ||
-        (d.interest_type ? d.interest_type.toLowerCase().includes(q) : false)
-      );
-    });
+        return (
+          name.includes(q) ||
+          email.includes(q) ||
+          creatorNote.includes(q) ||
+          counterpartyNote.includes(q) ||
+          principalStr.includes(q) ||
+          (d.status ? d.status.toLowerCase().includes(q) : false) ||
+          (d.interest_type ? d.interest_type.toLowerCase().includes(q) : false)
+        );
+      })
+  );
 
   return (
     <div className="page-enter space-y-6 md:space-y-8">

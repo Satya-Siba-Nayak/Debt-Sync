@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment } from '@/lib/types/database';
-import { calculateDebtBalance, calculatePortfolioAccrualRates, round2 } from '@/lib/utils/interest';
+import { calculateDebtBalance, calculatePortfolioAccrualRates, round2, sortDebtsActiveFirst } from '@/lib/utils/interest';
 import { BalanceCards } from '@/components/dashboard/BalanceCards';
 import { LiveTicker } from '@/components/dashboard/LiveTicker';
 import { CashflowChart } from '@/components/dashboard/CashflowChart';
@@ -200,6 +200,8 @@ export default function GlobalDashboardPage() {
     (d) => d.status === 'pending' && d.created_by !== currentUserId
   );
 
+  const sortedDebts = React.useMemo(() => sortDebtsActiveFirst(debts), [debts]);
+
   return (
     <div className="page-enter flex flex-col gap-6 md:gap-8">
       {/* Incoming Agreements Awaiting Acceptance Alert */}
@@ -338,8 +340,8 @@ export default function GlobalDashboardPage() {
         ) : (
           <div>
             {/* Mobile Card List (< md screens) */}
-            <div className="md:hidden space-y-3">
-              {debts.slice(0, 6).map((d) => {
+            <div className="md:hidden max-h-[480px] overflow-y-auto overscroll-contain modal-scroll-container pr-1 space-y-3">
+              {sortedDebts.slice(0, 8).map((d) => {
                 const isLender = d.lender_id === currentUserId;
                 const otherPerson = isLender ? d.borrower : d.lender;
                 const name = otherPerson?.full_name || otherPerson?.email || 'Unknown';
@@ -484,7 +486,7 @@ export default function GlobalDashboardPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--outline-variant)]/10">
-                  {debts.slice(0, 6).map((d) => {
+                  {sortedDebts.slice(0, 8).map((d) => {
                     const isLender = d.lender_id === currentUserId;
                     const otherPerson = isLender ? d.borrower : d.lender;
                     const name = otherPerson?.full_name || otherPerson?.email || 'Unknown';

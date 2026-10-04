@@ -268,7 +268,13 @@ export default function PeopleDirectoryPage() {
         noteMatches
       );
     })
-    .sort((a, b) => Math.abs(b.netBalance) - Math.abs(a.netBalance));
+    .sort((a, b) => {
+      const statusPriority: Record<string, number> = { active: 0, pending: 1, settled: 2 };
+      const pA = statusPriority[a.status] ?? 99;
+      const pB = statusPriority[b.status] ?? 99;
+      if (pA !== pB) return pA - pB;
+      return Math.abs(b.netBalance) - Math.abs(a.netBalance);
+    });
 
   return (
     <div className="page-enter space-y-6 md:space-y-8">

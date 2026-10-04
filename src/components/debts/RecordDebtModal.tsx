@@ -773,7 +773,7 @@ export function RecordDebtModal({
                   </div>
 
                   {/* List of matching contacts and platform users */}
-                  <div className="max-h-48 overflow-y-auto space-y-1 rounded-xl border border-[var(--outline-variant)]/20 p-1.5 bg-[var(--surface-container-low)]">
+                  <div className="max-h-48 overflow-y-auto overscroll-contain modal-scroll-container space-y-1 rounded-xl border border-[var(--outline-variant)]/20 p-1.5 bg-[var(--surface-container-low)]">
                     {filteredPeople.map((p) => (
                       <button
                         key={p.id}

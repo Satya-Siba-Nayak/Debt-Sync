@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment, ActivityLogEntry, Profile } from '@/lib/types/database';
-import { calculateDebtBalance, round2 } from '@/lib/utils/interest';
+import { calculateDebtBalance, round2, sortDebtsActiveFirst, sortPaymentsPendingFirst } from '@/lib/utils/interest';
 import { formatCurrency } from '@/lib/utils/currency';
 import { Chip } from '@/components/ui/Chip';
 import { Avatar } from '@/components/ui/Avatar';
@@ -370,23 +370,27 @@ function PersonDebtDetailContent() {
   const theyOweDebts = visibleDebts.filter((d) => d.lender_id === currentUserId && d.status !== 'declined');
   const youOweDebts = visibleDebts.filter((d) => d.borrower_id === currentUserId && d.status !== 'declined');
 
-  const displayDebts = visibleDebts
-    .filter((d) => {
-      if (filterDirection === 'they_owe') return d.lender_id === currentUserId && d.status !== 'declined';
-      if (filterDirection === 'you_owe') return d.borrower_id === currentUserId && d.status !== 'declined';
-      return true;
-    })
-    .filter((d) => {
-      if (!searchQuery.trim()) return true;
-      const q = searchQuery.toLowerCase().trim();
-      return (
-        (d.notes && d.notes.toLowerCase().includes(q)) ||
-        (d.counterparty_notes && d.counterparty_notes.toLowerCase().includes(q)) ||
-        String(d.principal).includes(q) ||
-        (d.interest_type ? d.interest_type.toLowerCase().includes(q) : false) ||
-        (d.status ? d.status.toLowerCase().includes(q) : false)
-      );
-    });
+  const displayDebts = sortDebtsActiveFirst(
+    visibleDebts
+      .filter((d) => {
+        if (filterDirection === 'they_owe') return d.lender_id === currentUserId && d.status !== 'declined';
+        if (filterDirection === 'you_owe') return d.borrower_id === currentUserId && d.status !== 'declined';
+        return true;
+      })
+      .filter((d) => {
+        if (!searchQuery.trim()) return true;
+        const q = searchQuery.toLowerCase().trim();
+        return (
+          (d.notes && d.notes.toLowerCase().includes(q)) ||
+          (d.counterparty_notes && d.counterparty_notes.toLowerCase().includes(q)) ||
+          String(d.principal).includes(q) ||
+          (d.interest_type ? d.interest_type.toLowerCase().includes(q) : false) ||
+          (d.status ? d.status.toLowerCase().includes(q) : false)
+        );
+      })
+  );
+
+  const sortedPayments = sortPaymentsPendingFirst(payments);
 
   let filteredBalance = 0;
   for (const d of displayDebts) {
@@ -791,7 +795,7 @@ function PersonDebtDetailContent() {
         {displayDebts.length === 0 ? (
           <p className="text-xs font-mono text-on-surface-variant py-4">No records found for this filter.</p>
         ) : (
-          <div className="space-y-4">
+          <div className="max-h-[520px] overflow-y-auto overscroll-contain modal-scroll-container pr-1 sm:pr-2 space-y-3 sm:space-y-4">
             {displayDebts.map((d) => {
               const isLender = d.lender_id === currentUserId;
               const isIncomingPending = d.status === 'pending' && d.created_by !== currentUserId;
@@ -983,8 +987,8 @@ function PersonDebtDetailContent() {
             </span>
           </div>
 
-          <div className="space-y-3">
-            {payments.map((p) => {
+          <div className="max-h-[380px] overflow-y-auto overscroll-contain modal-scroll-container pr-1 sm:pr-2 space-y-3">
+            {sortedPayments.map((p) => {
               const matchedDebt = debts.find((d) => d.id === p.debt_id);
               const isLenderOfDebt = matchedDebt?.lender_id === currentUserId;
               const isDisputed =
