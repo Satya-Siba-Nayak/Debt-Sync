@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -30,6 +31,11 @@ import { isValidUPIId, detectUPIApp } from '@/lib/utils/upi-link';
 export default function SettingsPage() {
   const supabase = createClient();
   const router = useRouter();
+
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1773,141 +1779,147 @@ export default function SettingsPage() {
         />
       )}
 
-      {/* Navigation Guard Backdrop */}
-      {pendingNav && (
-        <div
-          className="fixed inset-0 bg-black/40 z-40 backdrop-blur-xs transition-opacity animate-in fade-in duration-150"
-          onClick={handleStayAndEdit}
-        />
-      )}
+      {/* Portaled Floating Navigation Guard Backdrop, Floating Prompt & Floating Toast */}
+      {mounted && typeof document !== 'undefined' && createPortal(
+        <>
+          {/* Navigation Guard Backdrop */}
+          {pendingNav && (
+            <div
+              className="fixed inset-0 bg-black/50 z-[90] backdrop-blur-xs transition-opacity animate-in fade-in duration-150 pointer-events-auto"
+              onClick={handleStayAndEdit}
+            />
+          )}
 
-      {/* Floating Unsaved Changes & Navigation Guard Popup (Bottom-Left in Current View) */}
-      {(isDirty || pendingNav) && (
-        <div
-          className={`fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom,0px))] md:bottom-6 left-3 sm:left-4 md:left-[16.5rem] z-50 w-[calc(100%-1.5rem)] sm:w-auto max-w-xl p-3.5 md:p-4 rounded-2xl bg-[var(--surface-container-high)]/95 backdrop-blur-md border shadow-2xl flex flex-col gap-3 animate-in slide-in-from-bottom-5 duration-200 ${
-            pendingNav
-              ? 'border-amber-500/60 ring-2 ring-amber-500/30'
-              : 'border-[var(--primary)]/30'
-          }`}
-        >
-          {pendingNav ? (
-            /* Navigation Interception State */
-            <>
-              <div className="flex items-start gap-2.5">
-                <span className="material-symbols-outlined text-[20px] text-amber-500 shrink-0 mt-0.5 animate-bounce">
-                  warning
-                </span>
-                <div>
-                  <div className="font-heading font-bold text-xs text-[var(--on-surface)] flex items-center gap-1.5 flex-wrap">
-                    <span>Unsaved Changes</span>
-                    <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
-                      Navigating to {pendingNav.label}
+          {/* Floating Unsaved Changes & Navigation Guard Popup (Bottom-Left in Current View) */}
+          {(isDirty || pendingNav) && (
+            <div
+              className={`fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom,0px))] md:bottom-6 left-3 sm:left-4 md:left-[16.5rem] z-[100] w-[calc(100%-1.5rem)] sm:w-auto max-w-xl p-3.5 md:p-4 rounded-2xl bg-[var(--surface-container-high)]/95 backdrop-blur-md border shadow-2xl flex flex-col gap-3 animate-in slide-in-from-bottom-5 duration-200 pointer-events-auto ${
+                pendingNav
+                  ? 'border-amber-500/60 ring-2 ring-amber-500/30'
+                  : 'border-[var(--primary)]/30'
+              }`}
+            >
+              {pendingNav ? (
+                /* Navigation Interception State */
+                <>
+                  <div className="flex items-start gap-2.5">
+                    <span className="material-symbols-outlined text-[20px] text-amber-500 shrink-0 mt-0.5 animate-bounce">
+                      warning
+                    </span>
+                    <div>
+                      <div className="font-heading font-bold text-xs text-[var(--on-surface)] flex items-center gap-1.5 flex-wrap">
+                        <span>Unsaved Changes</span>
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                          Navigating to {pendingNav.label}
+                        </span>
+                      </div>
+                      <p className="text-[11px] font-mono text-[var(--on-surface-variant)] mt-1">
+                        You have unsaved changes in Settings. Leaving will discard your modifications.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-[var(--outline-variant)]/20">
+                    <button
+                      type="button"
+                      onClick={handleStayAndEdit}
+                      className="px-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container)] text-[var(--on-surface)] text-xs font-mono font-semibold transition-colors cursor-pointer min-h-[38px]"
+                    >
+                      Keep Editing
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDiscardAndLeave}
+                      className="px-3 py-1.5 rounded-xl border border-red-500/30 hover:bg-red-500/10 text-red-500 text-xs font-mono font-semibold transition-colors cursor-pointer min-h-[38px]"
+                    >
+                      Discard &amp; Leave
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveAndLeave}
+                      disabled={saving}
+                      className="px-3.5 py-1.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] text-xs font-mono font-bold hover:brightness-110 active:scale-[0.98] transition-all shadow-sm cursor-pointer flex items-center gap-1.5 disabled:opacity-50 min-h-[38px]"
+                    >
+                      {saving ? (
+                        <>
+                          <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
+                          <span>Saving...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="material-symbols-outlined text-[14px]">save</span>
+                          <span>Save &amp; Leave</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                /* Standard Unsaved Changes Bar (Bottom-Left in Current View) */
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 text-xs font-mono text-[var(--on-surface)]">
+                    <span className="material-symbols-outlined text-[18px] text-amber-500 animate-pulse">
+                      warning
+                    </span>
+                    <span>
+                      <strong>Careful:</strong> You have unsaved changes!
                     </span>
                   </div>
-                  <p className="text-[11px] font-mono text-[var(--on-surface-variant)] mt-1">
-                    You have unsaved changes in Settings. Leaving will discard your modifications.
-                  </p>
+
+                  <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleResetChanges}
+                      disabled={saving}
+                      className="px-3.5 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container)] text-[var(--on-surface-variant)] text-xs font-mono font-semibold transition-colors cursor-pointer disabled:opacity-50 min-h-[38px]"
+                    >
+                      Reset / Undo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleSave();
+                      }}
+                      disabled={saving}
+                      className="px-4 py-1.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] text-xs font-mono font-bold hover:brightness-110 active:scale-[0.98] transition-all shadow-sm cursor-pointer flex items-center gap-1.5 disabled:opacity-50 min-h-[38px]"
+                    >
+                      {saving ? (
+                        <>
+                          <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
+                          <span>Saving...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="material-symbols-outlined text-[14px]">save</span>
+                          <span>Save Changes</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
-              </div>
-
-              <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-[var(--outline-variant)]/20">
-                <button
-                  type="button"
-                  onClick={handleStayAndEdit}
-                  className="px-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container)] text-[var(--on-surface)] text-xs font-mono font-semibold transition-colors cursor-pointer min-h-[38px]"
-                >
-                  Keep Editing
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDiscardAndLeave}
-                  className="px-3 py-1.5 rounded-xl border border-red-500/30 hover:bg-red-500/10 text-red-500 text-xs font-mono font-semibold transition-colors cursor-pointer min-h-[38px]"
-                >
-                  Discard &amp; Leave
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSaveAndLeave}
-                  disabled={saving}
-                  className="px-3.5 py-1.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] text-xs font-mono font-bold hover:brightness-110 active:scale-[0.98] transition-all shadow-sm cursor-pointer flex items-center gap-1.5 disabled:opacity-50 min-h-[38px]"
-                >
-                  {saving ? (
-                    <>
-                      <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
-                      <span>Saving...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="material-symbols-outlined text-[14px]">save</span>
-                      <span>Save &amp; Leave</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </>
-          ) : (
-            /* Standard Unsaved Changes Bar (Bottom-Left in Current View) */
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5 text-xs font-mono text-[var(--on-surface)]">
-                <span className="material-symbols-outlined text-[18px] text-amber-500 animate-pulse">
-                  warning
-                </span>
-                <span>
-                  <strong>Careful:</strong> You have unsaved changes!
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
-                <button
-                  type="button"
-                  onClick={handleResetChanges}
-                  disabled={saving}
-                  className="px-3.5 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container)] text-[var(--on-surface-variant)] text-xs font-mono font-semibold transition-colors cursor-pointer disabled:opacity-50 min-h-[38px]"
-                >
-                  Reset / Undo
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    handleSave();
-                  }}
-                  disabled={saving}
-                  className="px-4 py-1.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] text-xs font-mono font-bold hover:brightness-110 active:scale-[0.98] transition-all shadow-sm cursor-pointer flex items-center gap-1.5 disabled:opacity-50 min-h-[38px]"
-                >
-                  {saving ? (
-                    <>
-                      <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
-                      <span>Saving...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="material-symbols-outlined text-[14px]">save</span>
-                      <span>Save Changes</span>
-                    </>
-                  )}
-                </button>
-              </div>
+              )}
             </div>
           )}
-        </div>
-      )}
 
-      {/* Floating Success Notification Toast (Bottom-Left in Current View) */}
-      {message && (
-        <div className="fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom,0px))] md:bottom-6 left-3 sm:left-4 md:left-[16.5rem] z-50 flex items-center gap-3 px-4 py-3 rounded-2xl bg-[var(--surface-container-high)]/95 backdrop-blur-md text-[var(--on-surface)] border border-emerald-500/40 shadow-2xl font-mono text-xs animate-in slide-in-from-bottom-5 duration-200">
-          <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-500 flex items-center justify-center shrink-0">
-            <span className="material-symbols-outlined text-[16px]">check_circle</span>
-          </div>
-          <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{message}</span>
-          <button
-            type="button"
-            onClick={() => setMessage('')}
-            className="w-5 h-5 rounded-full hover:bg-[var(--surface-container-highest)] flex items-center justify-center text-[var(--outline)] hover:text-[var(--on-surface)] transition-colors cursor-pointer ml-1"
-          >
-            <span className="material-symbols-outlined text-[14px]">close</span>
-          </button>
-        </div>
+          {/* Floating Success Notification Toast (Bottom-Left in Current View) */}
+          {message && (
+            <div className="fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom,0px))] md:bottom-6 left-3 sm:left-4 md:left-[16.5rem] z-[100] flex items-center gap-3 px-4 py-3 rounded-2xl bg-[var(--surface-container-high)]/95 backdrop-blur-md text-[var(--on-surface)] border border-emerald-500/40 shadow-2xl font-mono text-xs animate-in slide-in-from-bottom-5 duration-200 pointer-events-auto">
+              <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-500 flex items-center justify-center shrink-0">
+                <span className="material-symbols-outlined text-[16px]">check_circle</span>
+              </div>
+              <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{message}</span>
+              <button
+                type="button"
+                onClick={() => setMessage('')}
+                className="w-5 h-5 rounded-full hover:bg-[var(--surface-container-highest)] flex items-center justify-center text-[var(--outline)] hover:text-[var(--on-surface)] transition-colors cursor-pointer ml-1"
+              >
+                <span className="material-symbols-outlined text-[14px]">close</span>
+              </button>
+            </div>
+          )}
+        </>,
+        document.body
       )}
     </div>
   );
