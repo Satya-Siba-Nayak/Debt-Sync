@@ -4,8 +4,8 @@ import { ThemeInitializer } from "@/components/ui/ThemeInitializer";
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f8f9ff" },
-    { media: "(prefers-color-scheme: dark)", color: "#0d1117" },
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#161b22" },
   ],
   width: "device-width",
   initialScale: 1,
@@ -100,6 +100,15 @@ export default function RootLayout({
                     root.setAttribute('data-theme', 'light');
                     root.style.colorScheme = 'light';
                   }
+
+                  // Immediately synchronize Android gesture navigation bar color
+                  try {
+                    var themeColor = isDark ? '#161b22' : '#ffffff';
+                    var metaTags = document.querySelectorAll('meta[name="theme-color"]');
+                    for (var m = 0; m < metaTags.length; m++) {
+                      metaTags[m].setAttribute('content', themeColor);
+                    }
+                  } catch (e) {}
 
                   // Protect against React 19 hydration attribute stripping
                   if (window.MutationObserver) {

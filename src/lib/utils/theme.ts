@@ -109,13 +109,16 @@ export function applyTheme(theme: Theme) {
 
   // 4. Update mobile browser chrome theme-color dynamically
   try {
-    let themeMeta = document.querySelector('meta[name="theme-color"]');
-    if (!themeMeta) {
-      themeMeta = document.createElement('meta');
+    const themeColor = isDark ? '#161b22' : '#ffffff';
+    const metaTags = document.querySelectorAll('meta[name="theme-color"]');
+    if (metaTags.length > 0) {
+      metaTags.forEach((tag) => tag.setAttribute('content', themeColor));
+    } else {
+      const themeMeta = document.createElement('meta');
       themeMeta.setAttribute('name', 'theme-color');
+      themeMeta.setAttribute('content', themeColor);
       document.head.appendChild(themeMeta);
     }
-    themeMeta.setAttribute('content', isDark ? '#0d1117' : '#f8f9ff');
   } catch (_) {}
 
   // 5. Broadcast to all ThemeToggle instances and charts across the UI

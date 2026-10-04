@@ -507,61 +507,63 @@ export function DebtDetailModal({
                 No activity logged yet for this debt.
               </div>
             ) : (
-              <div className="relative pl-6 space-y-4 before:content-[''] before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-[var(--outline-variant)]/30">
-                {activityLogs.map((log) => {
-                  let dotColor = 'bg-[var(--outline)]';
-                  let title = log.action;
+              <div className="max-h-56 overflow-y-auto overscroll-contain modal-scroll-container pr-2">
+                <div className="relative pl-6 space-y-4 before:content-[''] before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-[var(--outline-variant)]/30">
+                  {activityLogs.map((log) => {
+                    let dotColor = 'bg-[var(--outline)]';
+                    let title = log.action;
 
-                  if (log.action === 'payment_made') {
-                    dotColor = 'bg-[var(--secondary)]';
-                    title = `Payment Received (${formatCurrency(Number((log.details as any)?.amount || 0), debtCurrency)})`;
-                  } else if (log.action === 'repayment_reported') {
-                    dotColor = 'bg-amber-500';
-                    title = `Repayment Reported (${formatCurrency(Number((log.details as any)?.amount || 0), debtCurrency)})`;
-                  } else if (log.action === 'payment_verified') {
-                    dotColor = 'bg-emerald-500';
-                    title = 'Repayment Verified by Lender';
-                  } else if (log.action === 'payment_disputed') {
-                    dotColor = 'bg-red-500';
-                    title = `Repayment Disputed by Lender (${formatCurrency(Number((log.details as any)?.amount || 0), debtCurrency)})`;
-                  } else if (log.action === 'creator_note_updated') {
-                    dotColor = 'bg-[var(--primary)]';
-                    title = 'Creator Note Updated';
-                  } else if (log.action === 'counterparty_note_updated') {
-                    dotColor = 'bg-[var(--secondary)]';
-                    title = 'Counterparty Note Updated';
-                  } else if (log.action === 'debt_created') {
-                    dotColor = 'bg-[var(--primary)]';
-                    title = `Debt Agreement Created (Principal: ${formatCurrency(Number((log.details as any)?.principal || debt.principal), debtCurrency)})`;
-                  } else if (log.action === 'debt_accepted') {
-                    dotColor = 'bg-emerald-500';
-                    title = 'Agreement Accepted by Counterparty';
-                  } else if (log.action === 'debt_settled') {
-                    dotColor = 'bg-emerald-500';
-                    title = 'Debt Agreement Fully Settled';
-                  }
+                    if (log.action === 'payment_made') {
+                      dotColor = 'bg-[var(--secondary)]';
+                      title = `Payment Received (${formatCurrency(Number((log.details as any)?.amount || 0), debtCurrency)})`;
+                    } else if (log.action === 'repayment_reported') {
+                      dotColor = 'bg-amber-500';
+                      title = `Repayment Reported (${formatCurrency(Number((log.details as any)?.amount || 0), debtCurrency)})`;
+                    } else if (log.action === 'payment_verified') {
+                      dotColor = 'bg-emerald-500';
+                      title = 'Repayment Verified by Lender';
+                    } else if (log.action === 'payment_disputed') {
+                      dotColor = 'bg-red-500';
+                      title = `Repayment Disputed by Lender (${formatCurrency(Number((log.details as any)?.amount || 0), debtCurrency)})`;
+                    } else if (log.action === 'creator_note_updated') {
+                      dotColor = 'bg-[var(--primary)]';
+                      title = 'Creator Note Updated';
+                    } else if (log.action === 'counterparty_note_updated') {
+                      dotColor = 'bg-[var(--secondary)]';
+                      title = 'Counterparty Note Updated';
+                    } else if (log.action === 'debt_created') {
+                      dotColor = 'bg-[var(--primary)]';
+                      title = `Debt Agreement Created (Principal: ${formatCurrency(Number((log.details as any)?.principal || debt.principal), debtCurrency)})`;
+                    } else if (log.action === 'debt_accepted') {
+                      dotColor = 'bg-emerald-500';
+                      title = 'Agreement Accepted by Counterparty';
+                    } else if (log.action === 'debt_settled') {
+                      dotColor = 'bg-emerald-500';
+                      title = 'Debt Agreement Fully Settled';
+                    }
 
-                  return (
-                    <div key={log.id} className="relative group">
-                      <div
-                        className={`absolute -left-[23px] top-1 w-2.5 h-2.5 rounded-full ${dotColor} ring-4 ring-[var(--surface)]`}
-                      />
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                        <div className="font-heading font-semibold text-xs text-[var(--on-surface)]">
-                          {title}
+                    return (
+                      <div key={log.id} className="relative group">
+                        <div
+                          className={`absolute -left-[23px] top-1 w-2.5 h-2.5 rounded-full ${dotColor} ring-4 ring-[var(--surface)]`}
+                        />
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                          <div className="font-heading font-semibold text-xs text-[var(--on-surface)]">
+                            {title}
+                          </div>
+                          <div className="font-mono text-[10px] text-[var(--on-surface-variant)]">
+                            {new Date(log.created_at).toLocaleString()}
+                          </div>
                         </div>
-                        <div className="font-mono text-[10px] text-[var(--on-surface-variant)]">
-                          {new Date(log.created_at).toLocaleString()}
-                        </div>
+                        {log.details && (log.details as any).note && (
+                          <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">
+                            {(log.details as any).note}
+                          </p>
+                        )}
                       </div>
-                      {log.details && (log.details as any).note && (
-                        <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">
-                          {(log.details as any).note}
-                        </p>
-                      )}
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>

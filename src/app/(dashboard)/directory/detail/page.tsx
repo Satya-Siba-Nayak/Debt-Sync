@@ -442,17 +442,17 @@ function PersonDebtDetailContent() {
       </Link>
 
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/30 shadow-sm">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-surface-container-lowest p-4 sm:p-6 rounded-2xl border border-outline-variant/30 shadow-sm overflow-hidden">
+        <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
           <Avatar
             src={person?.avatar_url}
             name={person?.full_name || person?.email || 'User'}
             size="lg"
-            className="rounded-2xl shadow-inner border border-outline-variant/20"
+            className="rounded-2xl shadow-inner border border-outline-variant/20 shrink-0"
           />
-          <div>
-            <div className="flex items-center gap-2.5">
-              <h1 className="font-heading text-xl md:text-2xl font-bold text-on-surface">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="font-heading text-lg sm:text-2xl font-bold text-on-surface truncate max-w-[200px] sm:max-w-none">
                 {person?.full_name || person?.email || 'Contact Ledger'}
               </h1>
               <Chip
@@ -460,7 +460,7 @@ function PersonDebtDetailContent() {
                 variant={netBalance !== 0 ? 'active' : 'settled'}
               />
               <div
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--surface-container)] border font-mono text-xs shadow-2xs ${
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--surface-container)] border font-mono text-xs shadow-2xs shrink-0 ${
                   contactTrust.score === -1
                     ? 'border-[var(--outline-variant)]/30 text-[var(--outline)]'
                     : 'border-[var(--outline-variant)]/30'
@@ -489,13 +489,13 @@ function PersonDebtDetailContent() {
                 const detected = detectUPIApp(person.upi_id);
                 return (
                   <div
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--primary)]/10 border border-[var(--primary)]/20 font-mono text-xs text-[var(--primary)] shadow-2xs"
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--primary)]/10 border border-[var(--primary)]/20 font-mono text-xs text-[var(--primary)] shadow-2xs shrink-0 max-w-full"
                     title={`UPI ID: ${person.upi_id} (${detected.name})`}
                   >
-                    <span className="material-symbols-outlined text-[14px]">{detected.icon}</span>
-                    <span className="font-semibold text-[11px] truncate max-w-[150px]">{person.upi_id}</span>
+                    <span className="material-symbols-outlined text-[14px] shrink-0">{detected.icon}</span>
+                    <span className="font-semibold text-[11px] truncate max-w-[130px]">{person.upi_id}</span>
                     {detected.isKnownApp && (
-                      <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded border ${detected.badgeClass}`}>
+                      <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded border shrink-0 ${detected.badgeClass}`}>
                         {detected.shortName}
                       </span>
                     )}
@@ -503,13 +503,13 @@ function PersonDebtDetailContent() {
                 );
               })()}
             </div>
-            <p className="font-mono text-xs text-on-surface-variant mt-1">
+            <p className="font-mono text-xs text-on-surface-variant mt-1 truncate">
               {person?.email} {person?.phone && `• ${person?.phone}`}
             </p>
             {person?.secondary_emails && person.secondary_emails.length > 0 && (
-              <p className="font-mono text-[11px] text-[var(--outline)] mt-0.5 flex items-center gap-1">
-                <span className="material-symbols-outlined text-[13px]">school</span>
-                <span>Secondary: {person.secondary_emails.join(', ')}</span>
+              <p className="font-mono text-[11px] text-[var(--outline)] mt-0.5 flex items-center gap-1 truncate">
+                <span className="material-symbols-outlined text-[13px] shrink-0">school</span>
+                <span className="truncate">Secondary: {person.secondary_emails.join(', ')}</span>
               </p>
             )}
           </div>
@@ -1081,71 +1081,80 @@ function PersonDebtDetailContent() {
       )}
 
       {/* Activity Log Stepper */}
-      <section className="bg-surface-container-lowest rounded-2xl p-6 md:p-8 border border-outline-variant/30 shadow-sm">
-        <h3 className="font-heading text-lg font-bold text-on-surface mb-6">
-          Activity Log &amp; Audit Trail
-        </h3>
+      <section className="bg-surface-container-lowest rounded-2xl p-4 sm:p-6 md:p-8 border border-outline-variant/30 shadow-sm">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-heading text-lg font-bold text-on-surface">
+            Activity Log &amp; Audit Trail
+          </h3>
+          {activityLogs.length > 0 && (
+            <span className="font-mono text-[11px] text-on-surface-variant bg-surface-container px-2 py-0.5 rounded-full">
+              {activityLogs.length} events
+            </span>
+          )}
+        </div>
 
         {activityLogs.length === 0 ? (
           <p className="font-mono text-xs text-on-surface-variant py-4">
             No activity logged yet.
           </p>
         ) : (
-          <div className="relative pl-6 space-y-6 before:content-[''] before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-outline-variant/30">
-            {activityLogs.map((log) => {
-              let dotColor = 'bg-outline';
-              let title = log.action;
+          <div className="max-h-[300px] overflow-y-auto overscroll-contain modal-scroll-container pr-2">
+            <div className="relative pl-6 space-y-5 before:content-[''] before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-outline-variant/30">
+              {activityLogs.map((log) => {
+                let dotColor = 'bg-outline';
+                let title = log.action;
 
-              if (log.action === 'payment_made') {
-                dotColor = 'bg-secondary';
-                title = `Payment Received (${formatCurrency(Number((log.details as any)?.amount || 0), currency)})`;
-              } else if (log.action === 'repayment_reported') {
-                dotColor = 'bg-amber-500';
-                title = `Repayment Reported (${formatCurrency(Number((log.details as any)?.amount || 0), currency)})`;
-              } else if (log.action === 'payment_verified') {
-                dotColor = 'bg-emerald-500';
-                title = 'Repayment Verified by Lender';
-              } else if (log.action === 'creator_note_updated') {
-                dotColor = 'bg-primary';
-                title = 'Creator Note Updated';
-              } else if (log.action === 'counterparty_note_updated') {
-                dotColor = 'bg-secondary';
-                title = 'Counterparty Note Updated';
-              } else if (log.action === 'debt_created') {
-                dotColor = 'bg-primary';
-                title = `Debt Record Created (Principal: ${formatCurrency(Number((log.details as any)?.principal || 0), currency)})`;
-              } else if (log.action === 'debt_accepted') {
-                dotColor = 'bg-success';
-                title = 'Agreement Accepted by Counterparty';
-              } else if (log.action === 'payment_disputed') {
-                dotColor = 'bg-red-500';
-                title = `Repayment Disputed by Lender (${formatCurrency(Number((log.details as any)?.amount || 0), currency)})`;
-              } else if (log.action === 'debt_settled') {
-                dotColor = 'bg-emerald-500';
-                title = 'Debt Agreement Fully Settled';
-              }
+                if (log.action === 'payment_made') {
+                  dotColor = 'bg-secondary';
+                  title = `Payment Received (${formatCurrency(Number((log.details as any)?.amount || 0), currency)})`;
+                } else if (log.action === 'repayment_reported') {
+                  dotColor = 'bg-amber-500';
+                  title = `Repayment Reported (${formatCurrency(Number((log.details as any)?.amount || 0), currency)})`;
+                } else if (log.action === 'payment_verified') {
+                  dotColor = 'bg-emerald-500';
+                  title = 'Repayment Verified by Lender';
+                } else if (log.action === 'creator_note_updated') {
+                  dotColor = 'bg-primary';
+                  title = 'Creator Note Updated';
+                } else if (log.action === 'counterparty_note_updated') {
+                  dotColor = 'bg-secondary';
+                  title = 'Counterparty Note Updated';
+                } else if (log.action === 'debt_created') {
+                  dotColor = 'bg-primary';
+                  title = `Debt Record Created (Principal: ${formatCurrency(Number((log.details as any)?.principal || 0), currency)})`;
+                } else if (log.action === 'debt_accepted') {
+                  dotColor = 'bg-success';
+                  title = 'Agreement Accepted by Counterparty';
+                } else if (log.action === 'payment_disputed') {
+                  dotColor = 'bg-red-500';
+                  title = `Repayment Disputed by Lender (${formatCurrency(Number((log.details as any)?.amount || 0), currency)})`;
+                } else if (log.action === 'debt_settled') {
+                  dotColor = 'bg-emerald-500';
+                  title = 'Debt Agreement Fully Settled';
+                }
 
-              return (
-                <div key={log.id} className="relative group">
-                  <div
-                    className={`absolute -left-[23px] top-1 w-3 h-3 rounded-full ${dotColor} ring-4 ring-surface-container-lowest`}
-                  />
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                    <div className="font-heading font-semibold text-sm text-on-surface">
-                      {title}
+                return (
+                  <div key={log.id} className="relative group">
+                    <div
+                      className={`absolute -left-[23px] top-1 w-3 h-3 rounded-full ${dotColor} ring-4 ring-surface-container-lowest`}
+                    />
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                      <div className="font-heading font-semibold text-sm text-on-surface">
+                        {title}
+                      </div>
+                      <div className="font-mono text-[11px] text-on-surface-variant">
+                        {new Date(log.created_at).toLocaleString()}
+                      </div>
                     </div>
-                    <div className="font-mono text-[11px] text-on-surface-variant">
-                      {new Date(log.created_at).toLocaleString()}
-                    </div>
+                    {log.details && (log.details as any).note && (
+                      <p className="text-xs text-on-surface-variant mt-0.5">
+                        {(log.details as any).note}
+                      </p>
+                    )}
                   </div>
-                  {log.details && (log.details as any).note && (
-                    <p className="text-xs text-on-surface-variant mt-0.5">
-                      {(log.details as any).note}
-                    </p>
-                  )}
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         )}
       </section>
