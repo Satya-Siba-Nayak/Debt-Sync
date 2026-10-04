@@ -504,3 +504,99 @@ export function formatPaymentMethodDisplay(
   };
 }
 
+export interface UPIAppLauncher {
+  id: string;
+  name: string;
+  shortName: string;
+  icon: string;
+  badgeClass: string;
+  androidIntent: string;
+  iosScheme?: string;
+  fallbackScheme: string;
+}
+
+export const UPI_POPULAR_APPS: UPIAppLauncher[] = [
+  {
+    id: 'gpay',
+    name: 'Google Pay',
+    shortName: 'GPay',
+    icon: 'smartphone',
+    badgeClass: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/25',
+    androidIntent: 'intent://#Intent;package=com.google.android.apps.nbu.paisa.user;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    iosScheme: 'gpay://',
+    fallbackScheme: 'gpay://',
+  },
+  {
+    id: 'phonepe',
+    name: 'PhonePe',
+    shortName: 'PhonePe',
+    icon: 'smartphone',
+    badgeClass: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/25',
+    androidIntent: 'intent://#Intent;package=com.phonepe.app;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    iosScheme: 'phonepe://',
+    fallbackScheme: 'phonepe://',
+  },
+  {
+    id: 'paytm',
+    name: 'Paytm',
+    shortName: 'Paytm',
+    icon: 'account_balance_wallet',
+    badgeClass: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/25',
+    androidIntent: 'intent://#Intent;package=net.one97.paytm;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    iosScheme: 'paytmmp://',
+    fallbackScheme: 'paytmmp://',
+  },
+  {
+    id: 'cred',
+    name: 'CRED',
+    shortName: 'CRED',
+    icon: 'credit_card',
+    badgeClass: 'bg-neutral-500/10 text-neutral-800 dark:text-neutral-200 border-neutral-500/25',
+    androidIntent: 'intent://#Intent;package=com.dreamplug.androidapp;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    iosScheme: 'cred://',
+    fallbackScheme: 'cred://',
+  },
+  {
+    id: 'bhim',
+    name: 'BHIM UPI',
+    shortName: 'BHIM',
+    icon: 'qr_code_2',
+    badgeClass: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25',
+    androidIntent: 'intent://#Intent;package=in.org.npci.upiapp;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    iosScheme: 'upi://',
+    fallbackScheme: 'upi://',
+  },
+];
+
+/**
+ * Directly launches a UPI application on mobile via OS package launcher intent,
+ * avoiding the browser-originated P2P `upi://pay` intent that bank switches decline.
+ */
+export function launchUPIApp(appId: string): boolean {
+  if (typeof window === 'undefined') return false;
+
+  const app = UPI_POPULAR_APPS.find((a) => a.id === appId);
+  if (!app) {
+    window.location.href = 'upi://';
+    return true;
+  }
+
+  const ua = (navigator.userAgent || '').toLowerCase();
+  const isAndroid = /android/i.test(ua);
+  const isIOS = /iphone|ipad|ipod/i.test(ua);
+
+  try {
+    if (isAndroid && app.androidIntent) {
+      window.location.href = app.androidIntent;
+    } else if (isIOS && app.iosScheme) {
+      window.location.href = app.iosScheme;
+    } else {
+      window.location.href = app.fallbackScheme;
+    }
+    return true;
+  } catch (err) {
+    console.error('Failed to launch UPI app:', err);
+    return false;
+  }
+}
+
