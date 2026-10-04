@@ -25,7 +25,7 @@ export function EditPendingDebtModal({
   onClose,
   onDebtUpdated,
 }: EditPendingDebtModalProps) {
-  const supabase = createClient();
+  const supabase = React.useMemo(() => createClient(), []);
 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -50,9 +50,18 @@ export function EditPendingDebtModal({
   const [splitTitle, setSplitTitle] = useState<string>(() => split?.title || '');
   const [applyToAllGroup, setApplyToAllGroup] = useState<boolean>(true);
 
-  // Sync state whenever modal opens or debt prop changes
+  const prevIsOpenRef = React.useRef(false);
+  const prevDebtIdRef = React.useRef<string | null>(null);
+
+  // Sync state ONLY when modal is first opened or when editing a different debt
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      prevIsOpenRef.current = false;
+      return;
+    }
+
+    const isJustOpening = !prevIsOpenRef.current;
+    const isDifferentDebt = prevDebtIdRef.current !== debt.id;
 
     async function initUser() {
       const user = await getCurrentUserFast(supabase);
@@ -60,20 +69,25 @@ export function EditPendingDebtModal({
     }
     initUser();
 
-    setPrincipal(Number(debt.principal) || 0);
-    setPrincipalStr(String(debt.principal || ''));
-    setCurrency(debt.currency || 'inr');
-    setInterestType(debt.interest_type || 'none');
-    setInterestRate(Number(debt.interest_rate) || 0);
-    setInterestRateStr(debt.interest_rate !== null && debt.interest_rate !== undefined ? String(debt.interest_rate) : '0.00');
-    setCompoundFreq((debt.compound_freq as any) || 'monthly');
-    setDueDate(debt.due_date ? debt.due_date.split('T')[0] : '');
-    setNotes(getCleanDebtNotes(debt.notes));
+    if (isJustOpening || isDifferentDebt) {
+      setPrincipal(Number(debt.principal) || 0);
+      setPrincipalStr(String(debt.principal || ''));
+      setCurrency(debt.currency || 'inr');
+      setInterestType(debt.interest_type || 'none');
+      setInterestRate(Number(debt.interest_rate) || 0);
+      setInterestRateStr(debt.interest_rate !== null && debt.interest_rate !== undefined ? String(debt.interest_rate) : '0.00');
+      setCompoundFreq((debt.compound_freq as any) || 'monthly');
+      setDueDate(debt.due_date ? debt.due_date.split('T')[0] : '');
+      setNotes(getCleanDebtNotes(debt.notes));
 
-    const s = parseSplitDetails(debt);
-    setSplitTitle(s?.title || '');
-    setError('');
-  }, [isOpen, debt, supabase]);
+      const s = parseSplitDetails(debt);
+      setSplitTitle(s?.title || '');
+      setError('');
+      prevDebtIdRef.current = debt.id;
+    }
+
+    prevIsOpenRef.current = true;
+  }, [isOpen, debt.id, debt.notes, debt.principal, debt.currency, debt.interest_type, debt.interest_rate, debt.compound_freq, debt.due_date, supabase]);
 
   const isLender = currentUserId ? debt.lender_id === currentUserId : true;
   const otherParty = isLender ? debt.borrower : debt.lender;

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { Modal } from '../ui/Modal';
 import { createClient } from '@/lib/supabase/client';
@@ -47,8 +47,13 @@ export function DebtDetailModal({
   const [isNoteModalOpen, setIsNoteModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
+  const prevDebtIdRef = useRef<string | null>(null);
+
   useEffect(() => {
-    setInternalDebt(initialDebt);
+    if (initialDebt?.id && initialDebt.id !== prevDebtIdRef.current) {
+      setInternalDebt(initialDebt);
+      prevDebtIdRef.current = initialDebt.id;
+    }
   }, [initialDebt]);
 
   const debt = internalDebt || initialDebt;
@@ -95,10 +100,10 @@ export function DebtDetailModal({
   }, [initialDebt?.id, supabase]);
 
   useEffect(() => {
-    if (isOpen && debt) {
+    if (isOpen && initialDebt?.id) {
       fetchDebtDetails();
     }
-  }, [isOpen, debt, fetchDebtDetails]);
+  }, [isOpen, initialDebt?.id, fetchDebtDetails]);
 
   if (!debt) return null;
 

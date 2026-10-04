@@ -20,19 +20,34 @@ export function CounterpartyNoteModal({
   currentUserId,
   onNoteUpdated,
 }: CounterpartyNoteModalProps) {
-  const supabase = createClient();
+  const supabase = React.useMemo(() => createClient(), []);
   const isCreator = debt.created_by === currentUserId;
 
   const [creatorNote, setCreatorNote] = useState(debt.notes || '');
   const [counterpartyNote, setCounterpartyNote] = useState(debt.counterparty_notes || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const prevIsOpenRef = React.useRef(false);
+  const prevDebtIdRef = React.useRef<string | null>(null);
 
   useEffect(() => {
-    setCreatorNote(debt.notes || '');
-    setCounterpartyNote(debt.counterparty_notes || '');
-    setError('');
-  }, [debt, isOpen]);
+    if (!isOpen) {
+      prevIsOpenRef.current = false;
+      return;
+    }
+
+    const isJustOpening = !prevIsOpenRef.current;
+    const isDifferentDebt = prevDebtIdRef.current !== debt.id;
+
+    if (isJustOpening || isDifferentDebt) {
+      setCreatorNote(debt.notes || '');
+      setCounterpartyNote(debt.counterparty_notes || '');
+      setError('');
+      prevDebtIdRef.current = debt.id;
+    }
+
+    prevIsOpenRef.current = true;
+  }, [debt.id, isOpen]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();

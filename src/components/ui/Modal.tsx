@@ -22,28 +22,42 @@ export function Modal({
 }: ModalProps) {
   const [mounted, setMounted] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  const prevIsOpenRef = useRef(false);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
+  // ONLY reset scroll position on the initial opening transition
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-      window.addEventListener('keydown', handleKeyDown);
-      // Reset scroll position on open so it always starts at the top
+    if (isOpen && !prevIsOpenRef.current) {
       if (contentRef.current) {
         contentRef.current.scrollTop = 0;
       }
     }
+    prevIsOpenRef.current = isOpen;
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCloseRef.current();
+    };
+
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleKeyDown);
+
     return () => {
       document.body.style.overflow = 'unset';
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen || !mounted) return null;
 
@@ -91,7 +105,7 @@ export function Modal({
         {/* Scrollable Content Body */}
         <div
           ref={contentRef}
-          className="flex-1 overflow-y-auto overscroll-contain modal-scroll-container p-4 sm:p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] sm:pb-6"
+          className="flex-1 overflow-y-auto overscroll-contain modal-scroll-container p-4 sm:p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] sm:pb-6 touch-pan-y"
         >
           {children}
         </div>

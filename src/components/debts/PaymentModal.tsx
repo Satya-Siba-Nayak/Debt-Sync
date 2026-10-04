@@ -58,7 +58,7 @@ export function PaymentModal({
   const [generatingQr, setGeneratingQr] = useState(false);
   const [isCurrentUserIsolated, setIsCurrentUserIsolated] = useState(false);
 
-  const supabase = createClient();
+  const supabase = React.useMemo(() => createClient(), []);
   const detectedLenderApp = detectUPIApp(lenderProfile?.upi_id);
 
   // Automatically sort UPI apps so that the paying user's own profile app appears 1st on top
@@ -178,8 +178,17 @@ export function PaymentModal({
     };
   }, [upiLink]);
 
+  const prevIsOpenRef = React.useRef(false);
+  const prevDebtIdRef = React.useRef<string | null>(null);
+
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      prevIsOpenRef.current = false;
+      return;
+    }
+
+    const isJustOpening = !prevIsOpenRef.current;
+    const isDifferentDebt = prevDebtIdRef.current !== debt.id;
 
     async function loadRoleAndLimits() {
       setCheckingLimits(true);
@@ -224,11 +233,15 @@ export function PaymentModal({
           );
           setPendingAmount(totalPending);
 
-          const allowable = Math.max(0, round2(currentBalance - totalPending));
-          setAmountUnified(round2(Math.min(allowable, 500)));
+          if (isJustOpening || isDifferentDebt) {
+            const allowable = Math.max(0, round2(currentBalance - totalPending));
+            setAmountUnified(round2(Math.min(allowable, 500)));
+          }
         } else {
           setPendingAmount(0);
-          setAmountUnified(round2(Math.min(currentBalance, 500)));
+          if (isJustOpening || isDifferentDebt) {
+            setAmountUnified(round2(Math.min(currentBalance, 500)));
+          }
         }
       } catch (err) {
         console.error('Error loading payment limits:', err);
@@ -237,7 +250,12 @@ export function PaymentModal({
       }
     }
 
-    loadRoleAndLimits();
+    if (isJustOpening || isDifferentDebt) {
+      loadRoleAndLimits();
+      prevDebtIdRef.current = debt.id;
+    }
+
+    prevIsOpenRef.current = true;
   }, [isOpen, debt.id, debt.lender_id, currentBalance, supabase]);
 
   const maxAllowable = isLender
