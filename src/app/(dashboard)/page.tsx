@@ -256,12 +256,19 @@ export default function GlobalDashboardPage() {
                             (Total Bill: {formatCurrency(split.totalAmount, split.currency)} split between {split.participants.length} people)
                           </span>
                         )}
-                        {!split && (
+                        {d.interest_type && d.interest_type !== 'none' && d.interest_rate ? (
+                          <>
+                            {' '}&bull;{' '}
+                            <span className="text-amber-600 dark:text-amber-400 font-semibold">
+                              {d.interest_rate}% {d.interest_type} APR
+                            </span>
+                          </>
+                        ) : !split ? (
                           <>
                             {' '}&bull;{' '}
                             {d.interest_type === 'none' ? '0% Interest-Free' : `${d.interest_rate}% ${d.interest_type}`}
                           </>
-                        )}
+                        ) : null}
                         {cleanNotes ? ` &bull; "${cleanNotes}"` : ''}
                       </div>
 

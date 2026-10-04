@@ -62,6 +62,13 @@ export function SplitBillModal({
   const [transactionDate, setTransactionDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [notes, setNotes] = useState('');
 
+  // Terms & Interest states
+  const [interestType, setInterestType] = useState<'none' | 'simple' | 'compound'>('none');
+  const [interestRateStr, setInterestRateStr] = useState<string>('5.00');
+  const [interestRate, setInterestRate] = useState<number>(5.0);
+  const [compoundFreq, setCompoundFreq] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('monthly');
+  const [dueDate, setDueDate] = useState('');
+
   // Participants
   const [contacts, setContacts] = useState<SplitPersonOption[]>([]);
   const [selectedParticipants, setSelectedParticipants] = useState<SplitPersonOption[]>([]);
@@ -224,6 +231,12 @@ export function SplitBillModal({
     const sanitized = val.replace(/^0+(?=\d)/, '');
     setTotalAmountStr(sanitized);
     setTotalAmount(parseFloat(sanitized) || 0);
+  };
+
+  const handleInterestRateChange = (val: string) => {
+    setInterestRateStr(val);
+    const parsed = parseFloat(val);
+    setInterestRate(isNaN(parsed) ? 0 : parsed);
   };
 
   // Toggle or add participant
@@ -434,6 +447,10 @@ export function SplitBillModal({
         participants: fullParticipantsList,
         notes: notes.trim() || null,
         createdAt: originationDate.toISOString(),
+        interestType,
+        interestRate: interestType !== 'none' ? interestRate : null,
+        compoundFreq: interestType === 'compound' ? compoundFreq : null,
+        dueDate: dueDate ? new Date(dueDate + 'T23:59:59Z').toISOString() : null,
       };
 
       const encodedNotes = buildSplitNotes(splitDetails, notes);
@@ -442,20 +459,25 @@ export function SplitBillModal({
       for (const p of participantShares) {
         let debtCreated = false;
 
+        const debtPayload = {
+          created_by: user.id,
+          lender_id: user.id,
+          borrower_id: p.id,
+          principal: p.shareAmount,
+          currency,
+          interest_type: interestType,
+          interest_rate: interestType !== 'none' ? interestRate : null,
+          compound_freq: interestType === 'compound' ? compoundFreq : null,
+          due_date: dueDate ? new Date(dueDate + 'T23:59:59Z').toISOString() : null,
+          status: 'pending',
+          notes: encodedNotes,
+          created_at: originationDate.toISOString(),
+        };
+
         // 1. Attempt first with native split_group_id & split_details columns
         try {
           const { error: insertErr } = await supabase.from('debts').insert({
-            created_by: user.id,
-            lender_id: user.id,
-            borrower_id: p.id,
-            principal: p.shareAmount,
-            currency,
-            interest_type: 'none',
-            interest_rate: null,
-            compound_freq: null,
-            status: 'pending',
-            notes: encodedNotes,
-            created_at: originationDate.toISOString(),
+            ...debtPayload,
             split_group_id: groupId,
             split_details: splitDetails,
           });
@@ -469,19 +491,7 @@ export function SplitBillModal({
 
         // 2. Fallback without new columns if schema migration not yet applied
         if (!debtCreated) {
-          const { error: fallbackErr } = await supabase.from('debts').insert({
-            created_by: user.id,
-            lender_id: user.id,
-            borrower_id: p.id,
-            principal: p.shareAmount,
-            currency,
-            interest_type: 'none',
-            interest_rate: null,
-            compound_freq: null,
-            status: 'pending',
-            notes: encodedNotes,
-            created_at: originationDate.toISOString(),
-          });
+          const { error: fallbackErr } = await supabase.from('debts').insert(debtPayload);
           if (fallbackErr) throw fallbackErr;
         }
 
@@ -497,7 +507,9 @@ export function SplitBillModal({
             senderName: currentUser?.name || 'A friend',
             amount: p.shareAmount,
             currency,
-            notes: `Split: "${title.trim()}" (Total: ${currency.toUpperCase()} ${totalAmount})`,
+            notes: `Split: "${title.trim()}" (Total: ${currency.toUpperCase()} ${totalAmount})${
+              interestType !== 'none' ? ` • ${interestRate}% ${interestType} APR` : ''
+            }`,
           });
         }
       }
@@ -515,6 +527,10 @@ export function SplitBillModal({
           totalParticipants: totalCount,
           participantCount: selectedParticipants.length,
           totalOwedToYou: totalOwedToMe,
+          interestType,
+          interestRate: interestType !== 'none' ? interestRate : null,
+          compoundFreq: interestType === 'compound' ? compoundFreq : null,
+          dueDate: dueDate || null,
           participants: fullParticipantsList.map((pt) => ({
             id: pt.userId,
             name: pt.name,
@@ -686,14 +702,22 @@ export function SplitBillModal({
         {/* 4. Split Financial Preview Bento */}
         {totalAmount > 0 && totalCount > 0 && (
           <div className="p-4 rounded-xl border border-[var(--primary)]/25 bg-[var(--primary)]/5 space-y-3">
-            <div className="flex justify-between items-center text-xs font-mono">
+            <div className="flex justify-between items-center text-xs font-mono flex-wrap gap-2">
               <span className="font-bold text-[var(--on-surface)] flex items-center gap-1.5">
                 <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">calculate</span>
                 <span>Split Breakdown ({totalCount} People)</span>
               </span>
-              <span className="text-[var(--primary)] font-bold">
-                {formatCurrency(totalAmount, currency)} Total
-              </span>
+              <div className="flex items-center gap-2">
+                {interestType !== 'none' && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/15 text-amber-500 border border-amber-500/30 flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[12px]">trending_up</span>
+                    <span>+{interestRate}% {interestType.toUpperCase()} APR</span>
+                  </span>
+                )}
+                <span className="text-[var(--primary)] font-bold">
+                  {formatCurrency(totalAmount, currency)} Total
+                </span>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs font-mono">
@@ -782,9 +806,14 @@ export function SplitBillModal({
                     <span className="font-mono text-xs font-bold text-[var(--on-surface)] block">
                       {formatCurrency(p.shareAmount, currency)}
                     </span>
-                    <span className="font-mono text-[10px] text-amber-600 dark:text-amber-400">
+                    <span className="font-mono text-[10px] text-amber-600 dark:text-amber-400 block">
                       Owes You
                     </span>
+                    {interestType !== 'none' && (
+                      <span className="font-mono text-[9px] text-[var(--primary)] font-bold block">
+                        +{interestRate}% APR
+                      </span>
+                    )}
                   </div>
 
                   <button
@@ -979,7 +1008,202 @@ export function SplitBillModal({
           )}
         </div>
 
-        {/* 6. Date & Optional Notes */}
+        {/* 6. Terms & Interest Rates */}
+        <div className="p-4 rounded-xl border border-[var(--outline-variant)]/30 bg-[var(--surface-container-low)] space-y-3">
+          <div className="flex items-center justify-between">
+            <label className="font-mono text-xs uppercase tracking-wider text-[var(--on-surface-variant)] font-semibold flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">percent</span>
+              <span>Terms &amp; Interest Rates</span>
+            </label>
+            <span className="text-[11px] font-mono text-[var(--on-surface-variant)]">
+              {interestType === 'none' ? '0% Accrual (Interest-Free)' : `${interestRate}% ${interestType.toUpperCase()} APR`}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            <button
+              type="button"
+              onClick={() => setInterestType('none')}
+              className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                interestType === 'none'
+                  ? 'border-[var(--primary)] bg-[var(--primary-container)]/15 ring-1 ring-[var(--primary)]'
+                  : 'border-[var(--outline-variant)]/30 hover:border-[var(--outline-variant)] bg-[var(--surface)]'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[16px] text-[var(--on-surface-variant)] block mb-0.5">
+                block
+              </span>
+              <div className="font-mono text-xs font-bold text-[var(--on-surface)]">NONE</div>
+              <div className="text-[10px] text-[var(--on-surface-variant)] mt-0.5">0% Accrual</div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setInterestType('simple');
+                if (interestRate === 0) {
+                  setInterestRate(5);
+                  setInterestRateStr('5.00');
+                }
+              }}
+              className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                interestType === 'simple'
+                  ? 'border-[var(--primary)] bg-[var(--primary-container)]/15 ring-1 ring-[var(--primary)]'
+                  : 'border-[var(--outline-variant)]/30 hover:border-[var(--outline-variant)] bg-[var(--surface)]'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[16px] text-[var(--secondary)] block mb-0.5">
+                trending_up
+              </span>
+              <div className="font-mono text-xs font-bold text-[var(--on-surface)]">SIMPLE</div>
+              <div className="text-[10px] text-[var(--on-surface-variant)] mt-0.5">Linear APR</div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setInterestType('compound');
+                if (interestRate === 0) {
+                  setInterestRate(5);
+                  setInterestRateStr('5.00');
+                }
+              }}
+              className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                interestType === 'compound'
+                  ? 'border-[var(--primary)] bg-[var(--primary-container)]/15 ring-1 ring-[var(--primary)]'
+                  : 'border-[var(--outline-variant)]/30 hover:border-[var(--outline-variant)] bg-[var(--surface)]'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[16px] text-[var(--primary)] block mb-0.5">
+                auto_graph
+              </span>
+              <div className="font-mono text-xs font-bold text-[var(--on-surface)]">COMPOUND</div>
+              <div className="text-[10px] text-[var(--on-surface-variant)] mt-0.5">Exponential</div>
+            </button>
+          </div>
+
+          {interestType !== 'none' && (
+            <div className="pt-2 border-t border-[var(--outline-variant)]/20 space-y-3 animate-in fade-in duration-150">
+              <div className="flex justify-between items-center">
+                <div>
+                  <span className="font-mono text-xs font-bold text-[var(--on-surface)] block">
+                    Annual Percentage Rate (APR)
+                  </span>
+                  <span className="font-mono text-[10px] text-[var(--outline)]">
+                    Applied equally to all co-participant shares
+                  </span>
+                </div>
+
+                <div className="relative w-24">
+                  <input
+                    type="number"
+                    min="0"
+                    max="500"
+                    step="0.01"
+                    value={interestRateStr}
+                    placeholder="0.00"
+                    onChange={(e) => handleInterestRateChange(e.target.value)}
+                    onFocus={(e) => e.target.select()}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-sm font-bold text-right pr-6 outline-none focus:border-[var(--primary)]"
+                  />
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-xs font-bold text-[var(--primary)] pointer-events-none">
+                    %
+                  </span>
+                </div>
+              </div>
+
+              {/* APR Slider */}
+              <div className="space-y-1">
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="0.05"
+                  value={Math.min(100, Math.max(0, interestRate))}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setInterestRate(val);
+                    setInterestRateStr(val.toFixed(2));
+                  }}
+                  className="w-full accent-[var(--primary)] cursor-pointer"
+                />
+                <div className="flex justify-between font-mono text-[10px] text-[var(--outline)] px-0.5">
+                  <span>0%</span>
+                  <span>25%</span>
+                  <span>50%</span>
+                  <span>75%</span>
+                  <span>100%</span>
+                </div>
+              </div>
+
+              {/* Quick Presets */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--outline)] mr-1">Presets:</span>
+                {[5, 10, 15, 24, 36].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => {
+                      setInterestRate(preset);
+                      setInterestRateStr(preset.toFixed(2));
+                    }}
+                    className={`px-2 py-0.5 rounded-md font-mono text-[10px] border transition-colors cursor-pointer ${
+                      interestRate === preset
+                        ? 'bg-[var(--primary)] text-[var(--on-primary)] border-[var(--primary)] font-bold'
+                        : 'border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container)] text-[var(--on-surface-variant)]'
+                    }`}
+                  >
+                    {preset}%
+                  </button>
+                ))}
+              </div>
+
+              {/* Compounding Frequency and Due Date */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                {interestType === 'compound' && (
+                  <div>
+                    <label className="block font-mono text-[11px] uppercase tracking-wider text-[var(--on-surface-variant)] font-semibold mb-1">
+                      Compounding Frequency
+                    </label>
+                    <select
+                      value={compoundFreq}
+                      onChange={(e) => setCompoundFreq(e.target.value as any)}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-xs font-mono outline-none focus:border-[var(--primary)]"
+                    >
+                      <option value="daily">Daily Compounding</option>
+                      <option value="weekly">Weekly Compounding</option>
+                      <option value="monthly">Monthly Compounding</option>
+                      <option value="yearly">Yearly Compounding</option>
+                    </select>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block font-mono text-[11px] uppercase tracking-wider text-[var(--on-surface-variant)] font-semibold mb-1">
+                    Repayment Due Date (Optional)
+                  </label>
+                  <input
+                    type="date"
+                    min={transactionDate}
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-xs font-mono outline-none focus:border-[var(--primary)]"
+                  />
+                </div>
+              </div>
+
+              {/* Clarification info */}
+              <p className="text-[11px] font-mono text-amber-600 dark:text-amber-400 bg-amber-500/10 p-2 rounded-lg border border-amber-500/20 flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-[15px] shrink-0">info</span>
+                <span>
+                  Each participant will be charged {interestRate}% {interestType} interest on their share until settled.
+                </span>
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* 7. Date & Optional Notes */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
           <div>
             <label className="block font-mono text-xs uppercase tracking-wider text-[var(--on-surface-variant)] font-semibold mb-1">
@@ -1032,6 +1256,7 @@ export function SplitBillModal({
                 <span className="material-symbols-outlined text-[16px]">call_split</span>
                 <span>
                   Split {formatCurrency(totalAmount, currency)} ({totalCount} People)
+                  {interestType !== 'none' ? ` @ ${interestRate}% APR` : ''}
                 </span>
               </>
             )}

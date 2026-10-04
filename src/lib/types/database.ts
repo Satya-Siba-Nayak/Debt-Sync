@@ -60,6 +60,10 @@ export type SplitBillDetails = {
   participants: SplitBillParticipant[];
   notes?: string | null;
   createdAt: string;
+  interestType?: 'none' | 'simple' | 'compound';
+  interestRate?: number | null;
+  compoundFreq?: 'daily' | 'weekly' | 'monthly' | 'yearly' | null;
+  dueDate?: string | null;
 };
 
 export type Debt = {

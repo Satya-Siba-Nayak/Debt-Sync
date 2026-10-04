@@ -344,12 +344,24 @@ export function DebtDetailModal({
                       </span>
                       <span className="font-mono text-[11px] text-[var(--on-surface-variant)]">
                         Original Total: {formatCurrency(split.totalAmount, split.currency)} • Organized by {split.payerName}
+                        {((split.interestType && split.interestType !== 'none' && split.interestRate) || (debt.interest_type && debt.interest_type !== 'none' && debt.interest_rate)) && (
+                          <span className="ml-1.5 text-amber-600 dark:text-amber-400 font-semibold">
+                            • {split.interestRate || debt.interest_rate}% {split.interestType || debt.interest_type} APR
+                          </span>
+                        )}
                       </span>
                     </div>
                   </div>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[var(--primary)]/20 text-[var(--primary)] border border-[var(--primary)]/30">
-                    {split.participants.length} People
-                  </span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {((split.interestType && split.interestType !== 'none' && split.interestRate) || (debt.interest_type && debt.interest_type !== 'none' && debt.interest_rate)) && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                        {split.interestRate || debt.interest_rate}% APR
+                      </span>
+                    )}
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[var(--primary)]/20 text-[var(--primary)] border border-[var(--primary)]/30">
+                      {split.participants.length} People
+                    </span>
+                  </div>
                 </div>
 
                 {/* Participant breakdown list */}
