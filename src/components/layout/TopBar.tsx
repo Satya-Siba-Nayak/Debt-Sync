@@ -7,7 +7,8 @@ import { ThemeToggle } from '../ui/ThemeToggle';
 import { Avatar, AVATAR_PRESETS } from '../ui/Avatar';
 import { NotificationCenter } from './NotificationCenter';
 import { createClient } from '@/lib/supabase/client';
-import { clearAuthSessionData, getCachedUserProfile } from '@/lib/utils/auth-session';
+import { clearAuthSessionData } from '@/lib/utils/auth-session';
+import { useViewMode } from '@/lib/hooks/useViewMode';
 
 interface TopBarProps {
   title?: string;
@@ -31,63 +32,17 @@ export function TopBar({
   onNewTransaction,
 }: TopBarProps) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<'admin' | 'user'>('admin');
-  const [isAdminState, setIsAdminState] = useState<boolean>(() => {
-    if (isAdmin !== undefined) return Boolean(isAdmin);
-    if (typeof window !== 'undefined') {
-      const cached = getCachedUserProfile();
-      if (cached?.is_admin) return true;
-    }
-    return false;
-  });
+  const {
+    isAdmin: effectiveIsAdmin,
+    viewMode,
+    inAdminMode,
+    toggleViewMode: handleToggleMode,
+  } = useViewMode(isAdmin);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const triggerMobileRef = useRef<HTMLButtonElement>(null);
   const triggerDesktopRef = useRef<HTMLButtonElement>(null);
   const supabase = createClient();
   const router = useRouter();
-
-  useEffect(() => {
-    if (isAdmin !== undefined) {
-      setIsAdminState(Boolean(isAdmin));
-    } else if (typeof window !== 'undefined') {
-      const cached = getCachedUserProfile();
-      if (cached?.is_admin) setIsAdminState(true);
-    }
-  }, [isAdmin]);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('debtsync_view_mode') as 'admin' | 'user' | null;
-      if (saved) setViewMode(saved);
-
-      const handleModeChange = (e: any) => {
-        if (e.detail?.mode) setViewMode(e.detail.mode);
-      };
-      const handleUserUpdated = (e: any) => {
-        if (e.detail?.isAdmin !== undefined) {
-          setIsAdminState(Boolean(e.detail.isAdmin));
-        }
-      };
-
-      window.addEventListener('debtsync:view_mode_changed', handleModeChange);
-      window.addEventListener('debtsync:user_updated', handleUserUpdated);
-      return () => {
-        window.removeEventListener('debtsync:view_mode_changed', handleModeChange);
-        window.removeEventListener('debtsync:user_updated', handleUserUpdated);
-      };
-    }
-  }, []);
-
-  const handleToggleMode = () => {
-    const nextMode = viewMode === 'admin' ? 'user' : 'admin';
-    setViewMode(nextMode);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('debtsync_view_mode', nextMode);
-      window.dispatchEvent(new CustomEvent('debtsync:view_mode_changed', { detail: { mode: nextMode } }));
-    }
-  };
-
-  const effectiveIsAdmin = Boolean(isAdminState || isAdmin || viewMode === 'admin');
 
   // Close dropdown on outside click or escape
   useEffect(() => {
@@ -147,34 +102,32 @@ export function TopBar({
   return (
     <>
       {/* Mobile Header */}
-      <header className="bg-[var(--surface)] flex justify-between items-center w-full px-4 h-16 sticky top-0 z-30 md:hidden border-b border-[var(--outline-variant)]/30 backdrop-blur-md">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-[var(--primary)] text-[var(--on-primary)] flex items-center justify-center font-bold text-sm">
+      <header className="bg-[var(--surface)]/90 flex justify-between items-center w-full px-4 h-14 sticky top-0 z-30 md:hidden border-b border-[var(--outline-variant)]/30 backdrop-blur-md pt-[env(safe-area-inset-top,0px)] box-content">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--primary)] to-[var(--primary-container)] text-[var(--on-primary)] flex items-center justify-center font-bold text-sm shadow-sm shrink-0">
             D
           </div>
-          <span className="font-heading text-lg font-bold text-[var(--primary)] dark:text-[var(--primary-fixed-dim)]">
+          <span className="font-heading text-lg font-bold text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] truncate">
             DebtSync
           </span>
+          {inAdminMode && (
+            <span className="px-1.5 py-0.5 rounded-md text-[9px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)] shrink-0">
+              ADMIN
+            </span>
+          )}
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-1.5">
           <NotificationCenter />
           <ThemeToggle />
-          {onNewTransaction && !(isAdmin && viewMode === 'admin') && (
-            <button
-              onClick={onNewTransaction}
-              className="p-1.5 rounded-lg bg-[var(--primary)] text-[var(--on-primary)] flex items-center justify-center cursor-pointer"
-              title="New Transaction"
-            >
-              <span className="material-symbols-outlined text-[18px]">add</span>
-            </button>
-          )}
           <button
             ref={triggerMobileRef}
             type="button"
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-            className="rounded-full cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/40"
+            className="w-11 h-11 -mr-1.5 flex items-center justify-center rounded-full cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]/40"
             title="Profile menu"
+            aria-label="Open profile menu"
+            aria-expanded={isDropdownOpen}
           >
             <Avatar src={avatarUrl} name={userName || userEmail} size="sm" className="rounded-full" />
           </button>
@@ -221,7 +174,8 @@ export function TopBar({
       {isDropdownOpen && (
         <div
           ref={dropdownRef}
-          className="fixed right-4 top-16 md:right-8 md:top-16 w-72 bg-[var(--surface-container-lowest)] rounded-2xl p-3.5 border border-[var(--outline-variant)]/30 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150 space-y-3"
+          className="fixed right-3 top-[calc(3.5rem+env(safe-area-inset-top,0px)+0.5rem)] md:right-8 md:top-16 w-[min(18rem,calc(100vw-1.5rem))] max-h-[calc(100dvh-6rem)] overflow-y-auto overscroll-contain bg-[var(--surface-container-lowest)] rounded-2xl p-3.5 border border-[var(--outline-variant)]/30 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150 space-y-3"
+          role="menu"
         >
           {/* User Details */}
           <div className="flex items-center gap-3 pb-2.5 border-b border-[var(--outline-variant)]/20">
@@ -318,47 +272,63 @@ export function TopBar({
           {/* Menu Actions */}
           <div className="pt-2 border-t border-[var(--outline-variant)]/20 space-y-1">
             {effectiveIsAdmin && (
-              <>
-                <Link
-                  href="/admin"
-                  onClick={() => setIsDropdownOpen(false)}
-                  className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl font-mono text-xs text-[var(--primary)] hover:bg-[var(--primary)]/10 transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-[16px]">shield_person</span>
-                    <span className="font-bold">Admin Observatory</span>
-                  </div>
-                  <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-[var(--primary)]/15">ADMIN</span>
-                </Link>
-
-                <button
-                  type="button"
-                  onClick={handleToggleMode}
-                  className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl font-mono text-xs text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors cursor-pointer text-left"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-[16px] text-[var(--on-surface-variant)]">swap_horiz</span>
-                    <span>View: {viewMode === 'admin' ? '⚡ Admin Mode' : '👤 User Mode'}</span>
-                  </div>
-                  <span className="text-[10px] text-[var(--primary)] font-semibold">Switch</span>
-                </button>
-              </>
+              <div className="p-2 mb-1 rounded-xl bg-[var(--surface-container)]/60 border border-[var(--outline-variant)]/20 space-y-2">
+                <div className="flex items-center justify-between px-0.5">
+                  <span className="font-mono text-[10px] text-[var(--outline)] uppercase tracking-wider font-semibold">
+                    View Mode
+                  </span>
+                  <Link
+                    href="/admin"
+                    onClick={() => setIsDropdownOpen(false)}
+                    className="text-[10px] font-mono font-bold text-[var(--primary)] hover:underline flex items-center gap-0.5"
+                  >
+                    <span className="material-symbols-outlined text-[13px]">shield_person</span>
+                    <span>Observatory</span>
+                  </Link>
+                </div>
+                <div className="grid grid-cols-2 gap-1 p-0.5 rounded-lg bg-[var(--surface-container-high)]/60" role="radiogroup" aria-label="View mode">
+                  {(['user', 'admin'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      role="radio"
+                      aria-checked={viewMode === mode}
+                      onClick={() => {
+                        if (viewMode !== mode) handleToggleMode();
+                        setIsDropdownOpen(false);
+                      }}
+                      className={`min-h-[36px] rounded-md font-mono text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                        viewMode === mode
+                          ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-sm'
+                          : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[14px]">
+                        {mode === 'admin' ? 'admin_panel_settings' : 'person'}
+                      </span>
+                      <span>{mode === 'admin' ? 'Admin' : 'User'}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
 
             <Link
               href="/settings"
               onClick={() => setIsDropdownOpen(false)}
-              className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl font-mono text-xs text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors"
+              className="w-full flex items-center gap-2.5 px-2.5 min-h-[44px] md:min-h-[36px] rounded-xl font-mono text-xs text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors"
+              role="menuitem"
             >
-              <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">manage_accounts</span>
+              <span className="material-symbols-outlined text-[18px] text-[var(--primary)]">manage_accounts</span>
               <span>Profile &amp; Preferences</span>
             </Link>
             <button
               type="button"
               onClick={handleSignOut}
-              className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl font-mono text-xs text-[var(--error)] hover:bg-red-500/10 transition-colors cursor-pointer text-left"
+              className="w-full flex items-center gap-2.5 px-2.5 min-h-[44px] md:min-h-[36px] rounded-xl font-mono text-xs text-[var(--error)] hover:bg-red-500/10 transition-colors cursor-pointer text-left"
+              role="menuitem"
             >
-              <span className="material-symbols-outlined text-[16px]">logout</span>
+              <span className="material-symbols-outlined text-[18px]">logout</span>
               <span>Sign Out</span>
             </button>
           </div>

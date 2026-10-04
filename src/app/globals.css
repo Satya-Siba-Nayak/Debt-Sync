@@ -193,20 +193,34 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════
-   Mobile Responsive & Zooming Optimizations
+   Mobile Responsive & Modal Optimizations
    ═══════════════════════════════════════════════════════ */
+@keyframes modalSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(28px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.modal-animate-in {
+  animation: modalSlideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.modal-scroll-container {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
 @media screen and (max-width: 768px) {
   /* Prevent iOS Safari forced auto-zoom jumps on inputs while allowing manual pinch-to-zoom */
   input:not([type="checkbox"]):not([type="radio"]),
   select,
   textarea {
     font-size: 16px !important;
-  }
-
-  /* Smooth momentum touch scrolling for all modal and popup dialog containers */
-  .modal-scroll-container {
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
   }
 }
 

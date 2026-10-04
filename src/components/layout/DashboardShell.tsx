@@ -48,6 +48,13 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      // Cached profile belongs to another account on this device -> discard it right away
+      const cached = getCachedUserProfile();
+      if (cached && cached.id !== user.id) {
+        clearAuthSessionData();
+        setUserProfile({ id: user.id, email: user.email, is_admin: false });
+      }
+
       let profile: any = null;
       const { data: p1, error: p1Err } = await supabase
         .from('profiles')

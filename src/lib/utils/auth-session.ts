@@ -68,5 +68,7 @@ export function clearAuthSessionData(): void {
   if (typeof window === 'undefined') return;
   try {
     localStorage.removeItem(PROFILE_CACHE_KEY);
+    localStorage.removeItem('debtsync_view_mode');
+    sessionStorage.removeItem('debtsync_ledger_cache_v2');
   } catch (_) {}
 }

@@ -6,7 +6,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { ThemeToggle } from '../ui/ThemeToggle';
 
-import { clearAuthSessionData, getCachedUserProfile } from '@/lib/utils/auth-session';
+import { clearAuthSessionData } from '@/lib/utils/auth-session';
+import { useViewMode } from '@/lib/hooks/useViewMode';
 
 interface SidebarProps {
   onNewTransaction?: () => void;
@@ -17,67 +18,13 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
-  const [viewMode, setViewMode] = React.useState<'admin' | 'user'>('admin');
-  const [isAdminState, setIsAdminState] = React.useState<boolean>(() => {
-    if (isAdmin !== undefined) return Boolean(isAdmin);
-    if (typeof window !== 'undefined') {
-      const cached = getCachedUserProfile();
-      if (cached?.is_admin) return true;
-    }
-    return false;
-  });
-
-  React.useEffect(() => {
-    if (isAdmin !== undefined) {
-      setIsAdminState(Boolean(isAdmin));
-    } else if (typeof window !== 'undefined') {
-      const cached = getCachedUserProfile();
-      if (cached?.is_admin) setIsAdminState(true);
-    }
-  }, [isAdmin]);
-
-  React.useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('debtsync_view_mode') as 'admin' | 'user' | null;
-      if (saved) setViewMode(saved);
-
-      const handleModeChange = (e: any) => {
-        if (e.detail?.mode) {
-          setViewMode(e.detail.mode);
-        }
-      };
-      const handleUserUpdated = (e: any) => {
-        if (e.detail?.isAdmin !== undefined) {
-          setIsAdminState(Boolean(e.detail.isAdmin));
-        }
-      };
-
-      window.addEventListener('debtsync:view_mode_changed', handleModeChange);
-      window.addEventListener('debtsync:user_updated', handleUserUpdated);
-      return () => {
-        window.removeEventListener('debtsync:view_mode_changed', handleModeChange);
-        window.removeEventListener('debtsync:user_updated', handleUserUpdated);
-      };
-    }
-  }, []);
-
-  const handleToggleMode = () => {
-    const nextMode = viewMode === 'admin' ? 'user' : 'admin';
-    setViewMode(nextMode);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('debtsync_view_mode', nextMode);
-      window.dispatchEvent(new CustomEvent('debtsync:view_mode_changed', { detail: { mode: nextMode } }));
-    }
-  };
+  const { isAdmin: effectiveIsAdmin, inAdminMode, toggleViewMode: handleToggleMode } = useViewMode(isAdmin);
 
   const handleSignOut = async () => {
     clearAuthSessionData();
     await supabase.auth.signOut();
     router.push('/login');
   };
-
-  const effectiveIsAdmin = Boolean(isAdminState || isAdmin || viewMode === 'admin');
-  const inAdminMode = Boolean(effectiveIsAdmin && viewMode === 'admin');
 
   interface NavItem {
     label: string;

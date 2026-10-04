@@ -184,7 +184,7 @@ export function DebtDetailModal({
         subtitle={`ID: ${debt.id.substring(0, 8)} • Recorded on ${new Date(debt.created_at).toLocaleDateString()}`}
         maxWidth="max-w-2xl"
       >
-        <div className="space-y-6 max-h-[80vh] overflow-y-auto pr-1">
+        <div className="space-y-6">
           {/* Header Card: Counterparty & Position */}
           <div className="p-4 rounded-2xl bg-[var(--surface-container-low)] border border-[var(--outline-variant)]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">

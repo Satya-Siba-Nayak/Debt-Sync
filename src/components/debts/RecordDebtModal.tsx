@@ -764,7 +764,6 @@ export function RecordDebtModal({
                       value={personSearch}
                       onChange={(e) => setPersonSearch(e.target.value)}
                       className="w-full pl-9 pr-3 py-2 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-sm text-[var(--on-surface)] outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)]/30"
-                      autoFocus
                     />
                     {isSearchingPlatform && (
                       <span className="material-symbols-outlined absolute right-3 top-2.5 text-[16px] text-[var(--primary)] animate-spin">
