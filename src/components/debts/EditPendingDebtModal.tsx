@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { Modal } from '../ui/Modal';
 import { createClient } from '@/lib/supabase/client';
 import { formatCurrency, SUPPORTED_CURRENCIES } from '@/lib/utils/currency';
@@ -275,18 +276,23 @@ export function EditPendingDebtModal({
 
         {/* Counterparty Read-Only Info Card */}
         <div className="p-3.5 rounded-xl bg-[var(--surface-container-low)] border border-[var(--outline-variant)]/30 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
+          <Link
+            href={`/directory/detail?id=${otherParty?.id || debt.id}`}
+            onClick={onClose}
+            className="flex items-center gap-2.5 min-w-0 hover:opacity-85 group cursor-pointer"
+            title={`View ${otherName}'s contact ledger`}
+          >
             <Avatar src={otherParty?.avatar_url} name={otherName} size="sm" />
             <div className="min-w-0">
-              <span className="text-xs font-semibold text-[var(--on-surface)] block truncate">
+              <span className="text-xs font-semibold text-[var(--on-surface)] group-hover:text-[var(--primary)] group-hover:underline transition-colors block truncate">
                 {otherName}
               </span>
               <span className="text-[11px] font-mono text-[var(--on-surface-variant)] block truncate">
                 {isLender ? 'You Lent (They Owe You)' : 'You Borrowed (You Owe Them)'}
               </span>
             </div>
-          </div>
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25">
+          </Link>
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25 shrink-0">
             Pending Review
           </span>
         </div>

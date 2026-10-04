@@ -253,21 +253,56 @@ export function allocateBulkPayment(
 }
 
 /**
- * Priority order for debt statuses: active obligations always appear on top, followed by pending, disputed, settled, and declined.
+ * Helper to check if an active debt is overdue.
+ */
+export function isDebtOverdue(dueDate?: string | null, status?: string): boolean {
+  if (!dueDate || status === 'settled' || status === 'declined') return false;
+  const now = new Date();
+  const due = new Date(dueDate);
+  const nowDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate()).getTime();
+  return dueDay < nowDay;
+}
+
+/**
+ * Priority order for debt obligations:
+ * 1. Overdue debts appear on the very top (urgent repayment action required)
+ * 2. Pending debts follow (unaccepted agreements awaiting approval/acceptance)
+ * 3. Active debts follow, sorted by date (newest first)
+ * 4. Disputed debts
+ * 5. Settled debts
+ * 6. Declined debts
  */
 export const DEBT_STATUS_PRIORITY: Record<string, number> = {
-  active: 0,
   pending: 1,
-  disputed: 2,
-  settled: 3,
-  declined: 4,
+  active: 2,
+  disputed: 3,
+  settled: 4,
+  declined: 5,
 };
 
-export function sortDebtsActiveFirst<T extends Pick<Debt, 'status' | 'created_at'>>(debtsList: T[]): T[] {
+export function sortDebtsActiveFirst<T extends Pick<Debt, 'status' | 'created_at'> & { due_date?: string | null; settled_at?: string | null }>(
+  debtsList: T[]
+): T[] {
   return [...debtsList].sort((a, b) => {
+    const aOverdue = a.status === 'active' && isDebtOverdue(a.due_date, a.status);
+    const bOverdue = b.status === 'active' && isDebtOverdue(b.due_date, b.status);
+
+    // 1. Overdue debts appear at the top-most
+    if (aOverdue && !bOverdue) return -1;
+    if (!aOverdue && bOverdue) return 1;
+    if (aOverdue && bOverdue) {
+      const dateA = a.due_date ? new Date(a.due_date).getTime() : 0;
+      const dateB = b.due_date ? new Date(b.due_date).getTime() : 0;
+      if (dateA !== dateB) return dateA - dateB; // earliest due date (most overdue) first
+    }
+
+    // 2. Status priority: pending (1) -> active (2) -> disputed (3) -> settled (4) -> declined (5)
     const pA = DEBT_STATUS_PRIORITY[a.status] ?? 99;
     const pB = DEBT_STATUS_PRIORITY[b.status] ?? 99;
     if (pA !== pB) return pA - pB;
+
+    // 3. Within same priority, sort by created_at descending (newest on top)
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
 }

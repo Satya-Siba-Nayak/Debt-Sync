@@ -27,7 +27,7 @@ export default function TransactionsPage() {
   const [payments, setPayments] = useState<Payment[]>(initialCache?.payments || []);
   const [currentUserId, setCurrentUserId] = useState<string | null>(initialCache?.userId || null);
   const [currency, setCurrency] = useState(initialCache?.currency || 'inr');
-  const [filter, setFilter] = useState<'all' | 'lent' | 'borrowed' | 'settled' | 'declined'>('all');
+  const [filter, setFilter] = useState<'all' | 'pending' | 'lent' | 'borrowed' | 'settled' | 'declined'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDebtForNote, setSelectedDebtForNote] = useState<Debt | null>(null);
   const [selectedDebtForDetail, setSelectedDebtForDetail] = useState<Debt | null>(null);
@@ -165,6 +165,7 @@ export default function TransactionsPage() {
     visibleDebts
       .filter((d) => {
         const isLender = d.lender_id === currentUserId;
+        if (filter === 'pending') return d.status === 'pending';
         if (filter === 'lent') return isLender && d.status !== 'declined';
         if (filter === 'borrowed') return !isLender && d.status !== 'declined';
         if (filter === 'settled') return d.status === 'settled';
@@ -225,19 +226,29 @@ export default function TransactionsPage() {
           </div>
 
           <div className="flex bg-[var(--surface-container)] p-1 rounded-xl border border-[var(--outline-variant)]/20 self-start flex-wrap gap-0.5">
-            {(['all', 'lent', 'borrowed', 'settled', 'declined'] as const).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setFilter(tab)}
-                className={`px-3 py-1.5 font-mono text-xs font-bold rounded-lg uppercase tracking-wider transition-all ${
-                  filter === tab
-                    ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-sm'
-                    : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
-                }`}
-              >
-                {tab}
-              </button>
-            ))}
+            {(['all', 'pending', 'lent', 'borrowed', 'settled', 'declined'] as const).map((tab) => {
+              const count = tab === 'pending'
+                ? visibleDebts.filter((d) => d.status === 'pending').length
+                : 0;
+              return (
+                <button
+                  key={tab}
+                  onClick={() => setFilter(tab)}
+                  className={`px-3 py-1.5 font-mono text-xs font-bold rounded-lg uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
+                    filter === tab
+                      ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-sm'
+                      : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                  }`}
+                >
+                  <span>{tab}</span>
+                  {count > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400">
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -274,14 +285,19 @@ export default function TransactionsPage() {
                     }`}
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-3 min-w-0">
+                      <Link
+                        href={`/directory/detail?id=${otherPerson?.id || d.id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="flex items-center gap-3 min-w-0 hover:opacity-90 group cursor-pointer"
+                        title={`View ${name}'s contact ledger`}
+                      >
                         <Avatar
                           src={otherPerson?.avatar_url}
                           name={name}
                           size="md"
                         />
                         <div className="min-w-0">
-                          <div className="font-semibold text-sm text-[var(--on-surface)] flex items-center gap-1.5 flex-wrap">
+                          <div className="font-semibold text-sm text-[var(--on-surface)] group-hover:text-[var(--primary)] group-hover:underline transition-colors flex items-center gap-1.5 flex-wrap">
                             <span className="truncate">{name}</span>
                             {split && (
                               <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/20 flex items-center gap-0.5 shrink-0">
@@ -294,7 +310,7 @@ export default function TransactionsPage() {
                             {new Date(d.created_at).toLocaleDateString()} • {otherPerson?.email}
                           </p>
                         </div>
-                      </div>
+                      </Link>
                       <div className="flex flex-col items-end gap-1">
                         <Chip
                           label={d.status}
@@ -527,14 +543,19 @@ export default function TransactionsPage() {
                         </td>
 
                         <td className="py-4">
-                          <div className="flex items-center gap-3">
+                          <Link
+                            href={`/directory/detail?id=${otherPerson?.id || d.id}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex items-center gap-3 hover:opacity-90 group cursor-pointer"
+                            title={`View ${name}'s contact ledger`}
+                          >
                             <Avatar
                               src={otherPerson?.avatar_url}
                               name={name}
                               size="sm"
                             />
                             <div>
-                              <div className="font-semibold text-[var(--on-surface)] flex items-center gap-1.5 flex-wrap">
+                              <div className="font-semibold text-[var(--on-surface)] group-hover:text-[var(--primary)] group-hover:underline transition-colors flex items-center gap-1.5 flex-wrap">
                                 <span>{name}</span>
                                 {split && (
                                   <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/20 flex items-center gap-1">
@@ -563,7 +584,7 @@ export default function TransactionsPage() {
                                 </div>
                               )}
                             </div>
-                          </div>
+                          </Link>
                         </td>
 
                         <td className="py-4">

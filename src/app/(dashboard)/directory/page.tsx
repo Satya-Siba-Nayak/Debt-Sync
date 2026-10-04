@@ -15,6 +15,8 @@ import { getLedgerCache, setLedgerCache } from '@/lib/stores/ledger-store';
 import { SkeletonDirectoryGrid } from '@/components/ui/Skeleton';
 import { calculateTrustScore } from '@/lib/utils/trust-score';
 
+type SortOption = 'recent' | 'alpha_asc' | 'alpha_desc' | 'balance_desc' | 'trust_score';
+
 export default function PeopleDirectoryPage() {
   const supabase = createClient();
 
@@ -24,6 +26,7 @@ export default function PeopleDirectoryPage() {
   const [people, setPeople] = useState<PersonSummary[]>(initialCache?.people || []);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterTab, setFilterTab] = useState<'all' | 'active' | 'settled'>('all');
+  const [sortBy, setSortBy] = useState<SortOption>('recent');
 
   // Modal states
   const [isAddPersonOpen, setIsAddPersonOpen] = useState(false);
@@ -82,6 +85,7 @@ export default function PeopleDirectoryPage() {
       if (contactRows) {
         for (const c of contactRows as any[]) {
           if (!c.profile) continue;
+          const contactCreated = c.created_at ? new Date(c.created_at).getTime() : 0;
           peopleMap.set(c.contact_id, {
             id: c.contact_id,
             name: c.nickname || c.profile.full_name || c.profile.email,
@@ -95,6 +99,7 @@ export default function PeopleDirectoryPage() {
             status: c.profile.is_shadow ? 'pending' : 'settled',
             isShadow: c.profile.is_shadow,
             notes: [],
+            lastInteractionAt: contactCreated,
           });
         }
       }
@@ -125,10 +130,20 @@ export default function PeopleDirectoryPage() {
             status: otherParty.is_shadow ? 'pending' : 'settled',
             isShadow: otherParty.is_shadow,
             notes: [],
+            lastInteractionAt: 0,
           });
         }
 
         const person = peopleMap.get(otherParty.id)!;
+
+        // Calculate most recent interaction timestamp
+        const debtCreatedTime = d.created_at ? new Date(d.created_at).getTime() : 0;
+        const debtAcceptedTime = d.accepted_at ? new Date(d.accepted_at).getTime() : 0;
+        const debtSettledTime = d.settled_at ? new Date(d.settled_at).getTime() : 0;
+        const maxDebtTime = Math.max(debtCreatedTime, debtAcceptedTime, debtSettledTime);
+        if (maxDebtTime > (person.lastInteractionAt || 0)) {
+          person.lastInteractionAt = maxDebtTime;
+        }
 
         // Collect two-sided notes for instant directory searchability
         if (d.notes && !person.notes?.includes(d.notes)) {
@@ -139,6 +154,12 @@ export default function PeopleDirectoryPage() {
         }
 
         const debtPayments = allPayments.filter((p) => p.debt_id === d.id);
+        for (const pm of debtPayments) {
+          const pmTime = pm.created_at ? new Date(pm.created_at).getTime() : 0;
+          if (pmTime > (person.lastInteractionAt || 0)) {
+            person.lastInteractionAt = pmTime;
+          }
+        }
         const calc = calculateDebtBalance(d, debtPayments);
 
         if (d.status === 'pending') {
@@ -269,11 +290,25 @@ export default function PeopleDirectoryPage() {
       );
     })
     .sort((a, b) => {
-      const statusPriority: Record<string, number> = { active: 0, pending: 1, settled: 2 };
-      const pA = statusPriority[a.status] ?? 99;
-      const pB = statusPriority[b.status] ?? 99;
-      if (pA !== pB) return pA - pB;
-      return Math.abs(b.netBalance) - Math.abs(a.netBalance);
+      if (sortBy === 'recent') {
+        const timeA = a.lastInteractionAt || 0;
+        const timeB = b.lastInteractionAt || 0;
+        if (timeA !== timeB) return timeB - timeA;
+        return (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+      }
+      if (sortBy === 'alpha_asc') {
+        return (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+      }
+      if (sortBy === 'alpha_desc') {
+        return (b.name || '').localeCompare(a.name || '', undefined, { sensitivity: 'base' });
+      }
+      if (sortBy === 'balance_desc') {
+        return Math.abs(b.netBalance) - Math.abs(a.netBalance);
+      }
+      if (sortBy === 'trust_score') {
+        return (b.trustScore ?? -1) - (a.trustScore ?? -1);
+      }
+      return 0;
     });
 
   return (
@@ -327,23 +362,48 @@ export default function PeopleDirectoryPage() {
         </div>
       </section>
 
-      {/* Search & Tabs Toolbar */}
-      <section className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-        {/* Tabs */}
-        <div className="flex bg-[var(--surface-container)] p-1 rounded-xl border border-[var(--outline-variant)]/20 self-start">
-          {(['all', 'active', 'settled'] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setFilterTab(tab)}
-              className={`px-4 py-1.5 font-mono text-xs font-bold rounded-lg uppercase tracking-wider transition-all ${
-                filterTab === tab
-                  ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-sm'
-                  : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
-              }`}
+      {/* Search, Sort & Tabs Toolbar */}
+      <section className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3.5">
+        {/* Left: Filter Tabs & Sort Selector */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Tabs */}
+          <div className="flex bg-[var(--surface-container)] p-1 rounded-xl border border-[var(--outline-variant)]/20">
+            {(['all', 'active', 'settled'] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setFilterTab(tab)}
+                className={`px-3.5 py-1.5 font-mono text-xs font-bold rounded-lg uppercase tracking-wider transition-all cursor-pointer ${
+                  filterTab === tab
+                    ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-sm'
+                    : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                }`}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+
+          {/* Sort Selector Dropdown */}
+          <div className="relative">
+            <span className="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-[16px] text-[var(--primary)] pointer-events-none">
+              swap_vert
+            </span>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortOption)}
+              className="pl-8 pr-7 py-1.5 rounded-xl border border-[var(--outline-variant)]/30 bg-[var(--surface-container-lowest)] text-xs font-mono font-bold text-[var(--on-surface)] outline-none focus:border-[var(--primary)] cursor-pointer shadow-2xs appearance-none min-h-[36px]"
+              aria-label="Sort contacts"
             >
-              {tab}
-            </button>
-          ))}
+              <option value="recent">Sort: Recently Interacted</option>
+              <option value="alpha_asc">Sort: Name (A → Z)</option>
+              <option value="alpha_desc">Sort: Name (Z → A)</option>
+              <option value="balance_desc">Sort: Highest Balance</option>
+              <option value="trust_score">Sort: Trust Score</option>
+            </select>
+            <span className="material-symbols-outlined absolute right-2 top-1/2 -translate-y-1/2 text-[15px] text-[var(--outline)] pointer-events-none">
+              expand_more
+            </span>
+          </div>
         </div>
 
         {/* Search Input */}
@@ -356,7 +416,7 @@ export default function PeopleDirectoryPage() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search names, emails, or phone..."
-            className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/30 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] text-sm font-medium outline-none focus:border-[var(--primary)] shadow-sm"
+            className="w-full pl-10 pr-4 py-2 rounded-xl border border-[var(--outline-variant)]/30 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] text-sm font-medium outline-none focus:border-[var(--primary)] shadow-sm"
           />
         </div>
       </section>

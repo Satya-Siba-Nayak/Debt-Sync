@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { Avatar } from '../ui/Avatar';
 import { formatCurrency } from '@/lib/utils/currency';
@@ -564,14 +565,19 @@ export function NotificationCenter() {
                     key={req.id}
                     className="p-3 rounded-xl bg-surface-container-low border border-amber-500/20 space-y-2.5 shadow-xs"
                   >
-                    <div className="flex items-start gap-2.5">
+                    <Link
+                      href={`/directory/detail?id=${req.counterparty?.id || req.id}`}
+                      onClick={() => setIsOpen(false)}
+                      className="flex items-start gap-2.5 hover:opacity-90 group cursor-pointer"
+                      title={`View ${req.counterparty.full_name}'s contact ledger`}
+                    >
                       <Avatar
                         src={req.counterparty.avatar_url}
                         name={req.counterparty.full_name}
                         size="sm"
                       />
                       <div className="min-w-0 flex-1">
-                        <p className="text-xs font-bold text-on-surface truncate">
+                        <p className="text-xs font-bold text-on-surface group-hover:text-primary group-hover:underline transition-colors truncate">
                           {req.counterparty.full_name}
                         </p>
                         <p className="font-mono text-[11px] text-on-surface-variant mt-0.5">
@@ -586,7 +592,7 @@ export function NotificationCenter() {
                           </p>
                         )}
                       </div>
-                    </div>
+                    </Link>
 
                     <div className="flex items-center justify-end gap-2 pt-1 border-t border-outline-variant/15">
                       <button
@@ -625,21 +631,26 @@ export function NotificationCenter() {
                     key={req.id}
                     className="p-3 rounded-xl bg-surface-container-low border border-primary/20 space-y-2.5 shadow-xs"
                   >
-                    <div className="flex items-center gap-2.5">
+                    <Link
+                      href={`/directory/detail?id=${req.sender?.id || req.id}`}
+                      onClick={() => setIsOpen(false)}
+                      className="flex items-center gap-2.5 hover:opacity-90 group cursor-pointer"
+                      title={`View ${req.sender.full_name}'s contact ledger`}
+                    >
                       <Avatar
                         src={req.sender.avatar_url}
                         name={req.sender.full_name}
                         size="sm"
                       />
                       <div className="min-w-0 flex-1">
-                        <p className="text-xs font-bold text-on-surface truncate">
+                        <p className="text-xs font-bold text-on-surface group-hover:text-primary group-hover:underline transition-colors truncate">
                           {req.sender.full_name}
                         </p>
                         <p className="font-mono text-[11px] text-on-surface-variant">
                           Wants to add you to their DebtSync directory
                         </p>
                       </div>
-                    </div>
+                    </Link>
 
                     <div className="flex items-center justify-end gap-2 pt-1 border-t border-outline-variant/15">
                       <button

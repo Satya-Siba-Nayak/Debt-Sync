@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { Modal } from '../ui/Modal';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment, ActivityLogEntry } from '@/lib/types/database';
@@ -245,11 +246,16 @@ export function DebtDetailModal({
         <div className="space-y-6">
           {/* Header Card: Counterparty & Position */}
           <div className="p-4 rounded-2xl bg-[var(--surface-container-low)] border border-[var(--outline-variant)]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
+            <Link
+              href={`/directory/detail?id=${otherPerson?.id || debt.id}`}
+              onClick={onClose}
+              className="flex items-center gap-3 hover:opacity-90 group cursor-pointer"
+              title={`View ${otherName}'s contact ledger`}
+            >
               <Avatar src={otherPerson?.avatar_url} name={otherName} size="md" />
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-heading font-bold text-base text-[var(--on-surface)]">
+                  <span className="font-heading font-bold text-base text-[var(--on-surface)] group-hover:text-[var(--primary)] group-hover:underline transition-colors">
                     {otherName}
                   </span>
                   <Chip
@@ -281,7 +287,7 @@ export function DebtDetailModal({
                   {otherPerson?.email}
                 </div>
               </div>
-            </div>
+            </Link>
 
             <div className="sm:text-right">
               <span

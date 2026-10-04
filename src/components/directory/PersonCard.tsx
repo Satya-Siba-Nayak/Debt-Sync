@@ -24,6 +24,7 @@ export interface PersonSummary {
   secondaryEmails?: string[];
   notes?: string[];
   matchingNote?: string;
+  lastInteractionAt?: number;
 }
 
 interface PersonCardProps {
@@ -43,7 +44,13 @@ export function PersonCard({ person, currency = 'inr', onRecordDebt }: PersonCar
         {/* Header: Avatar, Name & Status */}
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center gap-3">
-            <Avatar src={person.avatarUrl} name={person.name} size="md" />
+            <Link
+              href={`/directory/detail?id=${person.id}`}
+              className="shrink-0 hover:opacity-85 transition-opacity"
+              title={`View ${person.name}'s contact ledger`}
+            >
+              <Avatar src={person.avatarUrl} name={person.name} size="md" />
+            </Link>
             <div>
               <Link
                 href={`/directory/detail?id=${person.id}`}

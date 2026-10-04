@@ -368,18 +368,8 @@ export default function GlobalDashboardPage() {
           </div>
 
           <div className="flex items-center gap-2.5">
-            <button
-              type="button"
-              onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_split_modal'))}
-              className="text-xs font-mono font-bold px-3 py-1.5 rounded-xl border border-[var(--primary)]/30 text-[var(--primary)] hover:bg-[var(--primary)]/10 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
-              title="Split a group bill with friends"
-            >
-              <span className="material-symbols-outlined text-[15px]">call_split</span>
-              <span>Split Bill</span>
-            </button>
-
             <Link
-              href="/directory"
+              href="/transactions"
               className="text-xs font-mono font-bold text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] hover:underline flex items-center gap-1"
             >
               <span>View All</span>
@@ -601,14 +591,18 @@ export default function GlobalDashboardPage() {
                         }`}
                       >
                         <td className="py-4">
-                          <div className="flex items-center gap-3">
+                          <Link
+                            href={`/directory/detail?id=${otherPerson?.id || d.id}`}
+                            className="flex items-center gap-3 hover:opacity-90 group cursor-pointer"
+                            title={`View ${name}'s contact ledger`}
+                          >
                             <Avatar
                               src={otherPerson?.avatar_url}
                               name={name}
                               size="sm"
                             />
                             <div>
-                              <div className="font-semibold text-[var(--on-surface)] flex items-center gap-1.5 flex-wrap">
+                              <div className="font-semibold text-[var(--on-surface)] group-hover:text-[var(--primary)] group-hover:underline transition-colors flex items-center gap-1.5 flex-wrap">
                                 <span>{name}</span>
                                 {split && (
                                   <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/20 flex items-center gap-1">
@@ -621,7 +615,7 @@ export default function GlobalDashboardPage() {
                                 {otherPerson?.email} {cleanNotes ? `• "${cleanNotes}"` : ''}
                               </div>
                             </div>
-                          </div>
+                          </Link>
                         </td>
 
                         <td className="py-4">
