@@ -550,8 +550,8 @@ export interface UPIAppLauncher {
   shortName: string;
   icon: string;
   badgeClass: string;
-  androidScheme: string;
-  iosScheme: string;
+  androidPackage?: string;
+  iosSchemePrefix?: string;
   fallbackScheme: string;
 }
 
@@ -562,9 +562,9 @@ export const UPI_POPULAR_APPS: UPIAppLauncher[] = [
     shortName: 'GPay',
     icon: 'smartphone',
     badgeClass: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/25',
-    androidScheme: 'gpay://',
-    iosScheme: 'gpay://',
-    fallbackScheme: 'gpay://',
+    androidPackage: 'com.google.android.apps.nbu.paisa.user',
+    iosSchemePrefix: 'gpay://upi/pay',
+    fallbackScheme: 'upi://pay',
   },
   {
     id: 'phonepe',
@@ -572,9 +572,9 @@ export const UPI_POPULAR_APPS: UPIAppLauncher[] = [
     shortName: 'PhonePe',
     icon: 'smartphone',
     badgeClass: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/25',
-    androidScheme: 'phonepe://',
-    iosScheme: 'phonepe://',
-    fallbackScheme: 'phonepe://',
+    androidPackage: 'com.phonepe.app',
+    iosSchemePrefix: 'phonepe://pay',
+    fallbackScheme: 'upi://pay',
   },
   {
     id: 'paytm',
@@ -582,9 +582,9 @@ export const UPI_POPULAR_APPS: UPIAppLauncher[] = [
     shortName: 'Paytm',
     icon: 'account_balance_wallet',
     badgeClass: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/25',
-    androidScheme: 'paytmmp://',
-    iosScheme: 'paytmmp://',
-    fallbackScheme: 'paytmmp://',
+    androidPackage: 'net.one97.paytm',
+    iosSchemePrefix: 'paytmmp://pay',
+    fallbackScheme: 'upi://pay',
   },
   {
     id: 'slice',
@@ -592,9 +592,9 @@ export const UPI_POPULAR_APPS: UPIAppLauncher[] = [
     shortName: 'Slice',
     icon: 'credit_card',
     badgeClass: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/25',
-    androidScheme: 'slice://',
-    iosScheme: 'slice://',
-    fallbackScheme: 'slice://',
+    androidPackage: 'indwin.c3.shareapp',
+    iosSchemePrefix: 'slice://pay',
+    fallbackScheme: 'upi://pay',
   },
   {
     id: 'bhim',
@@ -602,86 +602,96 @@ export const UPI_POPULAR_APPS: UPIAppLauncher[] = [
     shortName: 'BHIM',
     icon: 'qr_code_2',
     badgeClass: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25',
-    androidScheme: 'upi://',
-    iosScheme: 'upi://',
-    fallbackScheme: 'upi://',
+    androidPackage: 'in.org.npci.upiapp',
+    iosSchemePrefix: 'upi://pay',
+    fallbackScheme: 'upi://pay',
+  },
+  {
+    id: 'cred',
+    name: 'CRED UPI',
+    shortName: 'CRED',
+    icon: 'credit_card',
+    badgeClass: 'bg-neutral-500/10 text-neutral-800 dark:text-neutral-200 border-neutral-500/25',
+    androidPackage: 'com.dreamplug.androidapp',
+    iosSchemePrefix: 'cred://pay',
+    fallbackScheme: 'upi://pay',
+  },
+  {
+    id: 'other',
+    name: 'Any UPI App',
+    shortName: 'Any UPI App',
+    icon: 'apps',
+    badgeClass: 'bg-teal-500/10 text-teal-600 dark:text-teal-400 border-teal-500/25',
+    fallbackScheme: 'upi://pay',
   },
 ];
 
-const ALL_UPI_LAUNCHERS: Record<string, { androidScheme: string; iosScheme: string; fallbackScheme: string }> = {
-  gpay: {
-    androidScheme: 'gpay://',
-    iosScheme: 'gpay://',
-    fallbackScheme: 'gpay://',
-  },
-  phonepe: {
-    androidScheme: 'phonepe://',
-    iosScheme: 'phonepe://',
-    fallbackScheme: 'phonepe://',
-  },
-  paytm: {
-    androidScheme: 'paytmmp://',
-    iosScheme: 'paytmmp://',
-    fallbackScheme: 'paytmmp://',
-  },
-  slice: {
-    androidScheme: 'slice://',
-    iosScheme: 'slice://',
-    fallbackScheme: 'slice://',
-  },
-  bhim: {
-    androidScheme: 'upi://',
-    iosScheme: 'upi://',
-    fallbackScheme: 'upi://',
-  },
-  cred: {
-    androidScheme: 'cred://',
-    iosScheme: 'cred://',
-    fallbackScheme: 'cred://',
-  },
-};
+const ALL_UPI_LAUNCHERS: Record<string, UPIAppLauncher> = UPI_POPULAR_APPS.reduce((acc, app) => {
+  acc[app.id] = app;
+  return acc;
+}, {} as Record<string, UPIAppLauncher>);
 
 /**
- * Directly launches a UPI application on mobile via registered custom URL schemes
- * (e.g. phonepe://, gpay://, paytmmp://, slice://, upi://)
- * avoiding the browser Play Store redirect bug caused by broken intent actions.
+ * Resolves the exact OS-specific Deeplink / Intent URL to launch a specific UPI application.
+ *
+ * - On Android: Uses Chrome Intent URL syntax targeting the app's package with scheme 'upi' and host 'pay'
+ *   (e.g. intent://pay?${query}#Intent;scheme=upi;package=com.phonepe.app;end).
+ *   This opens the installed app directly WITHOUT Play Store redirects and matches the app's browsable intent filter.
+ * - On iOS: Uses the app's registered custom URL scheme (e.g. phonepe://pay?${query}, gpay://upi/pay?${query}, or upi://pay?${query}).
+ * - Generic/Desktop: Uses standard upi://pay?${query}
  */
-export function launchUPIApp(appId: string): boolean {
-  if (typeof window === 'undefined') return false;
+export function getUPIAppLaunchUrl(appId: string, upiLink?: string | null): string {
+  if (!upiLink) return '';
 
-  const appMeta = ALL_UPI_LAUNCHERS[appId];
-  const ua = (navigator.userAgent || '').toLowerCase();
+  // Extract query string from upiLink (e.g. "upi://pay?pa=...&cu=INR" -> "pa=...&cu=INR")
+  const qIdx = upiLink.indexOf('?');
+  const queryString = qIdx !== -1 ? upiLink.slice(qIdx + 1) : '';
+
+  const ua = typeof navigator !== 'undefined' ? (navigator.userAgent || '').toLowerCase() : '';
   const isAndroid = /android/i.test(ua);
   const isIOS = /iphone|ipad|ipod/i.test(ua);
 
-  let targetUrl = 'upi://';
-  if (appMeta) {
-    if (isAndroid) {
-      targetUrl = appMeta.androidScheme || appMeta.fallbackScheme;
-    } else if (isIOS) {
-      targetUrl = appMeta.iosScheme || appMeta.fallbackScheme;
-    } else {
-      targetUrl = appMeta.fallbackScheme;
-    }
+  const app = ALL_UPI_LAUNCHERS[appId] || UPI_POPULAR_APPS.find((a) => a.id === appId);
+
+  if (!app) {
+    return queryString ? `upi://pay?${queryString}` : 'upi://pay';
   }
 
+  if (isAndroid) {
+    if (app.androidPackage) {
+      return `intent://pay?${queryString}#Intent;scheme=upi;package=${app.androidPackage};end`;
+    }
+    return queryString ? `upi://pay?${queryString}` : 'upi://pay';
+  }
+
+  if (isIOS) {
+    if (app.iosSchemePrefix) {
+      return `${app.iosSchemePrefix}?${queryString}`;
+    }
+    return queryString ? `upi://pay?${queryString}` : 'upi://pay';
+  }
+
+  // Desktop or universal
+  return queryString ? `upi://pay?${queryString}` : 'upi://pay';
+}
+
+/**
+ * Directly launches a UPI application on mobile via window.location.href
+ * using the resolved native Intent / Deeplink URL.
+ */
+export function launchUPIApp(appId: string, upiLink?: string): boolean {
+  if (typeof window === 'undefined') return false;
+
+  const targetUrl = getUPIAppLaunchUrl(appId, upiLink || 'upi://pay');
+  if (!targetUrl) return false;
+
   try {
-    const link = document.createElement('a');
-    link.href = targetUrl;
-    link.rel = 'noopener noreferrer';
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-    setTimeout(() => {
-      if (document.body.contains(link)) {
-        document.body.removeChild(link);
-      }
-    }, 1000);
+    window.location.href = targetUrl;
     return true;
   } catch (err) {
-    console.error('Failed to launch UPI app via anchor:', err);
+    console.error('Failed to launch UPI app via location:', err);
     try {
-      window.location.href = targetUrl;
+      window.location.assign(targetUrl);
       return true;
     } catch {
       return false;

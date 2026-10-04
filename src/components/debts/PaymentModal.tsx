@@ -18,6 +18,7 @@ import {
   isUPIMethod,
   UPI_POPULAR_APPS,
   launchUPIApp,
+  getUPIAppLaunchUrl,
   getSortedUPIAppsForUser,
   maskBankAccount,
   isValidIFSC,
@@ -65,6 +66,7 @@ export function PaymentModal({
   const [currentUserUpiId, setCurrentUserUpiId] = useState<string | null>(null);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
   const [upiPayTab, setUpiPayTab] = useState<'qr' | 'app'>('qr');
+  const [prefillAmount, setPrefillAmount] = useState(true);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [launchStatus, setLaunchStatus] = useState<string | null>(null);
   const [showBankExplainer, setShowBankExplainer] = useState(false);
@@ -126,11 +128,30 @@ export function PaymentModal({
     }
   };
 
-  const handleLaunchApp = (appId: string, appName: string) => {
+  const handleLaunchApp = (
+    e: React.MouseEvent<HTMLAnchorElement>,
+    appId: string,
+    appName: string
+  ) => {
     if (!lenderProfile?.upi_id) return;
     copyToClipboard(lenderProfile.upi_id, 'vpa');
-    setLaunchStatus(`Copied UPI ID (${lenderProfile.upi_id})! Opening ${appName}... In ${appName}, tap 'Pay to UPI ID' and paste.`);
-    launchUPIApp(appId);
+
+    const ua = typeof navigator !== 'undefined' ? (navigator.userAgent || '').toLowerCase() : '';
+    const isMobile = /android|iphone|ipad|ipod/i.test(ua);
+
+    if (!isMobile) {
+      e.preventDefault();
+      setLaunchStatus(
+        `Copied UPI ID (${lenderProfile.upi_id})! On desktop, scan the QR code above or paste into your mobile UPI app.`
+      );
+      setTimeout(() => {
+        setLaunchStatus(null);
+      }, 7000);
+      return;
+    }
+
+    // On mobile: allow native <a> navigation to invoke OS intent or app scheme
+    setLaunchStatus(`Copied UPI ID (${lenderProfile.upi_id})! Opening ${appName}... In ${appName}, verify the payee and complete payment.`);
     setTimeout(() => {
       setLaunchStatus(null);
     }, 7000);
@@ -193,6 +214,8 @@ export function PaymentModal({
         `DebtSync Repayment ${debt.id.slice(0, 6)}`
       )
     : '';
+
+  const activeUpiLink = (prefillAmount && amount > 0) ? upiLink : upiLinkWithoutAmount;
 
   // Auto-generate QR code immediately whenever upiLink is available
   useEffect(() => {
@@ -681,14 +704,16 @@ export function PaymentModal({
 
                     {/* Quick direct launcher for user's own profile app if detected */}
                     {userPreferredApp && (
-                      <button
-                        type="button"
-                        onClick={() => handleLaunchApp(userPreferredApp.id, userPreferredApp.name)}
+                      <a
+                        href={activeUpiLink ? getUPIAppLaunchUrl(userPreferredApp.id, activeUpiLink) : '#'}
+                        onClick={(e) => handleLaunchApp(e, userPreferredApp.id, userPreferredApp.name)}
+                        target="_top"
+                        rel="noopener noreferrer"
                         className="w-full min-h-[44px] py-2 px-3 rounded-xl bg-[var(--primary)]/10 hover:bg-[var(--primary)]/15 border border-[var(--primary)]/30 text-[var(--primary)] font-mono text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-[0.98]"
                       >
                         <span className="material-symbols-outlined text-[16px]">{userPreferredApp.icon}</span>
                         <span>Have {userPreferredApp.shortName}? Copy ID &amp; Open {userPreferredApp.shortName} Directly</span>
-                      </button>
+                      </a>
                     )}
 
                     <div className="p-2.5 rounded-xl bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)]/20 text-[11px] font-mono text-[var(--on-surface-variant)] space-y-1">
@@ -749,6 +774,25 @@ export function PaymentModal({
                       </div>
                     </div>
 
+                    {/* Amount Pre-fill Switch: Protects against bank collect rejections */}
+                    <div className="flex items-center justify-between text-xs font-mono p-2.5 rounded-xl bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/20">
+                      <div className="flex items-center gap-1.5 text-[var(--on-surface)]">
+                        <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">tune</span>
+                        <span className="font-semibold">Auto-fill Amount in App:</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setPrefillAmount(!prefillAmount)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                          prefillAmount
+                            ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30'
+                            : 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30'
+                        }`}
+                      >
+                        {prefillAmount ? '✓ ON (Auto-fill)' : 'OFF (Manual - 100% Approval)'}
+                      </button>
+                    </div>
+
                     {/* 1st / Preferred App: Prominent Header Button if matched to Paying User's Profile */}
                     {userPreferredApp && (
                       <div className="p-3 rounded-2xl bg-gradient-to-r from-[var(--primary)]/15 via-[var(--surface-container)] to-[var(--surface-container-high)] border border-[var(--primary)]/35 space-y-2 shadow-xs animate-in fade-in duration-150">
@@ -761,9 +805,11 @@ export function PaymentModal({
                             {currentUserUpiId}
                           </span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => handleLaunchApp(userPreferredApp.id, userPreferredApp.name)}
+                        <a
+                          href={activeUpiLink ? getUPIAppLaunchUrl(userPreferredApp.id, activeUpiLink) : '#'}
+                          onClick={(e) => handleLaunchApp(e, userPreferredApp.id, userPreferredApp.name)}
+                          target="_top"
+                          rel="noopener noreferrer"
                           className="w-full min-h-[46px] py-2.5 px-4 rounded-xl bg-[var(--primary)] hover:brightness-110 active:scale-[0.98] text-[var(--on-primary)] font-mono text-xs font-bold flex items-center justify-between transition-all cursor-pointer shadow-xs"
                         >
                           <div className="flex items-center gap-2">
@@ -774,7 +820,7 @@ export function PaymentModal({
                             <span>1-Tap Copy &amp; Open</span>
                             <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
                           </div>
-                        </button>
+                        </a>
                       </div>
                     )}
 
@@ -791,10 +837,12 @@ export function PaymentModal({
                       </div>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
                         {sortedApps.map((app) => (
-                          <button
+                          <a
                             key={app.id}
-                            type="button"
-                            onClick={() => handleLaunchApp(app.id, app.name)}
+                            href={activeUpiLink ? getUPIAppLaunchUrl(app.id, activeUpiLink) : '#'}
+                            onClick={(e) => handleLaunchApp(e, app.id, app.name)}
+                            target="_top"
+                            rel="noopener noreferrer"
                             className={`min-h-[44px] py-2 px-2.5 rounded-xl border text-[var(--on-surface)] font-mono text-xs font-semibold flex items-center justify-between gap-1.5 transition-all cursor-pointer active:scale-[0.98] ${
                               app.isUserPreferred
                                 ? 'border-[var(--primary)]/60 bg-[var(--primary)]/10 text-[var(--primary)] shadow-2xs font-bold ring-1 ring-[var(--primary)]/30'
@@ -805,12 +853,14 @@ export function PaymentModal({
                               <span className="material-symbols-outlined text-[16px] text-[var(--primary)] shrink-0">{app.icon}</span>
                               <span className="truncate">{app.shortName}</span>
                             </div>
-                            {app.isUserPreferred && (
+                            {app.isUserPreferred ? (
                               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[var(--primary)] text-[var(--on-primary)] shrink-0">
                                 1st
                               </span>
+                            ) : (
+                              <span className="material-symbols-outlined text-[13px] text-[var(--outline)] shrink-0">open_in_new</span>
                             )}
-                          </button>
+                          </a>
                         ))}
                       </div>
                     </div>
