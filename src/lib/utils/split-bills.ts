@@ -37,6 +37,28 @@ export function isSplitDebt(debt: Debt | any): boolean {
 }
 
 /**
+ * Helper to find the matching closing bracket for [SPLIT:...].
+ * Accounts for nested brackets inside JSON (such as arrays in participants).
+ */
+export function findSplitTagRange(text: string): { startIdx: number; endIdx: number } | null {
+  const startIdx = text.indexOf('[SPLIT:');
+  if (startIdx === -1) return null;
+
+  let depth = 0;
+  for (let i = startIdx; i < text.length; i++) {
+    if (text[i] === '[') {
+      depth++;
+    } else if (text[i] === ']') {
+      depth--;
+      if (depth === 0) {
+        return { startIdx, endIdx: i };
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Robustly parses SplitBillDetails from either native column (split_details)
  * or structured notes fallback tag ([SPLIT:{...}]).
  */
@@ -59,10 +81,9 @@ export function parseSplitDetails(debt: Debt | any): SplitBillDetails | null {
   // 3. Structured Note prefix fallback: [SPLIT:{...}]
   if (typeof debt.notes === 'string' && debt.notes.includes('[SPLIT:')) {
     try {
-      const startIdx = debt.notes.indexOf('[SPLIT:');
-      const endIdx = debt.notes.indexOf(']', startIdx);
-      if (startIdx !== -1 && endIdx > startIdx) {
-        const jsonStr = debt.notes.slice(startIdx + 7, endIdx);
+      const range = findSplitTagRange(debt.notes);
+      if (range) {
+        const jsonStr = debt.notes.slice(range.startIdx + 7, range.endIdx);
         const parsed = JSON.parse(jsonStr);
         if (parsed && (parsed.groupId || parsed.title)) {
           return parsed as SplitBillDetails;
@@ -78,31 +99,46 @@ export function parseSplitDetails(debt: Debt | any): SplitBillDetails | null {
 
 /**
  * Strips out the internal [SPLIT:{...}] tag from user notes for clean display in UI cards and lists.
+ * Also cleans any leftover title tags or legacy corrupted JSON fragments.
  */
 export function getCleanDebtNotes(notes: string | null | undefined): string {
   if (!notes) return '';
-  if (notes.includes('[SPLIT:')) {
-    const startIdx = notes.indexOf('[SPLIT:');
-    const endIdx = notes.indexOf(']', startIdx);
-    if (startIdx !== -1 && endIdx !== -1) {
-      const prefix = notes.slice(0, startIdx).trim();
-      const suffix = notes.slice(endIdx + 1).trim();
-      return [prefix, suffix].filter(Boolean).join(' ');
+  let cleaned = notes;
+
+  // 1. Remove [SPLIT: ... ] tag properly with bracket balance matching
+  const range = findSplitTagRange(cleaned);
+  if (range) {
+    const before = cleaned.slice(0, range.startIdx).trim();
+    const after = cleaned.slice(range.endIdx + 1).trim();
+    cleaned = [before, after].filter(Boolean).join(' ');
+  } else if (cleaned.includes('[SPLIT:')) {
+    const lastBracket = cleaned.lastIndexOf(']');
+    if (lastBracket !== -1) {
+      cleaned = cleaned.slice(lastBracket + 1).trim();
     }
   }
-  return notes;
+
+  // 2. Remove any lingering JSON fragment artifacts from previously saved buggy notes
+  cleaned = cleaned.replace(/^,?"[^"]*":(?:null|"[^"]*"|\d+|true|false)(?:,[^]]*)*\]*\]*/i, '').trim();
+  cleaned = cleaned.replace(/^\]+/, '').trim();
+
+  // 3. Strip auto-generated title fallbacks if user didn't write an explicit personal note
+  cleaned = cleaned.replace(/^Group Split Bill(\s*-\s*)?/i, '').trim();
+  cleaned = cleaned.replace(/^Split:\s*[^-\n]+(\s*-\s*)?/i, '').trim();
+
+  return cleaned.trim();
 }
 
 /**
  * Encodes SplitBillDetails as a structured note prefix tag for fallback compatibility.
+ * If user did not provide an explicit note, only the tag is saved.
  */
 export function buildSplitNotes(details: SplitBillDetails, userNote?: string | null): string {
   const jsonTag = `[SPLIT:${JSON.stringify(details)}]`;
   const cleanUserNote = userNote ? userNote.trim() : '';
-  const titleInfo = details.title ? `Split: ${details.title}` : 'Group Split Bill';
 
   if (cleanUserNote) {
-    return `${jsonTag} ${titleInfo} - ${cleanUserNote}`;
+    return `${jsonTag} ${cleanUserNote}`;
   }
-  return `${jsonTag} ${titleInfo}`;
+  return jsonTag;
 }

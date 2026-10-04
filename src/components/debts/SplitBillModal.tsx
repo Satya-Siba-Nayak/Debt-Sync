@@ -64,8 +64,8 @@ export function SplitBillModal({
 
   // Terms & Interest states
   const [interestType, setInterestType] = useState<'none' | 'simple' | 'compound'>('none');
-  const [interestRateStr, setInterestRateStr] = useState<string>('5.00');
-  const [interestRate, setInterestRate] = useState<number>(5.0);
+  const [interestRateStr, setInterestRateStr] = useState<string>('0.00');
+  const [interestRate, setInterestRate] = useState<number>(0);
   const [compoundFreq, setCompoundFreq] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('monthly');
   const [dueDate, setDueDate] = useState('');
 
@@ -103,15 +103,40 @@ export function SplitBillModal({
           avatar_url: user.user_metadata?.avatar_url || null,
         });
 
-        // Check user settings for default currency & country code
-        const { data: settings } = await supabase
-          .from('user_settings')
-          .select('default_currency, default_country_code')
-          .eq('user_id', user.id)
-          .single();
+        // Check user settings for default currency, country code & interest
+        const localInterestType = typeof window !== 'undefined' ? (localStorage.getItem('debtsync_default_interest_type') as any) : null;
+        const localInterestRate = typeof window !== 'undefined' ? localStorage.getItem('debtsync_default_interest_rate') : null;
+        const localCompoundFreq = typeof window !== 'undefined' ? (localStorage.getItem('debtsync_default_compound_freq') as any) : null;
 
-        if (settings?.default_currency) setCurrency(settings.default_currency);
-        if (settings?.default_country_code) setDefaultCountryCode(settings.default_country_code);
+        try {
+          const { data: settings } = await supabase
+            .from('user_settings')
+            .select('default_currency, default_country_code, default_interest_type, default_interest_rate, default_compound_freq')
+            .eq('user_id', user.id)
+            .single();
+
+          if (settings?.default_currency) setCurrency(settings.default_currency);
+          if (settings?.default_country_code) setDefaultCountryCode(settings.default_country_code);
+
+          const resolvedType = settings?.default_interest_type || localInterestType || 'none';
+          const resolvedRate = settings?.default_interest_rate !== undefined && settings?.default_interest_rate !== null
+            ? Number(settings.default_interest_rate)
+            : (localInterestRate ? parseFloat(localInterestRate) : 0);
+          const resolvedFreq = settings?.default_compound_freq || localCompoundFreq || 'monthly';
+
+          setInterestType(resolvedType);
+          setInterestRate(isNaN(resolvedRate) ? 0 : resolvedRate);
+          setInterestRateStr(isNaN(resolvedRate) ? '0.00' : resolvedRate.toFixed(2));
+          setCompoundFreq(resolvedFreq);
+        } catch (_) {
+          if (localInterestType) {
+            setInterestType(localInterestType);
+            const rate = localInterestRate ? parseFloat(localInterestRate) : 0;
+            setInterestRate(isNaN(rate) ? 0 : rate);
+            setInterestRateStr(isNaN(rate) ? '0.00' : rate.toFixed(2));
+            if (localCompoundFreq) setCompoundFreq(localCompoundFreq);
+          }
+        }
 
         // Check profile isolation
         const { data: profile } = await supabase
@@ -459,6 +484,7 @@ export function SplitBillModal({
       for (const p of participantShares) {
         let debtCreated = false;
 
+        const cleanUserNote = notes.trim() || null;
         const debtPayload = {
           created_by: user.id,
           lender_id: user.id,
@@ -470,7 +496,7 @@ export function SplitBillModal({
           compound_freq: interestType === 'compound' ? compoundFreq : null,
           due_date: dueDate ? new Date(dueDate + 'T23:59:59Z').toISOString() : null,
           status: 'pending',
-          notes: encodedNotes,
+          notes: cleanUserNote,
           created_at: originationDate.toISOString(),
         };
 
@@ -491,7 +517,10 @@ export function SplitBillModal({
 
         // 2. Fallback without new columns if schema migration not yet applied
         if (!debtCreated) {
-          const { error: fallbackErr } = await supabase.from('debts').insert(debtPayload);
+          const { error: fallbackErr } = await supabase.from('debts').insert({
+            ...debtPayload,
+            notes: encodedNotes,
+          });
           if (fallbackErr) throw fallbackErr;
         }
 

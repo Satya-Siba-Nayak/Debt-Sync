@@ -105,9 +105,9 @@ export function RecordDebtModal({
   const [principal, setPrincipal] = useState<number>(1500);
   const [currency, setCurrency] = useState('inr');
   const [direction, setDirection] = useState<'lent' | 'borrowed'>('lent'); // lent = current user is lender
-  const [interestType, setInterestType] = useState<'none' | 'simple' | 'compound'>('simple');
-  const [interestRateStr, setInterestRateStr] = useState<string>('5.00');
-  const [interestRate, setInterestRate] = useState<number>(5.0);
+  const [interestType, setInterestType] = useState<'none' | 'simple' | 'compound'>('none');
+  const [interestRateStr, setInterestRateStr] = useState<string>('0.00');
+  const [interestRate, setInterestRate] = useState<number>(0);
   const [compoundFreq, setCompoundFreq] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('monthly');
   const [transactionDate, setTransactionDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [dueDate, setDueDate] = useState('');
@@ -169,7 +169,31 @@ export function RecordDebtModal({
 
     async function loadContacts() {
       const user = await getCurrentUserFast(supabase);
-      if (!user) return;
+      // Load user_settings default preferences
+      try {
+        const { data: userSettings } = await supabase
+          .from('user_settings')
+          .select('default_currency, default_country_code, default_interest_type, default_interest_rate, default_compound_freq')
+          .eq('user_id', user.id)
+          .single();
+
+        if (userSettings?.default_currency) setCurrency(userSettings.default_currency);
+        if (userSettings?.default_country_code) setDefaultCountryCode(userSettings.default_country_code);
+        if (userSettings?.default_interest_type) {
+          setInterestType(userSettings.default_interest_type as any);
+          if (userSettings.default_interest_type !== 'none' && userSettings.default_interest_rate !== undefined && userSettings.default_interest_rate !== null) {
+            const r = Number(userSettings.default_interest_rate);
+            setInterestRate(isNaN(r) ? 0 : r);
+            setInterestRateStr(isNaN(r) ? '0.00' : r.toFixed(2));
+          } else if (userSettings.default_interest_type === 'none') {
+            setInterestRate(0);
+            setInterestRateStr('0.00');
+          }
+          if (userSettings.default_compound_freq) {
+            setCompoundFreq(userSettings.default_compound_freq as any);
+          }
+        }
+      } catch (_) {}
 
       // Check cached isolation status (60s TTL)
       if (
@@ -304,6 +328,27 @@ export function RecordDebtModal({
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('debtsync_default_country_code');
       if (saved) setDefaultCountryCode(saved);
+
+      const savedType = localStorage.getItem('debtsync_default_interest_type') as ('none' | 'simple' | 'compound') | null;
+      const savedRate = localStorage.getItem('debtsync_default_interest_rate');
+      const savedFreq = localStorage.getItem('debtsync_default_compound_freq') as ('daily' | 'weekly' | 'monthly' | 'yearly') | null;
+
+      if (savedType) {
+        setInterestType(savedType);
+        if (savedType !== 'none') {
+          const rateNum = savedRate ? parseFloat(savedRate) : 0;
+          setInterestRate(isNaN(rateNum) ? 0 : rateNum);
+          setInterestRateStr(isNaN(rateNum) ? '0.00' : rateNum.toFixed(2));
+        } else {
+          setInterestRate(0);
+          setInterestRateStr('0.00');
+        }
+        if (savedFreq) setCompoundFreq(savedFreq);
+      } else {
+        setInterestType('none');
+        setInterestRate(0);
+        setInterestRateStr('0.00');
+      }
     }
     loadContacts();
   }, [isOpen, preselectedContactId, preselectedPerson, supabase]);
@@ -1005,7 +1050,13 @@ export function RecordDebtModal({
 
                 <button
                   type="button"
-                  onClick={() => setInterestType('simple')}
+                  onClick={() => {
+                    setInterestType('simple');
+                    if (interestRate === 0) {
+                      setInterestRate(5);
+                      setInterestRateStr('5.00');
+                    }
+                  }}
                   className={`p-3 rounded-xl border text-left transition-all ${
                     interestType === 'simple'
                       ? 'border-[var(--primary)] bg-[var(--primary-container)]/10 ring-1 ring-[var(--primary)]'
@@ -1021,7 +1072,13 @@ export function RecordDebtModal({
 
                 <button
                   type="button"
-                  onClick={() => setInterestType('compound')}
+                  onClick={() => {
+                    setInterestType('compound');
+                    if (interestRate === 0) {
+                      setInterestRate(5);
+                      setInterestRateStr('5.00');
+                    }
+                  }}
                   className={`p-3 rounded-xl border text-left transition-all ${
                     interestType === 'compound'
                       ? 'border-[var(--primary)] bg-[var(--primary-container)]/10 ring-1 ring-[var(--primary)]'

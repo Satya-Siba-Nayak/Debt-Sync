@@ -43,6 +43,10 @@ export default function SettingsPage() {
   const [recentCustomAvatars, setRecentCustomAvatars] = useState<string[]>([]);
   const [currency, setCurrency] = useState('inr');
   const [defaultCountryCode, setDefaultCountryCode] = useState('+91');
+  const [defaultInterestType, setDefaultInterestType] = useState<'none' | 'simple' | 'compound'>('none');
+  const [defaultInterestRateStr, setDefaultInterestRateStr] = useState<string>('0');
+  const [defaultInterestRate, setDefaultInterestRate] = useState<number>(0);
+  const [defaultCompoundFreq, setDefaultCompoundFreq] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('monthly');
   const [newPassword, setNewPassword] = useState('');
   const [secondaryEmails, setSecondaryEmails] = useState<string[]>([]);
   const [newSecondaryEmail, setNewSecondaryEmail] = useState('');
@@ -146,20 +150,46 @@ export default function SettingsPage() {
         const localCode = typeof window !== 'undefined' ? localStorage.getItem('debtsync_default_country_code') : null;
 
         // Load settings
-        const { data: userSettings } = await supabase
-          .from('user_settings')
-          .select('default_currency, default_country_code, theme_preference')
-          .eq('user_id', user.id)
-          .single();
+        let userSettings: any = null;
+        try {
+          const { data: sData } = await supabase
+            .from('user_settings')
+            .select('default_currency, default_country_code, theme_preference, default_interest_type, default_interest_rate, default_compound_freq')
+            .eq('user_id', user.id)
+            .single();
+          userSettings = sData;
+        } catch (_) {
+          const { data: fallbackSData } = await supabase
+            .from('user_settings')
+            .select('default_currency, default_country_code, theme_preference')
+            .eq('user_id', user.id)
+            .single();
+          userSettings = fallbackSData;
+        }
 
         if (userSettings?.default_currency) {
           setCurrency(userSettings.default_currency);
         }
-        if ((userSettings as any)?.default_country_code) {
-          setDefaultCountryCode((userSettings as any).default_country_code);
+        if (userSettings?.default_country_code) {
+          setDefaultCountryCode(userSettings.default_country_code);
         } else if (localCode) {
           setDefaultCountryCode(localCode);
         }
+
+        const localInterestType = typeof window !== 'undefined' ? (localStorage.getItem('debtsync_default_interest_type') as any) : null;
+        const localInterestRate = typeof window !== 'undefined' ? localStorage.getItem('debtsync_default_interest_rate') : null;
+        const localCompoundFreq = typeof window !== 'undefined' ? (localStorage.getItem('debtsync_default_compound_freq') as any) : null;
+
+        const resolvedType = userSettings?.default_interest_type || localInterestType || 'none';
+        const resolvedRate = userSettings?.default_interest_rate !== undefined && userSettings?.default_interest_rate !== null
+          ? Number(userSettings.default_interest_rate)
+          : (localInterestRate ? parseFloat(localInterestRate) : 0);
+        const resolvedFreq = userSettings?.default_compound_freq || localCompoundFreq || 'monthly';
+
+        setDefaultInterestType(resolvedType);
+        setDefaultInterestRate(isNaN(resolvedRate) ? 0 : resolvedRate);
+        setDefaultInterestRateStr(isNaN(resolvedRate) ? '0' : String(resolvedRate));
+        setDefaultCompoundFreq(resolvedFreq);
 
         // Load user debts to evaluate account deletion eligibility
         const { data: userDebts } = await supabase
@@ -320,6 +350,10 @@ export default function SettingsPage() {
 
       if (typeof window !== 'undefined') {
         localStorage.setItem('debtsync_default_country_code', defaultCountryCode);
+        localStorage.setItem('debtsync_default_interest_type', defaultInterestType);
+        localStorage.setItem('debtsync_default_interest_rate', String(defaultInterestRate));
+        localStorage.setItem('debtsync_default_compound_freq', defaultCompoundFreq);
+        window.dispatchEvent(new CustomEvent('debtsync:settings_changed'));
       }
 
       // Update user_settings
@@ -328,6 +362,9 @@ export default function SettingsPage() {
         default_currency: currency,
         default_country_code: defaultCountryCode,
         theme_preference: getStoredTheme(),
+        default_interest_type: defaultInterestType,
+        default_interest_rate: defaultInterestType === 'none' ? 0 : defaultInterestRate,
+        default_compound_freq: defaultCompoundFreq,
         updated_at: new Date().toISOString(),
       };
 
@@ -335,11 +372,13 @@ export default function SettingsPage() {
         .from('user_settings')
         .upsert(settingsPayload);
 
-      if (settingsError && settingsError.message?.includes('default_country_code')) {
+      if (settingsError) {
+        // Fallback retry if newer columns aren't in database yet
+        delete settingsPayload.default_interest_type;
+        delete settingsPayload.default_interest_rate;
+        delete settingsPayload.default_compound_freq;
         delete settingsPayload.default_country_code;
         await supabase.from('user_settings').upsert(settingsPayload);
-      } else if (settingsError) {
-        throw settingsError;
       }
 
       // Update password if entered
@@ -890,6 +929,192 @@ export default function SettingsPage() {
             </div>
             <ThemeToggle />
           </div>
+        </div>
+
+        {/* Default Interest Terms */}
+        <div className="pt-6 border-t border-[var(--outline-variant)]/20 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-mono text-xs uppercase tracking-wider font-semibold text-[var(--on-surface-variant)] flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">percent</span>
+                <span>Default Interest Terms</span>
+              </h3>
+              <p className="text-[11px] font-mono text-[var(--outline)] mt-0.5">
+                Initial interest terms for new borrows, loans, and split bill payments (can always be changed per transaction).
+              </p>
+            </div>
+            <span className="font-mono text-xs font-bold text-[var(--primary)] shrink-0 ml-2">
+              {defaultInterestType === 'none' ? '0% (Interest-Free)' : `${defaultInterestRate}% ${defaultInterestType.toUpperCase()} APR`}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setDefaultInterestType('none');
+                setDefaultInterestRate(0);
+                setDefaultInterestRateStr('0');
+              }}
+              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                defaultInterestType === 'none'
+                  ? 'border-[var(--primary)] bg-[var(--primary-container)]/15 ring-1 ring-[var(--primary)]'
+                  : 'border-[var(--outline-variant)]/30 hover:border-[var(--outline-variant)] bg-[var(--surface)]'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[18px] text-[var(--on-surface-variant)] block mb-1">
+                block
+              </span>
+              <div className="font-mono text-xs font-bold text-[var(--on-surface)]">NO INTEREST</div>
+              <div className="text-[11px] text-[var(--on-surface-variant)] mt-0.5">0% Accrual (Default)</div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setDefaultInterestType('simple');
+                if (defaultInterestRate === 0) {
+                  setDefaultInterestRate(5);
+                  setDefaultInterestRateStr('5.00');
+                }
+              }}
+              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                defaultInterestType === 'simple'
+                  ? 'border-[var(--primary)] bg-[var(--primary-container)]/15 ring-1 ring-[var(--primary)]'
+                  : 'border-[var(--outline-variant)]/30 hover:border-[var(--outline-variant)] bg-[var(--surface)]'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[18px] text-[var(--secondary)] block mb-1">
+                trending_up
+              </span>
+              <div className="font-mono text-xs font-bold text-[var(--on-surface)]">SIMPLE</div>
+              <div className="text-[11px] text-[var(--on-surface-variant)] mt-0.5">On Principal</div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setDefaultInterestType('compound');
+                if (defaultInterestRate === 0) {
+                  setDefaultInterestRate(5);
+                  setDefaultInterestRateStr('5.00');
+                }
+              }}
+              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                defaultInterestType === 'compound'
+                  ? 'border-[var(--primary)] bg-[var(--primary-container)]/15 ring-1 ring-[var(--primary)]'
+                  : 'border-[var(--outline-variant)]/30 hover:border-[var(--outline-variant)] bg-[var(--surface)]'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[18px] text-[var(--primary)] block mb-1">
+                auto_graph
+              </span>
+              <div className="font-mono text-xs font-bold text-[var(--on-surface)]">COMPOUND</div>
+              <div className="text-[11px] text-[var(--on-surface-variant)] mt-0.5">Exponential</div>
+            </button>
+          </div>
+
+          {defaultInterestType !== 'none' && (
+            <div className="p-4 bg-[var(--surface-container-low)] rounded-xl border border-[var(--outline-variant)]/20 space-y-4 animate-in fade-in duration-150">
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <div>
+                    <span className="font-mono text-xs font-bold text-[var(--on-surface-variant)] block">
+                      Default Annual Percentage Rate (APR)
+                    </span>
+                    <span className="font-mono text-[11px] text-[var(--outline)]">
+                      Slide or type custom default rate
+                    </span>
+                  </div>
+                  <div className="relative w-28">
+                    <input
+                      type="number"
+                      min="0"
+                      max="500"
+                      step="0.01"
+                      value={defaultInterestRateStr}
+                      placeholder="0.00"
+                      onChange={(e) => {
+                        setDefaultInterestRateStr(e.target.value);
+                        const parsed = parseFloat(e.target.value);
+                        setDefaultInterestRate(isNaN(parsed) ? 0 : parsed);
+                      }}
+                      onFocus={(e) => e.target.select()}
+                      className="w-full px-3 py-1.5 rounded-lg border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-sm font-bold text-right pr-7 outline-none focus:border-[var(--primary)]"
+                    />
+                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 font-mono text-xs font-bold text-[var(--primary)] pointer-events-none">
+                      %
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="0.05"
+                    value={Math.min(100, Math.max(0, defaultInterestRate))}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      setDefaultInterestRate(val);
+                      setDefaultInterestRateStr(val.toFixed(2));
+                    }}
+                    className="w-full accent-[var(--primary)] cursor-pointer"
+                  />
+                  <div className="flex justify-between font-mono text-[10px] text-[var(--outline)] px-0.5">
+                    <span>0%</span>
+                    <span>25%</span>
+                    <span>50%</span>
+                    <span>75%</span>
+                    <span>100%</span>
+                  </div>
+                </div>
+
+                {/* Quick Presets */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-2">
+                  <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--outline)] mr-1">Presets:</span>
+                  {[5, 10, 15, 24, 36, 50].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => {
+                        setDefaultInterestRate(preset);
+                        setDefaultInterestRateStr(preset.toFixed(2));
+                      }}
+                      className={`px-2 py-0.5 rounded-md font-mono text-[10px] border transition-colors cursor-pointer ${
+                        defaultInterestRate === preset
+                          ? 'bg-[var(--primary)] text-[var(--on-primary)] border-[var(--primary)] font-bold'
+                          : 'border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container)] text-[var(--on-surface-variant)]'
+                      }`}
+                    >
+                      {preset}%
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Compounding / Accrual Frequency */}
+              <div>
+                <label className="block font-mono text-xs uppercase tracking-wider text-[var(--on-surface-variant)] font-semibold mb-1">
+                  Calculation / Compounding Period
+                </label>
+                <select
+                  value={defaultCompoundFreq}
+                  onChange={(e) => setDefaultCompoundFreq(e.target.value as any)}
+                  className="w-full px-3 py-2 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] text-xs font-mono outline-none focus:border-[var(--primary)]"
+                >
+                  <option value="daily">Daily Accrual (Daily Compounding)</option>
+                  <option value="weekly">Weekly Accrual (Weekly Compounding)</option>
+                  <option value="monthly">Monthly Accrual (Monthly Compounding — Recommended)</option>
+                  <option value="yearly">Yearly Accrual (Annual Compounding)</option>
+                </select>
+                <p className="text-[11px] font-mono text-[var(--on-surface-variant)] mt-1.5">
+                  Determines the frequency at which interest accrues and compounds on outstanding balances.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Security & Password */}

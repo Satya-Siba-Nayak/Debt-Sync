@@ -883,15 +883,15 @@ function PersonDebtDetailContent() {
                     </div>
 
                     {/* Two-Sided Notes Display */}
-                    {(cleanNotes || d.counterparty_notes) && (
+                    {(cleanNotes.trim() || d.counterparty_notes) && (
                       <div className="space-y-1 mt-2 pt-2 border-t border-outline-variant/10 text-xs">
-                        {cleanNotes && (
+                        {cleanNotes.trim() && (
                           <div className="flex items-start gap-1.5 text-on-surface-variant">
                             <span className="material-symbols-outlined text-[15px] text-primary shrink-0 mt-0.5">
                               edit_note
                             </span>
                             <span>
-                              <strong className="text-on-surface">Creator:</strong> {cleanNotes}
+                              <strong className="text-on-surface">Creator:</strong> {cleanNotes.trim()}
                             </span>
                           </div>
                         )}

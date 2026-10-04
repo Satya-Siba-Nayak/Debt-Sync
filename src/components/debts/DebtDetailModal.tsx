@@ -404,52 +404,59 @@ export function DebtDetailModal({
           })()}
 
           {/* Two-Sided Notes Section */}
-          <div className="p-4 rounded-xl bg-[var(--surface)] border border-[var(--outline-variant)]/30 space-y-2.5">
-            <div className="flex items-center justify-between">
-              <span className="font-mono text-xs font-bold uppercase tracking-wider text-[var(--on-surface-variant)]">
-                Agreement Notes
-              </span>
-              <button
-                type="button"
-                onClick={() => setIsNoteModalOpen(true)}
-                className="font-mono text-xs text-[var(--primary)] font-bold hover:underline flex items-center gap-1"
-              >
-                <span className="material-symbols-outlined text-[14px]">edit_note</span>
-                Edit Notes
-              </button>
-            </div>
+          {(() => {
+            const cleanNotes = getCleanDebtNotes(debt.notes).trim();
+            const counterNote = debt.counterparty_notes?.trim();
 
-            {debt.notes || debt.counterparty_notes ? (
-              <div className="space-y-2 text-xs">
-                {debt.notes && (
-                  <div className="flex items-start gap-2 text-[var(--on-surface-variant)] bg-[var(--surface-container-low)] p-2.5 rounded-lg border border-[var(--outline-variant)]/20">
-                    <span className="material-symbols-outlined text-[16px] text-[var(--primary)] shrink-0 mt-0.5">
-                      edit_note
-                    </span>
-                    <div>
-                      <strong className="text-[var(--on-surface)] block mb-0.5">Creator Note:</strong>
-                      <span>{getCleanDebtNotes(debt.notes)}</span>
-                    </div>
+            return (
+              <div className="p-4 rounded-xl bg-[var(--surface)] border border-[var(--outline-variant)]/30 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs font-bold uppercase tracking-wider text-[var(--on-surface-variant)]">
+                    Agreement Notes
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsNoteModalOpen(true)}
+                    className="font-mono text-xs text-[var(--primary)] font-bold hover:underline flex items-center gap-1"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">edit_note</span>
+                    Edit Notes
+                  </button>
+                </div>
+
+                {cleanNotes || counterNote ? (
+                  <div className="space-y-2 text-xs">
+                    {cleanNotes && (
+                      <div className="flex items-start gap-2 text-[var(--on-surface-variant)] bg-[var(--surface-container-low)] p-2.5 rounded-lg border border-[var(--outline-variant)]/20">
+                        <span className="material-symbols-outlined text-[16px] text-[var(--primary)] shrink-0 mt-0.5">
+                          edit_note
+                        </span>
+                        <div>
+                          <strong className="text-[var(--on-surface)] block mb-0.5">Creator Note:</strong>
+                          <span>{cleanNotes}</span>
+                        </div>
+                      </div>
+                    )}
+                    {counterNote && (
+                      <div className="flex items-start gap-2 text-[var(--on-surface-variant)] bg-[var(--surface-container-low)] p-2.5 rounded-lg border border-[var(--outline-variant)]/20">
+                        <span className="material-symbols-outlined text-[16px] text-[var(--secondary)] shrink-0 mt-0.5">
+                          quick_reference_all
+                        </span>
+                        <div>
+                          <strong className="text-[var(--on-surface)] block mb-0.5">Counterparty Note:</strong>
+                          <span>{counterNote}</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                )}
-                {debt.counterparty_notes && (
-                  <div className="flex items-start gap-2 text-[var(--on-surface-variant)] bg-[var(--surface-container-low)] p-2.5 rounded-lg border border-[var(--outline-variant)]/20">
-                    <span className="material-symbols-outlined text-[16px] text-[var(--secondary)] shrink-0 mt-0.5">
-                      quick_reference_all
-                    </span>
-                    <div>
-                      <strong className="text-[var(--on-surface)] block mb-0.5">Counterparty Note:</strong>
-                      <span>{debt.counterparty_notes}</span>
-                    </div>
+                ) : (
+                  <div className="text-xs text-[var(--on-surface-variant)] italic">
+                    No personal or counterparty notes recorded yet.
                   </div>
                 )}
               </div>
-            ) : (
-              <div className="text-xs text-[var(--on-surface-variant)] italic">
-                No personal or counterparty notes recorded yet.
-              </div>
-            )}
-          </div>
+            );
+          })()}
 
           {/* Repayment Receipts & Transactions */}
           <div className="space-y-3">

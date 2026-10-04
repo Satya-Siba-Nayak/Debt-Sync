@@ -22,6 +22,9 @@ export type UserSettings = {
   default_currency: string;
   theme_preference: 'light' | 'dark' | 'system';
   default_country_code?: string;
+  default_interest_type?: 'none' | 'simple' | 'compound';
+  default_interest_rate?: number;
+  default_compound_freq?: 'daily' | 'weekly' | 'monthly' | 'yearly';
   created_at: string;
   updated_at: string;
 };
