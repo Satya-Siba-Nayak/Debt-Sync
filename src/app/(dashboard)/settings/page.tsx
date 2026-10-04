@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { formatCurrency, SUPPORTED_CURRENCIES } from '@/lib/utils/currency';
@@ -71,6 +71,84 @@ export default function SettingsPage() {
     totalBalance: number;
     canDelete: boolean;
   }>({ activeCount: 0, pendingCount: 0, totalBalance: 0, canDelete: false });
+
+  // Discord-style Unsaved Changes Tracking
+  const [initialSettings, setInitialSettings] = useState<{
+    fullName: string;
+    phone: string;
+    upiId: string;
+    avatarUrl: string | null;
+    currency: string;
+    defaultCountryCode: string;
+    defaultInterestType: 'none' | 'simple' | 'compound';
+    defaultInterestRate: number;
+    defaultCompoundFreq: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  } | null>(null);
+
+  const isDirty = useMemo(() => {
+    if (!initialSettings || loading) return false;
+    return (
+      fullName !== initialSettings.fullName ||
+      phone !== initialSettings.phone ||
+      upiId !== initialSettings.upiId ||
+      avatarUrl !== initialSettings.avatarUrl ||
+      currency !== initialSettings.currency ||
+      defaultCountryCode !== initialSettings.defaultCountryCode ||
+      defaultInterestType !== initialSettings.defaultInterestType ||
+      defaultInterestRate !== initialSettings.defaultInterestRate ||
+      defaultCompoundFreq !== initialSettings.defaultCompoundFreq ||
+      newPassword.trim().length > 0
+    );
+  }, [
+    initialSettings,
+    loading,
+    fullName,
+    phone,
+    upiId,
+    avatarUrl,
+    currency,
+    defaultCountryCode,
+    defaultInterestType,
+    defaultInterestRate,
+    defaultCompoundFreq,
+    newPassword,
+  ]);
+
+  const handleResetChanges = () => {
+    if (!initialSettings) return;
+    setFullName(initialSettings.fullName);
+    setPhone(initialSettings.phone);
+    setUpiId(initialSettings.upiId);
+    setAvatarUrl(initialSettings.avatarUrl);
+    setCurrency(initialSettings.currency);
+    setDefaultCountryCode(initialSettings.defaultCountryCode);
+    setDefaultInterestType(initialSettings.defaultInterestType);
+    setDefaultInterestRate(initialSettings.defaultInterestRate);
+    setDefaultInterestRateStr(String(initialSettings.defaultInterestRate));
+    setDefaultCompoundFreq(initialSettings.defaultCompoundFreq);
+    setNewPassword('');
+    setError('');
+  };
+
+  // Browser navigation safety prompt when unsaved changes exist
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isDirty]);
+
+  // Auto-dismiss floating toast overlay message after 4s
+  useEffect(() => {
+    if (message) {
+      const timer = setTimeout(() => setMessage(''), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [message]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -231,6 +309,17 @@ export default function SettingsPage() {
           canDelete: activeDebtCount === 0 && pendingDebtCount === 0 && totalOutstanding <= 0.01,
         });
 
+        setInitialSettings({
+          fullName: profile?.full_name || '',
+          phone: profile?.phone || '',
+          upiId: profile?.upi_id || '',
+          avatarUrl: profile?.avatar_url || null,
+          currency: userSettings?.default_currency || 'inr',
+          defaultCountryCode: userSettings?.default_country_code || localCode || '+91',
+          defaultInterestType: resolvedType,
+          defaultInterestRate: isNaN(resolvedRate) ? 0 : resolvedRate,
+          defaultCompoundFreq: resolvedFreq,
+        });
       } catch (err) {
         console.error('Error loading settings:', err);
       } finally {
@@ -393,6 +482,18 @@ export default function SettingsPage() {
         setNewPassword('');
       }
 
+      setInitialSettings({
+        fullName,
+        phone,
+        upiId,
+        avatarUrl,
+        currency,
+        defaultCountryCode,
+        defaultInterestType,
+        defaultInterestRate,
+        defaultCompoundFreq,
+      });
+
       setMessage('Settings updated successfully!');
     } catch (err: any) {
       setError(err.message || 'Failed to update settings');
@@ -495,11 +596,6 @@ export default function SettingsPage() {
         onSubmit={handleSave}
         className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 md:p-8 border border-[var(--outline-variant)]/30 shadow-sm space-y-6"
       >
-        {message && (
-          <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 text-xs font-mono">
-            {message}
-          </div>
-        )}
         {error && (
           <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-[var(--error)] text-xs font-mono">
             {error}
@@ -1513,6 +1609,69 @@ export default function SettingsPage() {
             setMessage('Profile picture cropped, saved, and optimized under 5MB!');
           }}
         />
+      )}
+
+      {/* Discord-style Floating Unsaved Changes Bar */}
+      {isDirty && (
+        <div className="fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom,0px))] md:bottom-6 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-2rem)] max-w-xl p-3.5 md:p-4 rounded-2xl bg-[var(--surface-container-high)]/95 backdrop-blur-md border border-[var(--primary)]/30 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-3 animate-in slide-in-from-bottom-5 duration-200">
+          <div className="flex items-center gap-2.5 text-xs font-mono text-[var(--on-surface)]">
+            <span className="material-symbols-outlined text-[18px] text-amber-500 animate-pulse">
+              warning
+            </span>
+            <span>
+              <strong>Careful:</strong> You have unsaved changes!
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+            <button
+              type="button"
+              onClick={handleResetChanges}
+              disabled={saving}
+              className="px-3.5 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container)] text-[var(--on-surface-variant)] text-xs font-mono font-semibold transition-colors cursor-pointer disabled:opacity-50 min-h-[38px]"
+            >
+              Reset / Undo
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                handleSave(e as any);
+              }}
+              disabled={saving}
+              className="px-4 py-1.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] text-xs font-mono font-bold hover:brightness-110 active:scale-[0.98] transition-all shadow-sm cursor-pointer flex items-center gap-1.5 disabled:opacity-50 min-h-[38px]"
+            >
+              {saving ? (
+                <>
+                  <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
+                  <span>Saving...</span>
+                </>
+              ) : (
+                <>
+                  <span className="material-symbols-outlined text-[14px]">save</span>
+                  <span>Save Changes</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Success Notification Toast */}
+      {message && (
+        <div className="fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom,0px))] md:bottom-6 right-4 md:right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl bg-[var(--surface-container-high)]/95 backdrop-blur-md text-[var(--on-surface)] border border-emerald-500/40 shadow-2xl font-mono text-xs animate-in slide-in-from-bottom-5 duration-200">
+          <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-500 flex items-center justify-center shrink-0">
+            <span className="material-symbols-outlined text-[16px]">check_circle</span>
+          </div>
+          <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{message}</span>
+          <button
+            type="button"
+            onClick={() => setMessage('')}
+            className="w-5 h-5 rounded-full hover:bg-[var(--surface-container-highest)] flex items-center justify-center text-[var(--outline)] hover:text-[var(--on-surface)] transition-colors cursor-pointer ml-1"
+          >
+            <span className="material-symbols-outlined text-[14px]">close</span>
+          </button>
+        </div>
       )}
     </div>
   );

@@ -21,6 +21,7 @@ import { calculateTrustScore } from '@/lib/utils/trust-score';
 import { detectUPIApp, formatPaymentMethodDisplay } from '@/lib/utils/upi-link';
 import { getLedgerCache } from '@/lib/stores/ledger-store';
 import { parseSplitDetails, getCleanDebtNotes } from '@/lib/utils/split-bills';
+import { EditPendingDebtModal } from '@/components/debts/EditPendingDebtModal';
 import Link from 'next/link';
 
 function PersonDebtDetailContent() {
@@ -71,6 +72,7 @@ function PersonDebtDetailContent() {
   const [selectedDebtForNote, setSelectedDebtForNote] = useState<Debt | null>(null);
   const [isRecordDebtOpen, setIsRecordDebtOpen] = useState(false);
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [selectedDebtForEdit, setSelectedDebtForEdit] = useState<Debt | null>(null);
   const [verifyingPaymentId, setVerifyingPaymentId] = useState<string | null>(null);
 
   const fetchDetails = useCallback(async () => {
@@ -941,6 +943,18 @@ function PersonDebtDetailContent() {
                       </button>
                     )}
 
+                    {isOutgoingPending && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDebtForEdit(d)}
+                        className="py-1.5 px-3 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 border border-amber-500/30 font-mono text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                        title="Edit pending agreement details"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">edit</span>
+                        <span>Edit Agreement</span>
+                      </button>
+                    )}
+
                     {isIncomingPending && (
                       <div className="flex items-center gap-2">
                         <button
@@ -1227,6 +1241,16 @@ function PersonDebtDetailContent() {
           onPaymentCompleted={() => {
             fetchDetails();
           }}
+        />
+      )}
+
+      {/* Edit Pending Debt Modal */}
+      {selectedDebtForEdit && (
+        <EditPendingDebtModal
+          isOpen={Boolean(selectedDebtForEdit)}
+          debt={selectedDebtForEdit}
+          onClose={() => setSelectedDebtForEdit(null)}
+          onDebtUpdated={fetchDetails}
         />
       )}
     </div>

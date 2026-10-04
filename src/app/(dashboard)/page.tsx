@@ -16,6 +16,7 @@ import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { getLedgerCache, setLedgerCache, computeDashboardStats } from '@/lib/stores/ledger-store';
 import { SkeletonBalanceCards, SkeletonTableRows } from '@/components/ui/Skeleton';
 import { parseSplitDetails, getCleanDebtNotes } from '@/lib/utils/split-bills';
+import { EditPendingDebtModal } from '@/components/debts/EditPendingDebtModal';
 import Link from 'next/link';
 
 export default function GlobalDashboardPage() {
@@ -27,6 +28,7 @@ export default function GlobalDashboardPage() {
   const [debts, setDebts] = useState<Debt[]>(initialCache?.debts || []);
   const [payments, setPayments] = useState<Payment[]>(initialCache?.payments || []);
   const [currentUserId, setCurrentUserId] = useState<string | null>(initialCache?.userId || null);
+  const [selectedDebtForEdit, setSelectedDebtForEdit] = useState<Debt | null>(null);
 
   const initialStats = initialCache && initialCache.userId
     ? computeDashboardStats(initialCache.debts, initialCache.payments, initialCache.userId)
@@ -541,6 +543,25 @@ export default function GlobalDashboardPage() {
                         </button>
                       </div>
                     )}
+
+                    {d.status === 'pending' && d.created_by === currentUserId && (
+                      <div className="mt-3 pt-2.5 border-t border-[var(--outline-variant)]/15 flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-mono text-amber-500/90 flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[13px]">schedule</span>
+                          <span>Awaiting acceptance</span>
+                        </span>
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            setSelectedDebtForEdit(d);
+                          }}
+                          className="px-3 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 border border-amber-500/30 font-mono text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                        >
+                          <span className="material-symbols-outlined text-[13px]">edit</span>
+                          <span>Edit</span>
+                        </button>
+                      </div>
+                    )}
                   </Link>
                 );
               })}
@@ -683,6 +704,14 @@ export default function GlobalDashboardPage() {
                               >
                                 Accept
                               </button>
+                            ) : d.status === 'pending' && d.created_by === currentUserId ? (
+                              <button
+                                onClick={() => setSelectedDebtForEdit(d)}
+                                className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 border border-amber-500/30 font-mono text-xs font-bold transition-colors cursor-pointer flex items-center gap-1"
+                              >
+                                <span className="material-symbols-outlined text-[13px]">edit</span>
+                                <span>Edit</span>
+                              </button>
                             ) : null}
                             <Link
                               href={`/directory/detail?id=${otherPerson?.id || d.id}`}
@@ -701,6 +730,16 @@ export default function GlobalDashboardPage() {
           </div>
         )}
       </section>
+
+      {/* Edit Pending Debt Modal */}
+      {selectedDebtForEdit && (
+        <EditPendingDebtModal
+          isOpen={Boolean(selectedDebtForEdit)}
+          debt={selectedDebtForEdit}
+          onClose={() => setSelectedDebtForEdit(null)}
+          onDebtUpdated={fetchDashboardData}
+        />
+      )}
     </div>
   );
 }

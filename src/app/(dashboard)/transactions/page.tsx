@@ -9,6 +9,7 @@ import { Chip } from '@/components/ui/Chip';
 import { Avatar } from '@/components/ui/Avatar';
 import { CounterpartyNoteModal } from '@/components/debts/CounterpartyNoteModal';
 import { DebtDetailModal } from '@/components/debts/DebtDetailModal';
+import { EditPendingDebtModal } from '@/components/debts/EditPendingDebtModal';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { getDueDateInfo } from '@/lib/utils/due-date';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
@@ -30,6 +31,7 @@ export default function TransactionsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDebtForNote, setSelectedDebtForNote] = useState<Debt | null>(null);
   const [selectedDebtForDetail, setSelectedDebtForDetail] = useState<Debt | null>(null);
+  const [selectedDebtForEdit, setSelectedDebtForEdit] = useState<Debt | null>(null);
 
   const fetchTransactions = useCallback(async () => {
     try {
@@ -458,6 +460,27 @@ export default function TransactionsPage() {
                         </div>
                       </div>
                     )}
+
+                    {d.status === 'pending' && d.created_by === currentUserId && (
+                      <div className="mt-3 pt-3 border-t border-amber-500/20 flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-mono text-amber-500/90 flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[13px]">schedule</span>
+                          <span>Awaiting acceptance</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setSelectedDebtForEdit(d);
+                          }}
+                          className="px-3 py-1 bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 border border-amber-500/30 rounded-lg font-mono text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                        >
+                          <span className="material-symbols-outlined text-[14px]">edit</span>
+                          <span>Edit</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -668,6 +691,24 @@ export default function TransactionsPage() {
                                   Decline
                                 </button>
                               </div>
+                            ) : d.status === 'pending' && d.created_by === currentUserId ? (
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedDebtForEdit(d)}
+                                  className="px-2.5 py-1 rounded-md bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 border border-amber-500/30 font-mono text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                                  title="Edit pending agreement details"
+                                >
+                                  <span className="material-symbols-outlined text-[13px]">edit</span>
+                                  <span>Edit</span>
+                                </button>
+                                <Link
+                                  href={`/directory/detail?id=${otherPerson?.id || d.id}`}
+                                  className="font-mono text-xs text-[var(--on-surface-variant)] hover:text-[var(--primary)] hover:underline ml-1"
+                                >
+                                  Ledger
+                                </Link>
+                              </div>
                             ) : (
                               <Link
                                 href={`/directory/detail?id=${otherPerson?.id || d.id}`}
@@ -707,6 +748,16 @@ export default function TransactionsPage() {
           currentUserId={currentUserId || ''}
           currency={currency}
           onClose={() => setSelectedDebtForDetail(null)}
+          onDebtUpdated={fetchTransactions}
+        />
+      )}
+
+      {/* Edit Pending Debt Modal */}
+      {selectedDebtForEdit && (
+        <EditPendingDebtModal
+          isOpen={Boolean(selectedDebtForEdit)}
+          debt={selectedDebtForEdit}
+          onClose={() => setSelectedDebtForEdit(null)}
           onDebtUpdated={fetchTransactions}
         />
       )}

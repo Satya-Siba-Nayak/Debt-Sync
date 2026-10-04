@@ -13,6 +13,7 @@ import { PaymentModal } from './PaymentModal';
 import { CounterpartyNoteModal } from './CounterpartyNoteModal';
 import { formatPaymentMethodDisplay } from '@/lib/utils/upi-link';
 import { parseSplitDetails, getCleanDebtNotes } from '@/lib/utils/split-bills';
+import { EditPendingDebtModal } from './EditPendingDebtModal';
 
 export interface DebtDetailModalProps {
   isOpen: boolean;
@@ -26,42 +27,63 @@ export interface DebtDetailModalProps {
 export function DebtDetailModal({
   isOpen,
   onClose,
-  debt,
+  debt: initialDebt,
   currentUserId,
   currency = 'inr',
   onDebtUpdated,
 }: DebtDetailModalProps) {
   const supabase = createClient();
 
+  const [internalDebt, setInternalDebt] = useState<Debt | null>(initialDebt);
   const [loading, setLoading] = useState(false);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLogEntry[]>([]);
   const [verifyingPaymentId, setVerifyingPaymentId] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
 
   // Sub-modals
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isNoteModalOpen, setIsNoteModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+
+  useEffect(() => {
+    setInternalDebt(initialDebt);
+  }, [initialDebt]);
+
+  const debt = internalDebt || initialDebt;
 
   const fetchDebtDetails = useCallback(async () => {
-    if (!debt) return;
+    if (!initialDebt?.id) return;
     setLoading(true);
     try {
-      const [paymentsRes, logsRes] = await Promise.all([
+      const [debtRes, paymentsRes, logsRes] = await Promise.all([
+        supabase
+          .from('debts')
+          .select(`
+            *,
+            lender:profiles!debts_lender_id_fkey(id, full_name, email, avatar_url),
+            borrower:profiles!debts_borrower_id_fkey(id, full_name, email, avatar_url)
+          `)
+          .eq('id', initialDebt.id)
+          .single(),
         supabase
           .from('payments')
           .select(`
             *,
             payer:profiles!payments_paid_by_fkey(id, full_name, email, avatar_url)
           `)
-          .eq('debt_id', debt.id)
+          .eq('debt_id', initialDebt.id)
           .order('created_at', { ascending: false }),
         supabase
           .from('activity_log')
           .select('*')
-          .eq('debt_id', debt.id)
+          .eq('debt_id', initialDebt.id)
           .order('created_at', { ascending: false }),
       ]);
 
+      if (debtRes.data) {
+        setInternalDebt(debtRes.data as any);
+      }
       setPayments((paymentsRes.data as any) || []);
       setActivityLogs((logsRes.data as any) || []);
     } catch (err) {
@@ -69,7 +91,7 @@ export function DebtDetailModal({
     } finally {
       setLoading(false);
     }
-  }, [debt, supabase]);
+  }, [initialDebt?.id, supabase]);
 
   useEffect(() => {
     if (isOpen && debt) {
@@ -173,6 +195,39 @@ export function DebtDetailModal({
       alert(err.message || 'Failed to process repayment verification');
     } finally {
       setVerifyingPaymentId(null);
+    }
+  };
+
+  const handleAcceptDebt = async (decision: 'active' | 'declined') => {
+    if (!debt) return;
+    setActionLoading(true);
+    try {
+      const { error: err } = await supabase
+        .from('debts')
+        .update({
+          status: decision,
+          accepted_at: decision === 'active' ? new Date().toISOString() : null,
+        })
+        .eq('id', debt.id)
+        .eq('status', 'pending');
+
+      if (err) throw err;
+
+      await supabase.from('activity_log').insert({
+        user_id: currentUserId,
+        debt_id: debt.id,
+        action: decision === 'active' ? 'debt_accepted' : 'debt_declined',
+        details: { decided_by: currentUserId },
+      });
+
+      window.dispatchEvent(new CustomEvent('debtsync:refresh'));
+      await fetchDebtDetails();
+      onDebtUpdated?.();
+    } catch (e: any) {
+      console.error('Failed to update debt status:', e);
+      alert(e.message || 'Failed to update agreement status.');
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -325,6 +380,72 @@ export function DebtDetailModal({
                 </span>{' '}
                 marked as disputed by lender.
               </span>
+            </div>
+          )}
+
+          {/* Pending Agreement Action Banners */}
+          {debt.status === 'pending' && debt.created_by === currentUserId && (
+            <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <span className="material-symbols-outlined text-amber-500 text-[20px] mt-0.5 shrink-0">
+                  pending_actions
+                </span>
+                <div>
+                  <div className="font-heading font-bold text-xs text-amber-900 dark:text-amber-200">
+                    Pending Counterparty Acceptance
+                  </div>
+                  <p className="text-xs text-amber-800/90 dark:text-amber-300/90 mt-0.5">
+                    Waiting for {otherName} to review &amp; accept this agreement. You can edit the principal, interest, terms, or notes before they accept.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsEditModalOpen(true)}
+                className="py-1.5 px-3 rounded-lg bg-amber-500 hover:bg-amber-600 text-stone-950 font-mono text-xs font-bold flex items-center justify-center gap-1.5 shrink-0 cursor-pointer shadow-xs transition-colors"
+              >
+                <span className="material-symbols-outlined text-[15px]">edit</span>
+                <span>Edit Agreement</span>
+              </button>
+            </div>
+          )}
+
+          {debt.status === 'pending' && debt.created_by !== currentUserId && (
+            <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <span className="material-symbols-outlined text-amber-500 text-[20px] mt-0.5 shrink-0">
+                  notification_important
+                </span>
+                <div>
+                  <div className="font-heading font-bold text-xs text-amber-900 dark:text-amber-200">
+                    Action Required: Review Agreement
+                  </div>
+                  <p className="text-xs text-amber-800/90 dark:text-amber-300/90 mt-0.5">
+                    {otherName} proposed this transaction. Please review the principal amount and terms before accepting.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleAcceptDebt('active')}
+                  disabled={actionLoading}
+                  className="py-1.5 px-3 rounded-lg bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 transition-opacity cursor-pointer shadow-xs flex items-center gap-1 disabled:opacity-50"
+                >
+                  <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                  <span>Accept</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (confirm('Decline this agreement?')) handleAcceptDebt('declined');
+                  }}
+                  disabled={actionLoading}
+                  className="py-1.5 px-3 rounded-lg border border-red-500/30 text-red-500 font-mono text-xs font-bold hover:bg-red-500/10 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  <span>Decline</span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -619,9 +740,15 @@ export function DebtDetailModal({
                     } else if (log.action === 'debt_created') {
                       dotColor = 'bg-[var(--primary)]';
                       title = `Debt Agreement Created (Principal: ${formatCurrency(Number((log.details as any)?.principal || debt.principal), debtCurrency)})`;
+                    } else if (log.action === 'debt_pending_edited') {
+                      dotColor = 'bg-amber-500';
+                      title = `Pending Agreement Edited (Principal: ${formatCurrency(Number((log.details as any)?.newPrincipal || debt.principal), debtCurrency)})`;
                     } else if (log.action === 'debt_accepted') {
                       dotColor = 'bg-emerald-500';
                       title = 'Agreement Accepted by Counterparty';
+                    } else if (log.action === 'debt_declined') {
+                      dotColor = 'bg-red-500';
+                      title = 'Agreement Declined by Counterparty';
                     } else if (log.action === 'debt_settled') {
                       dotColor = 'bg-emerald-500';
                       title = 'Debt Agreement Fully Settled';
@@ -654,23 +781,58 @@ export function DebtDetailModal({
           </div>
 
           {/* Modal Footer Actions */}
-          <div className="pt-4 border-t border-[var(--outline-variant)]/20 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
+          <div className="pt-4 border-t border-[var(--outline-variant)]/20 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 flex-wrap">
               {debt.status === 'active' && calc.currentBalance > 0 && (
                 <button
                   type="button"
                   onClick={() => setIsPaymentModalOpen(true)}
-                  className="py-2 px-3.5 rounded-xl bg-[var(--secondary)] text-[var(--on-secondary)] font-mono text-xs font-bold hover:opacity-95 shadow-xs cursor-pointer"
+                  className="py-2 px-3.5 rounded-xl bg-[var(--secondary)] text-[var(--on-secondary)] font-mono text-xs font-bold hover:opacity-95 shadow-xs cursor-pointer min-h-[40px]"
                 >
                   {isLender ? 'Record Payment' : 'Report Repayment'}
                 </button>
+              )}
+
+              {debt.status === 'pending' && debt.created_by === currentUserId && (
+                <button
+                  type="button"
+                  onClick={() => setIsEditModalOpen(true)}
+                  className="py-2 px-3.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-95 shadow-xs flex items-center gap-1.5 cursor-pointer min-h-[40px]"
+                >
+                  <span className="material-symbols-outlined text-[15px]">edit</span>
+                  <span>Edit Agreement</span>
+                </button>
+              )}
+
+              {debt.status === 'pending' && debt.created_by !== currentUserId && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleAcceptDebt('active')}
+                    disabled={actionLoading}
+                    className="py-2 px-3.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 shadow-xs flex items-center gap-1 cursor-pointer disabled:opacity-50 min-h-[40px]"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">check_circle</span>
+                    <span>Accept</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (confirm('Decline this agreement?')) handleAcceptDebt('declined');
+                    }}
+                    disabled={actionLoading}
+                    className="py-2 px-3 rounded-xl border border-red-500/30 text-red-500 hover:bg-red-500/10 font-mono text-xs font-bold cursor-pointer disabled:opacity-50 min-h-[40px]"
+                  >
+                    Decline
+                  </button>
+                </div>
               )}
             </div>
 
             <button
               type="button"
               onClick={onClose}
-              className="py-2 px-4 rounded-xl border border-[var(--outline-variant)]/40 font-mono text-xs font-semibold text-[var(--on-surface)] hover:bg-[var(--surface-container)] cursor-pointer"
+              className="py-2 px-4 rounded-xl border border-[var(--outline-variant)]/40 font-mono text-xs font-semibold text-[var(--on-surface)] hover:bg-[var(--surface-container)] cursor-pointer min-h-[40px]"
             >
               Close
             </button>
@@ -700,6 +862,19 @@ export function DebtDetailModal({
           currentUserId={currentUserId}
           onClose={() => setIsNoteModalOpen(false)}
           onNoteUpdated={() => {
+            fetchDebtDetails();
+            onDebtUpdated?.();
+          }}
+        />
+      )}
+
+      {/* Edit Pending Debt Modal */}
+      {isEditModalOpen && (
+        <EditPendingDebtModal
+          isOpen={isEditModalOpen}
+          debt={debt}
+          onClose={() => setIsEditModalOpen(false)}
+          onDebtUpdated={() => {
             fetchDebtDetails();
             onDebtUpdated?.();
           }}
