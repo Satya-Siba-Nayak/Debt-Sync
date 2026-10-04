@@ -35,6 +35,33 @@ export type Contact = {
   profile?: Profile;
 };
 
+export type SplitBillParticipant = {
+  userId: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  avatarUrl?: string | null;
+  isPayer: boolean;
+  shareAmount: number;
+  percentage?: number;
+  debtId?: string;
+  status?: 'pending' | 'active' | 'settled' | 'declined';
+};
+
+export type SplitBillDetails = {
+  groupId: string;
+  title: string;
+  totalAmount: number;
+  currency: string;
+  splitMode: 'equal' | 'exact' | 'percentage';
+  payerId: string;
+  payerName: string;
+  includePayerInSplit: boolean;
+  participants: SplitBillParticipant[];
+  notes?: string | null;
+  createdAt: string;
+};
+
 export type Debt = {
   id: string;
   created_by: string;
@@ -53,6 +80,8 @@ export type Debt = {
   created_at: string;
   settled_at: string | null;
   due_date?: string | null;
+  split_group_id?: string | null;
+  split_details?: SplitBillDetails | null;
   lender?: Profile;
   borrower?: Profile;
 };

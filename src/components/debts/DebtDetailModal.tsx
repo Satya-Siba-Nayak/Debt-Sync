@@ -12,6 +12,7 @@ import { getDueDateInfo } from '@/lib/utils/due-date';
 import { PaymentModal } from './PaymentModal';
 import { CounterpartyNoteModal } from './CounterpartyNoteModal';
 import { formatPaymentMethodDisplay } from '@/lib/utils/upi-link';
+import { parseSplitDetails, getCleanDebtNotes } from '@/lib/utils/split-bills';
 
 export interface DebtDetailModalProps {
   isOpen: boolean;
@@ -327,6 +328,69 @@ export function DebtDetailModal({
             </div>
           )}
 
+          {/* Split Bill Group Card */}
+          {(() => {
+            const split = parseSplitDetails(debt);
+            if (!split) return null;
+
+            return (
+              <div className="p-4 rounded-xl border border-[var(--primary)]/30 bg-gradient-to-br from-[var(--primary)]/10 via-[var(--surface-container-low)] to-[var(--surface-container)] space-y-3 shadow-xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[20px] text-[var(--primary)]">call_split</span>
+                    <div>
+                      <span className="font-heading text-sm font-bold text-[var(--on-surface)] block">
+                        Split Bill: {split.title}
+                      </span>
+                      <span className="font-mono text-[11px] text-[var(--on-surface-variant)]">
+                        Original Total: {formatCurrency(split.totalAmount, split.currency)} • Organized by {split.payerName}
+                      </span>
+                    </div>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[var(--primary)]/20 text-[var(--primary)] border border-[var(--primary)]/30">
+                    {split.participants.length} People
+                  </span>
+                </div>
+
+                {/* Participant breakdown list */}
+                <div className="space-y-1.5 pt-1">
+                  <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] font-semibold block">
+                    Group Split Breakdown
+                  </span>
+                  <div className="max-h-40 overflow-y-auto overscroll-contain modal-scroll-container pr-1 space-y-1.5">
+                    {split.participants.map((pt) => {
+                      const isMe = pt.userId === currentUserId;
+                      return (
+                        <div
+                          key={pt.userId}
+                          className={`p-2 rounded-lg flex items-center justify-between text-xs border ${
+                            isMe
+                              ? 'bg-[var(--primary)]/15 border-[var(--primary)]/30 font-bold'
+                              : 'bg-[var(--surface-container-lowest)]/80 border-[var(--outline-variant)]/20'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="truncate text-[var(--on-surface)]">
+                              {pt.name} {isMe ? '(You)' : ''}
+                            </span>
+                            {pt.isPayer && (
+                              <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                                Paid Bill
+                              </span>
+                            )}
+                          </div>
+                          <span className="font-mono font-bold text-[var(--on-surface)] shrink-0 ml-2">
+                            {formatCurrency(pt.shareAmount, split.currency)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Two-Sided Notes Section */}
           <div className="p-4 rounded-xl bg-[var(--surface)] border border-[var(--outline-variant)]/30 space-y-2.5">
             <div className="flex items-center justify-between">
@@ -352,7 +416,7 @@ export function DebtDetailModal({
                     </span>
                     <div>
                       <strong className="text-[var(--on-surface)] block mb-0.5">Creator Note:</strong>
-                      <span>{debt.notes}</span>
+                      <span>{getCleanDebtNotes(debt.notes)}</span>
                     </div>
                   </div>
                 )}

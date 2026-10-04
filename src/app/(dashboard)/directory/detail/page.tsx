@@ -20,6 +20,7 @@ import { SkeletonBalanceCards, SkeletonTableRows } from '@/components/ui/Skeleto
 import { calculateTrustScore } from '@/lib/utils/trust-score';
 import { detectUPIApp, formatPaymentMethodDisplay } from '@/lib/utils/upi-link';
 import { getLedgerCache } from '@/lib/stores/ledger-store';
+import { parseSplitDetails, getCleanDebtNotes } from '@/lib/utils/split-bills';
 import Link from 'next/link';
 
 function PersonDebtDetailContent() {
@@ -803,6 +804,8 @@ function PersonDebtDetailContent() {
               const debtPayments = payments.filter((p) => p.debt_id === d.id);
               const calc = calculateDebtBalance(d, debtPayments);
               const dueDateInfo = getDueDateInfo(d.due_date, d.status);
+              const split = parseSplitDetails(d);
+              const cleanNotes = getCleanDebtNotes(d.notes);
 
               return (
                 <div
@@ -841,6 +844,12 @@ function PersonDebtDetailContent() {
                             : 'default'
                         }
                       />
+                      {split && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-primary/15 text-primary border border-primary/25 flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[12px]">call_split</span>
+                          <span>Split: {split.title}</span>
+                        </span>
+                      )}
                       {dueDateInfo && d.status !== 'declined' && (
                         <span className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-semibold border ${dueDateInfo.className} flex items-center gap-1`}>
                           <span className="material-symbols-outlined text-[12px]">
@@ -874,15 +883,15 @@ function PersonDebtDetailContent() {
                     </div>
 
                     {/* Two-Sided Notes Display */}
-                    {(d.notes || d.counterparty_notes) && (
+                    {(cleanNotes || d.counterparty_notes) && (
                       <div className="space-y-1 mt-2 pt-2 border-t border-outline-variant/10 text-xs">
-                        {d.notes && (
+                        {cleanNotes && (
                           <div className="flex items-start gap-1.5 text-on-surface-variant">
                             <span className="material-symbols-outlined text-[15px] text-primary shrink-0 mt-0.5">
                               edit_note
                             </span>
                             <span>
-                              <strong className="text-on-surface">Creator:</strong> {d.notes}
+                              <strong className="text-on-surface">Creator:</strong> {cleanNotes}
                             </span>
                           </div>
                         )}

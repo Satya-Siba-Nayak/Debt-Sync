@@ -15,6 +15,7 @@ import { getDueDateInfo } from '@/lib/utils/due-date';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { getLedgerCache, setLedgerCache, computeDashboardStats } from '@/lib/stores/ledger-store';
 import { SkeletonBalanceCards, SkeletonTableRows } from '@/components/ui/Skeleton';
+import { parseSplitDetails, getCleanDebtNotes } from '@/lib/utils/split-bills';
 import Link from 'next/link';
 
 export default function GlobalDashboardPage() {
@@ -222,24 +223,67 @@ export default function GlobalDashboardPage() {
               const isLender = d.lender_id === currentUserId;
               const counterparty = isLender ? d.borrower : d.lender;
               const name = counterparty?.full_name || counterparty?.email || 'Counterparty';
+              const split = parseSplitDetails(d);
+              const cleanNotes = getCleanDebtNotes(d.notes);
+              const otherParticipants = split?.participants.filter((p) => p.userId !== currentUserId) || [];
 
               return (
                 <div
                   key={d.id}
                   className="bg-[var(--surface-container-lowest)] p-4 rounded-xl border border-[var(--outline-variant)]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs"
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-start gap-3">
                     <Avatar src={counterparty?.avatar_url} name={name} size="md" />
                     <div>
-                      <div className="font-heading font-bold text-sm text-[var(--on-surface)]">
-                        {name} <span className="font-normal text-xs text-[var(--on-surface-variant)]">recorded a transaction:</span>
+                      <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                        <span className="font-heading font-bold text-sm text-[var(--on-surface)]">
+                          {name}
+                        </span>
+                        {split ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/30 flex items-center gap-1">
+                            <span className="material-symbols-outlined text-[12px]">call_split</span>
+                            <span>Split Bill: {split.title}</span>
+                          </span>
+                        ) : (
+                          <span className="font-normal text-xs text-[var(--on-surface-variant)]">recorded a transaction:</span>
+                        )}
                       </div>
+
                       <div className="font-mono text-xs text-[var(--on-surface-variant)] mt-0.5">
                         {isLender ? 'You Lent' : 'You Borrowed'}: <strong className="text-[var(--on-surface)] text-sm">{formatCurrency(d.principal, d.currency || currency)}</strong>
-                        {' '}&bull;{' '}
-                        {d.interest_type === 'none' ? '0% Interest-Free' : `${d.interest_rate}% ${d.interest_type}`}
-                        {d.notes ? ` &bull; "${d.notes}"` : ''}
+                        {split && (
+                          <span className="text-[var(--primary)] font-semibold ml-1.5">
+                            (Total Bill: {formatCurrency(split.totalAmount, split.currency)} split between {split.participants.length} people)
+                          </span>
+                        )}
+                        {!split && (
+                          <>
+                            {' '}&bull;{' '}
+                            {d.interest_type === 'none' ? '0% Interest-Free' : `${d.interest_rate}% ${d.interest_type}`}
+                          </>
+                        )}
+                        {cleanNotes ? ` &bull; "${cleanNotes}"` : ''}
                       </div>
+
+                      {split && otherParticipants.length > 0 && (
+                        <div className="mt-2 flex items-center gap-1.5 flex-wrap text-[11px] font-mono text-[var(--on-surface-variant)]">
+                          <span className="text-[var(--outline)]">Split with:</span>
+                          {split.participants.map((pt) => (
+                            <span
+                              key={pt.userId}
+                              className={`px-1.5 py-0.5 rounded text-[10px] ${
+                                pt.userId === currentUserId
+                                  ? 'bg-[var(--primary)]/15 text-[var(--primary)] font-bold'
+                                  : pt.isPayer
+                                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-medium'
+                                  : 'bg-[var(--surface-container-high)] text-[var(--on-surface)]'
+                              }`}
+                            >
+                              {pt.name} {pt.userId === currentUserId ? '(You)' : pt.isPayer ? '(Paid)' : ''}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -314,13 +358,25 @@ export default function GlobalDashboardPage() {
             </p>
           </div>
 
-          <Link
-            href="/directory"
-            className="text-xs font-mono font-bold text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] hover:underline flex items-center gap-1"
-          >
-            <span>View All</span>
-            <span className="material-symbols-outlined text-[16px]">chevron_right</span>
-          </Link>
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_split_modal'))}
+              className="text-xs font-mono font-bold px-3 py-1.5 rounded-xl border border-[var(--primary)]/30 text-[var(--primary)] hover:bg-[var(--primary)]/10 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              title="Split a group bill with friends"
+            >
+              <span className="material-symbols-outlined text-[15px]">call_split</span>
+              <span>Split Bill</span>
+            </button>
+
+            <Link
+              href="/directory"
+              className="text-xs font-mono font-bold text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] hover:underline flex items-center gap-1"
+            >
+              <span>View All</span>
+              <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+            </Link>
+          </div>
         </div>
 
         {loading && debts.length === 0 ? (
@@ -348,6 +404,8 @@ export default function GlobalDashboardPage() {
                 const debtPayments = payments.filter((p) => p.debt_id === d.id);
                 const calc = calculateDebtBalance(d, debtPayments);
                 const dueDateInfo = getDueDateInfo(d.due_date, d.status);
+                const split = parseSplitDetails(d);
+                const cleanNotes = getCleanDebtNotes(d.notes);
 
                 return (
                   <Link
@@ -420,12 +478,21 @@ export default function GlobalDashboardPage() {
                             {isLender ? 'You Lent' : 'You Borrowed'}
                           </span>
                         )}
-                        <div className="font-mono text-[11px] text-[var(--on-surface-variant)] mt-0.5">
-                          {d.status === 'declined' ? (
-                            <span className="line-through">{formatCurrency(d.principal, d.currency || currency)}</span>
-                          ) : (
-                            formatCurrency(d.principal, d.currency || currency)
-                          )} • {d.interest_type === 'none' ? '0% Free' : `${d.interest_rate}% ${d.interest_type}`}
+                        <div className="font-mono text-[11px] text-[var(--on-surface-variant)] mt-0.5 flex items-center gap-1.5 flex-wrap">
+                          {split && (
+                            <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/20 flex items-center gap-0.5">
+                              <span className="material-symbols-outlined text-[10px]">call_split</span>
+                              <span>Split: {split.title}</span>
+                            </span>
+                          )}
+                          <span>
+                            {d.status === 'declined' ? (
+                              <span className="line-through">{formatCurrency(d.principal, d.currency || currency)}</span>
+                            ) : (
+                              formatCurrency(d.principal, d.currency || currency)
+                            )} • {d.interest_type === 'none' ? '0% Free' : `${d.interest_rate}% ${d.interest_type}`}
+                            {cleanNotes ? ` • "${cleanNotes}"` : ''}
+                          </span>
                         </div>
                       </div>
 
@@ -493,6 +560,8 @@ export default function GlobalDashboardPage() {
                     const debtPayments = payments.filter((p) => p.debt_id === d.id);
                     const calc = calculateDebtBalance(d, debtPayments);
                     const dueDateInfo = getDueDateInfo(d.due_date, d.status);
+                    const split = parseSplitDetails(d);
+                    const cleanNotes = getCleanDebtNotes(d.notes);
 
                     return (
                       <tr
@@ -511,9 +580,17 @@ export default function GlobalDashboardPage() {
                               size="sm"
                             />
                             <div>
-                              <div className="font-semibold text-[var(--on-surface)]">{name}</div>
+                              <div className="font-semibold text-[var(--on-surface)] flex items-center gap-1.5 flex-wrap">
+                                <span>{name}</span>
+                                {split && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/20 flex items-center gap-1">
+                                    <span className="material-symbols-outlined text-[11px]">call_split</span>
+                                    <span>{split.title}</span>
+                                  </span>
+                                )}
+                              </div>
                               <div className="font-mono text-xs text-[var(--on-surface-variant)]">
-                                {otherPerson?.email}
+                                {otherPerson?.email} {cleanNotes ? `• "${cleanNotes}"` : ''}
                               </div>
                             </div>
                           </div>

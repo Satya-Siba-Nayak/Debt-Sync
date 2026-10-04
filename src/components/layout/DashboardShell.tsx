@@ -5,6 +5,7 @@ import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { BottomNav } from './BottomNav';
 import { RecordDebtModal } from '../debts/RecordDebtModal';
+import { SplitBillModal } from '../debts/SplitBillModal';
 import { PWAInstallPrompt } from '../ui/PWAInstallPrompt';
 import { createClient } from '@/lib/supabase/client';
 
@@ -20,6 +21,7 @@ import {
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
+  const [isSplitModalOpen, setIsSplitModalOpen] = useState(false);
   const [recordModalParams, setRecordModalParams] = useState<{
     contactId?: string;
     person?: any;
@@ -32,10 +34,22 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const handleOpenRecordModal = (e: any) => {
       setRecordModalParams(e.detail || null);
+      setIsSplitModalOpen(false);
       setIsRecordModalOpen(true);
     };
+
+    const handleOpenSplitModal = () => {
+      setIsRecordModalOpen(false);
+      setIsSplitModalOpen(true);
+    };
+
     window.addEventListener('debtsync:open_record_modal', handleOpenRecordModal);
-    return () => window.removeEventListener('debtsync:open_record_modal', handleOpenRecordModal);
+    window.addEventListener('debtsync:open_split_modal', handleOpenSplitModal);
+
+    return () => {
+      window.removeEventListener('debtsync:open_record_modal', handleOpenRecordModal);
+      window.removeEventListener('debtsync:open_split_modal', handleOpenSplitModal);
+    };
   }, []);
 
   useEffect(() => {
@@ -160,11 +174,29 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           setIsRecordModalOpen(false);
           setRecordModalParams(null);
         }}
+        onSwitchToSplit={() => {
+          setIsRecordModalOpen(false);
+          setIsSplitModalOpen(true);
+        }}
         onDebtCreated={() => {
-          // Trigger page reload or custom event
           window.dispatchEvent(new CustomEvent('debtsync:refresh'));
         }}
       />
+
+      {/* Global Split Bill & Group Expenses Modal */}
+      <SplitBillModal
+        isOpen={isSplitModalOpen}
+        onClose={() => setIsSplitModalOpen(false)}
+        onSwitchToSingle={() => {
+          setIsSplitModalOpen(false);
+          setRecordModalParams(null);
+          setIsRecordModalOpen(true);
+        }}
+        onSplitCreated={() => {
+          window.dispatchEvent(new CustomEvent('debtsync:refresh'));
+        }}
+      />
+
       {/* PWA Install Prompt */}
       <PWAInstallPrompt />
     </div>

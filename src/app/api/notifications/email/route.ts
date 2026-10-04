@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 interface EmailPayload {
-  type: 'ghost_account_invite' | 'payment_request' | 'debt_recorded';
+  type: 'ghost_account_invite' | 'payment_request' | 'debt_recorded' | 'split_bill_request';
   recipientEmail: string;
   recipientName?: string;
   senderName: string;
@@ -92,6 +92,11 @@ export async function POST(request: NextRequest) {
       headline = 'Payment Verification Request';
       description = `<strong>${senderName}</strong> has reported a repayment of <strong>${formattedAmount}</strong> on your shared ledger. Please review and verify the receipt.`;
       ctaText = 'Verify Repayment Receipt';
+    } else if (type === 'split_bill_request') {
+      subject = `${senderName} split an expense with you: ${formattedAmount}`;
+      headline = 'Group Expense Split Request';
+      description = `<strong>${senderName}</strong> recorded a group expense split on DebtSync. Your share is <strong>${formattedAmount}</strong>.`;
+      ctaText = 'Review & Accept Split';
     } else {
       subject = `Ledger update of ${formattedAmount} from ${senderName}`;
       headline = 'Ledger Agreement Update';

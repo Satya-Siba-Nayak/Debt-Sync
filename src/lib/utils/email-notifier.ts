@@ -1,5 +1,5 @@
 export interface EmailNotificationPayload {
-  type: 'ghost_account_invite' | 'payment_request' | 'debt_recorded';
+  type: 'ghost_account_invite' | 'payment_request' | 'debt_recorded' | 'split_bill_request';
   recipientEmail: string;
   recipientName?: string;
   senderName: string;

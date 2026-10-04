@@ -32,6 +32,7 @@ export interface RecordDebtModalProps {
   onDebtCreated?: () => void;
   preselectedContactId?: string;
   preselectedPerson?: PersonOption | null;
+  onSwitchToSplit?: () => void;
 }
 
 // Module-level hot caches for 0ms frame-0 rendering
@@ -76,6 +77,7 @@ export function RecordDebtModal({
   onDebtCreated,
   preselectedContactId,
   preselectedPerson,
+  onSwitchToSplit,
 }: RecordDebtModalProps) {
   const supabase = createClient();
 
@@ -580,6 +582,32 @@ export function RecordDebtModal({
       maxWidth="max-w-3xl"
     >
       <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Tab Switcher: Single vs Split Bill */}
+        <div className="flex bg-[var(--surface-container-low)] p-1 rounded-xl border border-[var(--outline-variant)]/25">
+          <button
+            type="button"
+            className="flex-1 py-1.5 px-3 rounded-lg text-xs font-mono font-bold bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-xs transition-all flex items-center justify-center gap-1.5"
+          >
+            <span className="material-symbols-outlined text-[16px]">person</span>
+            <span>Single Transaction</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (onSwitchToSplit) {
+                onSwitchToSplit();
+              } else {
+                window.dispatchEvent(new CustomEvent('debtsync:open_split_modal'));
+                onClose();
+              }
+            }}
+            className="flex-1 py-1.5 px-3 rounded-lg text-xs font-mono font-medium text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[16px]">call_split</span>
+            <span>Split Bill</span>
+          </button>
+        </div>
+
         {error && (
           <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-[var(--error)] text-sm border border-[var(--error)]/20">
             {error}

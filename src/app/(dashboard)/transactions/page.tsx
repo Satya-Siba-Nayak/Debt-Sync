@@ -14,6 +14,7 @@ import { getDueDateInfo } from '@/lib/utils/due-date';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { getLedgerCache, setLedgerCache } from '@/lib/stores/ledger-store';
 import { SkeletonTableRows } from '@/components/ui/Skeleton';
+import { parseSplitDetails, getCleanDebtNotes } from '@/lib/utils/split-bills';
 import Link from 'next/link';
 
 export default function TransactionsPage() {
@@ -175,13 +176,16 @@ export default function TransactionsPage() {
         const otherPerson = isLender ? d.borrower : d.lender;
         const name = otherPerson?.full_name?.toLowerCase() || '';
         const email = otherPerson?.email?.toLowerCase() || '';
-        const creatorNote = d.notes?.toLowerCase() || '';
+        const split = parseSplitDetails(d);
+        const splitTitle = split?.title?.toLowerCase() || '';
+        const creatorNote = getCleanDebtNotes(d.notes).toLowerCase();
         const counterpartyNote = d.counterparty_notes?.toLowerCase() || '';
         const principalStr = String(d.principal);
 
         return (
           name.includes(q) ||
           email.includes(q) ||
+          splitTitle.includes(q) ||
           creatorNote.includes(q) ||
           counterpartyNote.includes(q) ||
           principalStr.includes(q) ||
@@ -254,6 +258,8 @@ export default function TransactionsPage() {
                 const debtPayments = payments.filter((p) => p.debt_id === d.id);
                 const calc = calculateDebtBalance(d, debtPayments);
                 const dueDateInfo = getDueDateInfo(d.due_date, d.status);
+                const split = parseSplitDetails(d);
+                const cleanNotes = getCleanDebtNotes(d.notes);
 
                 return (
                   <div
@@ -273,9 +279,15 @@ export default function TransactionsPage() {
                           size="md"
                         />
                         <div className="min-w-0">
-                          <p className="font-semibold text-sm text-[var(--on-surface)] truncate">
-                            {name}
-                          </p>
+                          <div className="font-semibold text-sm text-[var(--on-surface)] flex items-center gap-1.5 flex-wrap">
+                            <span className="truncate">{name}</span>
+                            {split && (
+                              <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/20 flex items-center gap-0.5 shrink-0">
+                                <span className="material-symbols-outlined text-[10px]">call_split</span>
+                                <span>{split.title}</span>
+                              </span>
+                            )}
+                          </div>
                           <p className="font-mono text-xs text-[var(--on-surface-variant)] truncate">
                             {new Date(d.created_at).toLocaleDateString()} • {otherPerson?.email}
                           </p>
@@ -474,6 +486,8 @@ export default function TransactionsPage() {
                     const debtPayments = payments.filter((p) => p.debt_id === d.id);
                     const calc = calculateDebtBalance(d, debtPayments);
                     const dueDateInfo = getDueDateInfo(d.due_date, d.status);
+                    const split = parseSplitDetails(d);
+                    const cleanNotes = getCleanDebtNotes(d.notes);
 
                     return (
                       <tr
@@ -497,16 +511,24 @@ export default function TransactionsPage() {
                               size="sm"
                             />
                             <div>
-                              <div className="font-semibold text-[var(--on-surface)]">{name}</div>
+                              <div className="font-semibold text-[var(--on-surface)] flex items-center gap-1.5 flex-wrap">
+                                <span>{name}</span>
+                                {split && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/20 flex items-center gap-1">
+                                    <span className="material-symbols-outlined text-[11px]">call_split</span>
+                                    <span>{split.title}</span>
+                                  </span>
+                                )}
+                              </div>
                               <div className="font-mono text-xs text-[var(--on-surface-variant)]">
                                 {otherPerson?.email}
                               </div>
-                              {(d.notes || d.counterparty_notes) && (
+                              {(cleanNotes || d.counterparty_notes) && (
                                 <div className="mt-1 space-y-0.5 max-w-xs">
-                                  {d.notes && (
+                                  {cleanNotes && (
                                     <div className="text-[11px] text-[var(--on-surface-variant)] truncate flex items-center gap-1">
                                       <span className="material-symbols-outlined text-[12px] text-[var(--primary)] shrink-0">edit_note</span>
-                                      <span className="truncate italic">"{d.notes}"</span>
+                                      <span className="truncate italic">"{cleanNotes}"</span>
                                     </div>
                                   )}
                                   {d.counterparty_notes && (
