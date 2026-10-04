@@ -547,14 +547,14 @@ export const UPI_POPULAR_APPS: UPIAppLauncher[] = [
     fallbackScheme: 'paytmmp://',
   },
   {
-    id: 'cred',
-    name: 'CRED',
-    shortName: 'CRED',
+    id: 'slice',
+    name: 'Slice UPI',
+    shortName: 'Slice',
     icon: 'credit_card',
-    badgeClass: 'bg-neutral-500/10 text-neutral-800 dark:text-neutral-200 border-neutral-500/25',
-    androidIntent: 'intent://#Intent;package=com.dreamplug.androidapp;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
-    iosScheme: 'cred://',
-    fallbackScheme: 'cred://',
+    badgeClass: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/25',
+    androidIntent: 'intent://#Intent;package=indwin.c3.shareapp;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    iosScheme: 'slice://',
+    fallbackScheme: 'slice://',
   },
   {
     id: 'bhim',
@@ -568,6 +568,39 @@ export const UPI_POPULAR_APPS: UPIAppLauncher[] = [
   },
 ];
 
+const ALL_UPI_LAUNCHERS: Record<string, { androidIntent: string; iosScheme?: string; fallbackScheme: string }> = {
+  gpay: {
+    androidIntent: 'intent://#Intent;package=com.google.android.apps.nbu.paisa.user;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    iosScheme: 'gpay://',
+    fallbackScheme: 'gpay://',
+  },
+  phonepe: {
+    androidIntent: 'intent://#Intent;package=com.phonepe.app;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    iosScheme: 'phonepe://',
+    fallbackScheme: 'phonepe://',
+  },
+  paytm: {
+    androidIntent: 'intent://#Intent;package=net.one97.paytm;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    iosScheme: 'paytmmp://',
+    fallbackScheme: 'paytmmp://',
+  },
+  slice: {
+    androidIntent: 'intent://#Intent;package=indwin.c3.shareapp;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    iosScheme: 'slice://',
+    fallbackScheme: 'slice://',
+  },
+  bhim: {
+    androidIntent: 'intent://#Intent;package=in.org.npci.upiapp;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    iosScheme: 'upi://',
+    fallbackScheme: 'upi://',
+  },
+  cred: {
+    androidIntent: 'intent://#Intent;package=com.dreamplug.androidapp;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end',
+    iosScheme: 'cred://',
+    fallbackScheme: 'cred://',
+  },
+};
+
 /**
  * Directly launches a UPI application on mobile via OS package launcher intent,
  * avoiding the browser-originated P2P `upi://pay` intent that bank switches decline.
@@ -575,8 +608,8 @@ export const UPI_POPULAR_APPS: UPIAppLauncher[] = [
 export function launchUPIApp(appId: string): boolean {
   if (typeof window === 'undefined') return false;
 
-  const app = UPI_POPULAR_APPS.find((a) => a.id === appId);
-  if (!app) {
+  const appMeta = ALL_UPI_LAUNCHERS[appId];
+  if (!appMeta) {
     window.location.href = 'upi://';
     return true;
   }
@@ -586,17 +619,53 @@ export function launchUPIApp(appId: string): boolean {
   const isIOS = /iphone|ipad|ipod/i.test(ua);
 
   try {
-    if (isAndroid && app.androidIntent) {
-      window.location.href = app.androidIntent;
-    } else if (isIOS && app.iosScheme) {
-      window.location.href = app.iosScheme;
+    if (isAndroid && appMeta.androidIntent) {
+      window.location.href = appMeta.androidIntent;
+    } else if (isIOS && appMeta.iosScheme) {
+      window.location.href = appMeta.iosScheme;
     } else {
-      window.location.href = app.fallbackScheme;
+      window.location.href = appMeta.fallbackScheme;
     }
     return true;
   } catch (err) {
     console.error('Failed to launch UPI app:', err);
     return false;
   }
+}
+
+export interface SortedUPIAppsResult {
+  sortedApps: (UPIAppLauncher & { isUserPreferred: boolean })[];
+  userPreferredApp: (UPIAppLauncher & { isUserPreferred: boolean }) | null;
+}
+
+/**
+ * Sorts UPI apps so that the app corresponding to the paying user's own profile UPI ID
+ * appears at the very top (1st app), followed by the other supported apps.
+ *
+ * Example: If paying user has a Slice UPI ID (e.g. user@slice or user@sliceaxis),
+ * Slice is placed first at index 0 and marked isUserPreferred: true.
+ */
+export function getSortedUPIAppsForUser(userUpiId?: string | null): SortedUPIAppsResult {
+  const apps = UPI_POPULAR_APPS.map((a) => ({ ...a, isUserPreferred: false }));
+  if (!userUpiId) {
+    return { sortedApps: apps, userPreferredApp: null };
+  }
+
+  const detected = detectUPIApp(userUpiId);
+  if (!detected.isKnownApp) {
+    return { sortedApps: apps, userPreferredApp: null };
+  }
+
+  const targetIndex = apps.findIndex((a) => a.id === detected.appId);
+  if (targetIndex > -1) {
+    const [preferred] = apps.splice(targetIndex, 1);
+    preferred.isUserPreferred = true;
+    return {
+      sortedApps: [preferred, ...apps],
+      userPreferredApp: preferred,
+    };
+  }
+
+  return { sortedApps: apps, userPreferredApp: null };
 }
 

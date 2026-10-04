@@ -18,6 +18,7 @@ import {
   isUPIMethod,
   UPI_POPULAR_APPS,
   launchUPIApp,
+  getSortedUPIAppsForUser,
 } from '@/lib/utils/upi-link';
 
 interface PaymentModalProps {
@@ -47,6 +48,7 @@ export function PaymentModal({
   const [isLender, setIsLender] = useState(false);
   const [pendingAmount, setPendingAmount] = useState(0);
   const [lenderProfile, setLenderProfile] = useState<{ id: string; full_name?: string; email?: string; upi_id?: string | null } | null>(null);
+  const [currentUserUpiId, setCurrentUserUpiId] = useState<string | null>(null);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
   const [upiPayTab, setUpiPayTab] = useState<'qr' | 'app'>('qr');
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -58,6 +60,12 @@ export function PaymentModal({
 
   const supabase = createClient();
   const detectedLenderApp = detectUPIApp(lenderProfile?.upi_id);
+
+  // Automatically sort UPI apps so that the paying user's own profile app appears 1st on top
+  const { sortedApps, userPreferredApp } = React.useMemo(
+    () => getSortedUPIAppsForUser(currentUserUpiId),
+    [currentUserUpiId]
+  );
 
   const handleAmountChange = (val: string) => {
     const sanitized = val.replace(/^0+(?=\d)/, '');
@@ -180,8 +188,11 @@ export function PaymentModal({
         const user = await getCurrentUserFast(supabase);
         if (!user) return;
 
-        const { data: myProf } = await supabase.from('profiles').select('is_isolated').eq('id', user.id).single();
+        const { data: myProf } = await supabase.from('profiles').select('is_isolated, upi_id').eq('id', user.id).single();
         setIsCurrentUserIsolated(Boolean(myProf?.is_isolated));
+        if (myProf?.upi_id) {
+          setCurrentUserUpiId(myProf.upi_id);
+        }
 
         const userIsLender = user.id === debt.lender_id;
         setIsLender(userIsLender);
@@ -532,6 +543,18 @@ export function PaymentModal({
                   </button>
                 </div>
 
+                {/* Quick direct launcher for user's own profile app if detected */}
+                {userPreferredApp && (
+                  <button
+                    type="button"
+                    onClick={() => handleLaunchApp(userPreferredApp.id, userPreferredApp.name)}
+                    className="w-full min-h-[44px] py-2 px-3 rounded-xl bg-[var(--primary)]/10 hover:bg-[var(--primary)]/15 border border-[var(--primary)]/30 text-[var(--primary)] font-mono text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-[0.98]"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">{userPreferredApp.icon}</span>
+                    <span>Have {userPreferredApp.shortName}? Copy ID & Open {userPreferredApp.shortName} Directly</span>
+                  </button>
+                )}
+
                 <div className="p-2.5 rounded-xl bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)]/20 text-[11px] font-mono text-[var(--on-surface-variant)] space-y-1">
                   <div className="flex items-center gap-1.5 text-[var(--on-surface)] font-semibold">
                     <span className="material-symbols-outlined text-[14px] text-emerald-600">verified</span>
@@ -590,24 +613,72 @@ export function PaymentModal({
                   </div>
                 </div>
 
+                {/* 1st / Preferred App: Prominent Header Button if matched to Paying User's Profile */}
+                {userPreferredApp && (
+                  <div className="p-3 rounded-2xl bg-gradient-to-r from-[var(--primary)]/15 via-[var(--surface-container)] to-[var(--surface-container-high)] border border-[var(--primary)]/35 space-y-2 shadow-xs animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between text-xs font-mono">
+                      <span className="font-bold text-[var(--primary)] flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-[16px] text-amber-500 fill-amber-500">star</span>
+                        <span>Your Primary UPI App: {userPreferredApp.name}</span>
+                      </span>
+                      <span className="text-[10px] text-[var(--on-surface-variant)] px-2 py-0.5 rounded-md bg-[var(--surface)] border border-[var(--outline-variant)]/30 truncate max-w-[150px]">
+                        {currentUserUpiId}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleLaunchApp(userPreferredApp.id, userPreferredApp.name)}
+                      className="w-full min-h-[46px] py-2.5 px-4 rounded-xl bg-[var(--primary)] hover:brightness-110 active:scale-[0.98] text-[var(--on-primary)] font-mono text-xs font-bold flex items-center justify-between transition-all cursor-pointer shadow-xs"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="material-symbols-outlined text-[18px]">{userPreferredApp.icon}</span>
+                        <span>Open {userPreferredApp.shortName} & Pay</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-[11px] opacity-90 font-semibold">
+                        <span>1-Tap Copy & Open</span>
+                        <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+                      </div>
+                    </button>
+                  </div>
+                )}
+
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-mono font-semibold uppercase tracking-wider text-[var(--on-surface-variant)] block">
-                    Tap to Copy & Open Your UPI App:
-                  </label>
+                  <div className="flex items-center justify-between text-[11px] font-mono">
+                    <label className="font-semibold uppercase tracking-wider text-[var(--on-surface-variant)]">
+                      {userPreferredApp ? 'All Supported UPI Apps:' : 'Tap to Copy & Open Your UPI App:'}
+                    </label>
+                    {userPreferredApp && (
+                      <span className="text-[10px] text-[var(--primary)] font-semibold">
+                        {userPreferredApp.shortName} prioritized on top
+                      </span>
+                    )}
+                  </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                    {UPI_POPULAR_APPS.map((app) => (
+                    {sortedApps.map((app) => (
                       <button
                         key={app.id}
                         type="button"
                         onClick={() => handleLaunchApp(app.id, app.name)}
-                        className="min-h-[44px] py-2 px-2.5 rounded-xl border border-[var(--outline-variant)]/30 bg-[var(--surface)] hover:bg-[var(--surface-container)] text-[var(--on-surface)] font-mono text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer active:scale-[0.98]"
+                        className={`min-h-[44px] py-2 px-2.5 rounded-xl border text-[var(--on-surface)] font-mono text-xs font-semibold flex items-center justify-between gap-1.5 transition-all cursor-pointer active:scale-[0.98] ${
+                          app.isUserPreferred
+                            ? 'border-[var(--primary)]/60 bg-[var(--primary)]/10 text-[var(--primary)] shadow-2xs font-bold ring-1 ring-[var(--primary)]/30'
+                            : 'border-[var(--outline-variant)]/30 bg-[var(--surface)] hover:bg-[var(--surface-container)]'
+                        }`}
                       >
-                        <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">{app.icon}</span>
-                        <span className="truncate">{app.shortName}</span>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="material-symbols-outlined text-[16px] text-[var(--primary)] shrink-0">{app.icon}</span>
+                          <span className="truncate">{app.shortName}</span>
+                        </div>
+                        {app.isUserPreferred && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[var(--primary)] text-[var(--on-primary)] shrink-0">
+                            1st
+                          </span>
+                        )}
                       </button>
                     ))}
                   </div>
                 </div>
+
 
                 <div className="p-2.5 rounded-xl bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)]/20 text-[11px] font-mono text-[var(--on-surface-variant)] space-y-1">
                   <div className="font-semibold text-[var(--on-surface)]">How to complete payment:</div>
