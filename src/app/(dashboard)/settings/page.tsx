@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { formatCurrency, SUPPORTED_CURRENCIES } from '@/lib/utils/currency';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
@@ -28,12 +29,14 @@ import { isValidUPIId, detectUPIApp } from '@/lib/utils/upi-link';
 
 export default function SettingsPage() {
   const supabase = createClient();
+  const router = useRouter();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [userId, setUserId] = useState<string | null>(null);
+  const [pendingNav, setPendingNav] = useState<{ href: string; label: string } | null>(null);
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -115,6 +118,9 @@ export default function SettingsPage() {
   ]);
 
   const handleResetChanges = () => {
+    if (userId) {
+      sessionStorage.removeItem(`debtsync_settings_draft_${userId}`);
+    }
     if (!initialSettings) return;
     setFullName(initialSettings.fullName);
     setPhone(initialSettings.phone);
@@ -128,9 +134,135 @@ export default function SettingsPage() {
     setDefaultCompoundFreq(initialSettings.defaultCompoundFreq);
     setNewPassword('');
     setError('');
+    setPendingNav(null);
   };
 
-  // Browser navigation safety prompt when unsaved changes exist
+  const handleStayAndEdit = () => {
+    setPendingNav(null);
+  };
+
+  const handleDiscardAndLeave = () => {
+    if (userId) {
+      sessionStorage.removeItem(`debtsync_settings_draft_${userId}`);
+    }
+    handleResetChanges();
+    const dest = pendingNav?.href;
+    setPendingNav(null);
+    if (dest) {
+      if (dest === 'BACK') {
+        window.history.back();
+      } else {
+        router.push(dest);
+      }
+    }
+  };
+
+  const handleSaveAndLeave = async () => {
+    const dest = pendingNav?.href;
+    const ok = await handleSave();
+    if (ok && dest) {
+      setPendingNav(null);
+      if (dest === 'BACK') {
+        window.history.back();
+      } else {
+        router.push(dest);
+      }
+    }
+  };
+
+  // Auto-sync unsaved changes to sessionStorage so navigating tabs preserves work
+  useEffect(() => {
+    if (typeof window === 'undefined' || !userId || loading || !initialSettings) return;
+    const draftKey = `debtsync_settings_draft_${userId}`;
+    if (isDirty) {
+      const draft = {
+        fullName,
+        phone,
+        upiId,
+        avatarUrl,
+        currency,
+        defaultCountryCode,
+        defaultInterestType,
+        defaultInterestRate,
+        defaultCompoundFreq,
+        newPassword,
+      };
+      sessionStorage.setItem(draftKey, JSON.stringify(draft));
+    } else {
+      sessionStorage.removeItem(draftKey);
+    }
+  }, [
+    isDirty,
+    userId,
+    loading,
+    initialSettings,
+    fullName,
+    phone,
+    upiId,
+    avatarUrl,
+    currency,
+    defaultCountryCode,
+    defaultInterestType,
+    defaultInterestRate,
+    defaultCompoundFreq,
+    newPassword,
+  ]);
+
+  // Capture-phase link click interception when isDirty
+  useEffect(() => {
+    if (!isDirty) {
+      setPendingNav(null);
+      return;
+    }
+
+    const handleCaptureClick = (e: MouseEvent) => {
+      // Find closest anchor tag
+      const anchor = (e.target as HTMLElement)?.closest('a');
+      if (!anchor) return;
+
+      const href = anchor.getAttribute('href');
+      if (!href) return;
+
+      // Allow in-page anchor jumps or links pointing to /settings
+      if (href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
+      if (href === '/settings' || href.startsWith('/settings?')) return;
+
+      // Intercept navigation!
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Resolve friendly destination label for UI
+      let label = 'another page';
+      if (href === '/') label = 'Dashboard';
+      else if (href.includes('analytics')) label = 'Analytics';
+      else if (href.includes('transactions')) label = 'Transactions';
+      else if (href.includes('directory')) label = 'Directory';
+      else if (href.includes('admin')) label = 'Admin Hub';
+      else {
+        const clean = href.replace(/^\//, '').split('?')[0];
+        if (clean) label = clean.charAt(0).toUpperCase() + clean.slice(1);
+      }
+
+      setPendingNav({ href, label });
+    };
+
+    window.addEventListener('click', handleCaptureClick, true);
+    return () => window.removeEventListener('click', handleCaptureClick, true);
+  }, [isDirty]);
+
+  // Intercept browser back/forward buttons when isDirty
+  useEffect(() => {
+    if (!isDirty) return;
+    const handlePopState = () => {
+      window.history.pushState(null, '', window.location.href);
+      setPendingNav({ href: 'BACK', label: 'Previous Page' });
+    };
+    window.history.pushState(null, '', window.location.href);
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [isDirty]);
+
+  // Browser reload/close safety prompt when unsaved changes exist
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (isDirty) {
@@ -320,6 +452,30 @@ export default function SettingsPage() {
           defaultInterestRate: isNaN(resolvedRate) ? 0 : resolvedRate,
           defaultCompoundFreq: resolvedFreq,
         });
+
+        // Restore any unsaved changes draft from sessionStorage
+        const draftKey = `debtsync_settings_draft_${user.id}`;
+        const draftStr = typeof window !== 'undefined' ? sessionStorage.getItem(draftKey) : null;
+        if (draftStr) {
+          try {
+            const draft = JSON.parse(draftStr);
+            if (draft) {
+              if (draft.fullName !== undefined) setFullName(draft.fullName);
+              if (draft.phone !== undefined) setPhone(draft.phone);
+              if (draft.upiId !== undefined) setUpiId(draft.upiId);
+              if (draft.avatarUrl !== undefined) setAvatarUrl(draft.avatarUrl);
+              if (draft.currency !== undefined) setCurrency(draft.currency);
+              if (draft.defaultCountryCode !== undefined) setDefaultCountryCode(draft.defaultCountryCode);
+              if (draft.defaultInterestType !== undefined) setDefaultInterestType(draft.defaultInterestType);
+              if (draft.defaultInterestRate !== undefined) {
+                setDefaultInterestRate(draft.defaultInterestRate);
+                setDefaultInterestRateStr(String(draft.defaultInterestRate));
+              }
+              if (draft.defaultCompoundFreq !== undefined) setDefaultCompoundFreq(draft.defaultCompoundFreq);
+              if (draft.newPassword !== undefined) setNewPassword(draft.newPassword);
+            }
+          } catch (_) {}
+        }
       } catch (err) {
         console.error('Error loading settings:', err);
       } finally {
@@ -355,8 +511,8 @@ export default function SettingsPage() {
     if (e.target) e.target.value = '';
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSave = async (e?: React.FormEvent): Promise<boolean> => {
+    if (e) e.preventDefault();
     setSaving(true);
     setMessage('');
     setError('');
@@ -494,9 +650,15 @@ export default function SettingsPage() {
         defaultCompoundFreq,
       });
 
+      if (userId) {
+        sessionStorage.removeItem(`debtsync_settings_draft_${userId}`);
+      }
+
       setMessage('Settings updated successfully!');
+      return true;
     } catch (err: any) {
       setError(err.message || 'Failed to update settings');
+      return false;
     } finally {
       setSaving(false);
     }
@@ -1611,55 +1773,129 @@ export default function SettingsPage() {
         />
       )}
 
-      {/* Discord-style Floating Unsaved Changes Bar */}
-      {isDirty && (
-        <div className="fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom,0px))] md:bottom-6 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-2rem)] max-w-xl p-3.5 md:p-4 rounded-2xl bg-[var(--surface-container-high)]/95 backdrop-blur-md border border-[var(--primary)]/30 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-3 animate-in slide-in-from-bottom-5 duration-200">
-          <div className="flex items-center gap-2.5 text-xs font-mono text-[var(--on-surface)]">
-            <span className="material-symbols-outlined text-[18px] text-amber-500 animate-pulse">
-              warning
-            </span>
-            <span>
-              <strong>Careful:</strong> You have unsaved changes!
-            </span>
-          </div>
+      {/* Navigation Guard Backdrop */}
+      {pendingNav && (
+        <div
+          className="fixed inset-0 bg-black/40 z-40 backdrop-blur-xs transition-opacity animate-in fade-in duration-150"
+          onClick={handleStayAndEdit}
+        />
+      )}
 
-          <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
-            <button
-              type="button"
-              onClick={handleResetChanges}
-              disabled={saving}
-              className="px-3.5 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container)] text-[var(--on-surface-variant)] text-xs font-mono font-semibold transition-colors cursor-pointer disabled:opacity-50 min-h-[38px]"
-            >
-              Reset / Undo
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                handleSave(e as any);
-              }}
-              disabled={saving}
-              className="px-4 py-1.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] text-xs font-mono font-bold hover:brightness-110 active:scale-[0.98] transition-all shadow-sm cursor-pointer flex items-center gap-1.5 disabled:opacity-50 min-h-[38px]"
-            >
-              {saving ? (
-                <>
-                  <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
-                  <span>Saving...</span>
-                </>
-              ) : (
-                <>
-                  <span className="material-symbols-outlined text-[14px]">save</span>
-                  <span>Save Changes</span>
-                </>
-              )}
-            </button>
-          </div>
+      {/* Floating Unsaved Changes & Navigation Guard Popup (Bottom-Left in Current View) */}
+      {(isDirty || pendingNav) && (
+        <div
+          className={`fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom,0px))] md:bottom-6 left-3 sm:left-4 md:left-[16.5rem] z-50 w-[calc(100%-1.5rem)] sm:w-auto max-w-xl p-3.5 md:p-4 rounded-2xl bg-[var(--surface-container-high)]/95 backdrop-blur-md border shadow-2xl flex flex-col gap-3 animate-in slide-in-from-bottom-5 duration-200 ${
+            pendingNav
+              ? 'border-amber-500/60 ring-2 ring-amber-500/30'
+              : 'border-[var(--primary)]/30'
+          }`}
+        >
+          {pendingNav ? (
+            /* Navigation Interception State */
+            <>
+              <div className="flex items-start gap-2.5">
+                <span className="material-symbols-outlined text-[20px] text-amber-500 shrink-0 mt-0.5 animate-bounce">
+                  warning
+                </span>
+                <div>
+                  <div className="font-heading font-bold text-xs text-[var(--on-surface)] flex items-center gap-1.5 flex-wrap">
+                    <span>Unsaved Changes</span>
+                    <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                      Navigating to {pendingNav.label}
+                    </span>
+                  </div>
+                  <p className="text-[11px] font-mono text-[var(--on-surface-variant)] mt-1">
+                    You have unsaved changes in Settings. Leaving will discard your modifications.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-[var(--outline-variant)]/20">
+                <button
+                  type="button"
+                  onClick={handleStayAndEdit}
+                  className="px-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container)] text-[var(--on-surface)] text-xs font-mono font-semibold transition-colors cursor-pointer min-h-[38px]"
+                >
+                  Keep Editing
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDiscardAndLeave}
+                  className="px-3 py-1.5 rounded-xl border border-red-500/30 hover:bg-red-500/10 text-red-500 text-xs font-mono font-semibold transition-colors cursor-pointer min-h-[38px]"
+                >
+                  Discard &amp; Leave
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveAndLeave}
+                  disabled={saving}
+                  className="px-3.5 py-1.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] text-xs font-mono font-bold hover:brightness-110 active:scale-[0.98] transition-all shadow-sm cursor-pointer flex items-center gap-1.5 disabled:opacity-50 min-h-[38px]"
+                >
+                  {saving ? (
+                    <>
+                      <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-[14px]">save</span>
+                      <span>Save &amp; Leave</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </>
+          ) : (
+            /* Standard Unsaved Changes Bar (Bottom-Left in Current View) */
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 text-xs font-mono text-[var(--on-surface)]">
+                <span className="material-symbols-outlined text-[18px] text-amber-500 animate-pulse">
+                  warning
+                </span>
+                <span>
+                  <strong>Careful:</strong> You have unsaved changes!
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                <button
+                  type="button"
+                  onClick={handleResetChanges}
+                  disabled={saving}
+                  className="px-3.5 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container)] text-[var(--on-surface-variant)] text-xs font-mono font-semibold transition-colors cursor-pointer disabled:opacity-50 min-h-[38px]"
+                >
+                  Reset / Undo
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleSave();
+                  }}
+                  disabled={saving}
+                  className="px-4 py-1.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] text-xs font-mono font-bold hover:brightness-110 active:scale-[0.98] transition-all shadow-sm cursor-pointer flex items-center gap-1.5 disabled:opacity-50 min-h-[38px]"
+                >
+                  {saving ? (
+                    <>
+                      <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-[14px]">save</span>
+                      <span>Save Changes</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Floating Success Notification Toast */}
+      {/* Floating Success Notification Toast (Bottom-Left in Current View) */}
       {message && (
-        <div className="fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom,0px))] md:bottom-6 right-4 md:right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl bg-[var(--surface-container-high)]/95 backdrop-blur-md text-[var(--on-surface)] border border-emerald-500/40 shadow-2xl font-mono text-xs animate-in slide-in-from-bottom-5 duration-200">
+        <div className="fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom,0px))] md:bottom-6 left-3 sm:left-4 md:left-[16.5rem] z-50 flex items-center gap-3 px-4 py-3 rounded-2xl bg-[var(--surface-container-high)]/95 backdrop-blur-md text-[var(--on-surface)] border border-emerald-500/40 shadow-2xl font-mono text-xs animate-in slide-in-from-bottom-5 duration-200">
           <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-500 flex items-center justify-center shrink-0">
             <span className="material-symbols-outlined text-[16px]">check_circle</span>
           </div>
