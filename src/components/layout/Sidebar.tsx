@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { ThemeToggle } from '../ui/ThemeToggle';
+import { BrandLogo } from '../ui/BrandLogo';
 
 import { clearAuthSessionData } from '@/lib/utils/auth-session';
 import { useViewMode } from '@/lib/hooks/useViewMode';
@@ -51,18 +52,12 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
   return (
     <aside className="hidden md:flex bg-[var(--surface-container)] docked left-0 h-screen w-60 fixed left-0 top-0 flex-col p-4 border-r border-[var(--outline-variant)]/30 z-40 transition-colors">
       {/* Brand Header */}
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[var(--primary)] to-[var(--primary-container)] flex items-center justify-center text-[var(--on-primary)] font-bold text-xl shadow-md">
-          D
-        </div>
-        <div>
-          <div className="font-heading text-lg font-bold text-[var(--primary)] dark:text-[var(--primary-fixed-dim)]">
-            DebtSync
-          </div>
-          <div className="font-mono text-[11px] text-[var(--on-surface-variant)] tracking-wider uppercase">
-            {inAdminMode ? 'Admin Console' : 'Trust & Precision'}
-          </div>
-        </div>
+      <div className="mb-6">
+        <BrandLogo
+          size="md"
+          tagline={inAdminMode ? 'Admin Console' : 'Synced Ledgers. Zero Friction.'}
+          href="/"
+        />
       </div>
 
       {/* Transaction Button or Admin Console Pill */}

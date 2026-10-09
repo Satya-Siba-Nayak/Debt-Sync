@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ThemeToggle } from '../ui/ThemeToggle';
 import { Avatar, AVATAR_PRESETS } from '../ui/Avatar';
+import { BrandLogo } from '../ui/BrandLogo';
 import { NotificationCenter } from './NotificationCenter';
 import { createClient } from '@/lib/supabase/client';
 import { clearAuthSessionData } from '@/lib/utils/auth-session';
@@ -105,12 +106,7 @@ export function TopBar({
       <header className="bg-[var(--surface)]/95 w-full sticky top-0 z-30 md:hidden border-b border-[var(--outline-variant)]/30 backdrop-blur-md pt-[env(safe-area-inset-top,0px)] pl-[max(0.75rem,env(safe-area-inset-left,0px))] pr-[max(0.75rem,env(safe-area-inset-right,0px))] transition-colors">
         <div className="flex justify-between items-center w-full h-14 min-w-0">
           <div className="flex items-center gap-2 min-w-0 pr-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--primary)] to-[var(--primary-container)] text-[var(--on-primary)] flex items-center justify-center font-bold text-sm shadow-sm shrink-0">
-              D
-            </div>
-            <span className="font-heading text-lg font-bold text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] truncate">
-              DebtSync
-            </span>
+            <BrandLogo size="sm" showTagline={false} href="/" />
             {inAdminMode && (
               <span className="px-1.5 py-0.5 rounded-md text-[9px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)] shrink-0">
                 ADMIN

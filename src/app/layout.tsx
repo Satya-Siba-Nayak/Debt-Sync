@@ -15,7 +15,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "DebtSync — Trust & Precision",
+  title: "DebtSync — Synced Ledgers. Zero Friction.",
   description: "Smart peer-to-peer ledger, interest engine, and debt management portal",
   manifest: "/manifest.json",
   appleWebApp: {
@@ -25,6 +25,7 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
       { url: "/favicon.png", sizes: "32x32", type: "image/png" },
       { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
     ],

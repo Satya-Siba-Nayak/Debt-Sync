@@ -8,6 +8,7 @@ import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { checkAuthRateLimit, checkAccountStatusForLogin } from '@/lib/utils/rate-limit';
 import { ERROR_CODES, formatErrorWithCode, parseAuthError } from '@/lib/constants/error-codes';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
+import { BrandLogo } from '@/components/ui/BrandLogo';
 
 function LoginContent() {
   const [authMode, setAuthMode] = useState<'password' | 'magic_link'>('password');
@@ -254,16 +255,8 @@ function LoginContent() {
       </div>
       <div className="w-full max-w-md">
         {/* Brand Header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex w-12 h-12 rounded-2xl bg-primary text-on-primary font-bold text-2xl items-center justify-center mb-3 shadow-lg shadow-primary/20">
-            D
-          </div>
-          <h1 className="font-heading text-3xl font-bold text-on-surface tracking-tight">
-            DebtSync
-          </h1>
-          <p className="font-mono text-xs tracking-widest uppercase text-on-surface-variant mt-1 font-semibold">
-            Trust &amp; Precision
-          </p>
+        <div className="flex flex-col items-center justify-center text-center mb-8">
+          <BrandLogo size="xl" href="/" />
         </div>
 
         {/* Card */}

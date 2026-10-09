@@ -7,6 +7,7 @@ import { Debt } from '@/lib/types/database';
 import { formatCurrency } from '@/lib/utils/currency';
 import { calculateDebtBalance } from '@/lib/utils/interest';
 import { Avatar } from '@/components/ui/Avatar';
+import { BrandLogo } from '@/components/ui/BrandLogo';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
 import Link from 'next/link';
 
@@ -207,8 +208,8 @@ function AcceptDebtContent() {
     return (
       <div className="min-h-screen bg-surface flex items-center justify-center p-4 md:p-6">
         <div className="w-full max-w-md bg-surface-container-lowest rounded-2xl p-6 md:p-8 border border-outline-variant/30 shadow-xl text-center space-y-4">
-          <div className="w-12 h-12 rounded-xl bg-primary text-on-primary font-bold text-2xl flex items-center justify-center mx-auto shadow-md">
-            D
+          <div className="flex justify-center mb-2">
+            <BrandLogo size="lg" showTagline={false} />
           </div>
           <h2 className="font-heading text-xl font-bold text-on-surface">
             Sign In to Verify Agreement

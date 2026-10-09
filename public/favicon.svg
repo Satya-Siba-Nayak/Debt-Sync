@@ -1,0 +1,27 @@
+<svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="monolith-grad" x1="4" y1="4" x2="36" y2="36" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38d9d9" />
+      <stop offset="100%" stop-color="#0d5c63" />
+    </linearGradient>
+  </defs>
+  <rect width="40" height="40" rx="10.5" fill="url(#monolith-grad)" />
+  <rect x="0.5" y="0.5" width="39" height="39" rx="10" stroke="#38d9d9" stroke-opacity="0.35" />
+
+  <path
+    fill-rule="evenodd"
+    clip-rule="evenodd"
+    d="M11 9C9.89543 9 9 9.89543 9 11V29C9 30.1046 9.89543 31 11 31H22.5C28.299 31 33 26.299 33 20.5C33 14.701 28.299 9 22.5 9H11ZM14.5 14H22C25.5899 14 28.5 16.9101 28.5 20.5C28.5 24.0899 25.5899 27 22 27H14.5V14Z"
+    fill="#042124"
+  />
+
+  <rect
+    x="21.5"
+    y="10.5"
+    width="3"
+    height="19"
+    rx="1.5"
+    transform="rotate(33 21.5 10.5)"
+    fill="url(#monolith-grad)"
+  />
+</svg>
