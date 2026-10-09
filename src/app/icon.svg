@@ -1,24 +1,25 @@
 <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="monolith-grad" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+    <linearGradient id="monolith-base-grad" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#00F0FF" />
       <stop offset="100%" stop-color="#00757F" />
     </linearGradient>
   </defs>
-  <rect width="40" height="40" rx="10.5" fill="url(#monolith-grad)" />
-  <rect x="0.75" y="0.75" width="38.5" height="38.5" rx="9.75" stroke="#FFFFFF" stroke-opacity="0.28" stroke-width="1.5" />
-  
-  <g transform="translate(8, 8)">
-    <rect x="2" y="2" width="3.5" height="20" rx="1.75" fill="#FFFFFF" />
-    <path
-      d="M8 2H13C17.4183 2 21 5.58172 21 10C21 11.4 20.6 12.7 19.9 13.8L15.6 9.5C15.3 7.8 13.8 6.5 12 6.5H8V2Z"
-      fill="#FFFFFF"
-    />
-    <path
-      d="M8 22H13C17.4183 22 21 18.4183 21 14C21 13.6 20.9 13.2 20.8 12.8L16.5 17.1C15.5 18 14 18.5 12.5 18.5H8V22Z"
-      fill="#FFFFFF"
-      opacity="0.95"
-    />
-    <circle cx="11.5" cy="12" r="1.75" fill="#FFFFFF" />
-  </g>
+  <rect width="40" height="40" rx="10.5" fill="url(#monolith-base-grad)" />
+  <rect x="0.75" y="0.75" width="38.5" height="38.5" rx="9.75" stroke="#FFFFFF" stroke-opacity="0.25" stroke-width="1.5" />
+  <path
+    fill-rule="evenodd"
+    clip-rule="evenodd"
+    d="M10.5 8.5C9.39543 8.5 8.5 9.39543 8.5 10.5V29.5C8.5 30.6046 9.39543 31.5 10.5 31.5H21C27.3513 31.5 32.5 26.3513 32.5 20C32.5 13.6487 27.3513 8.5 21 8.5H10.5ZM13.5 13.5H20.5C24.0899 13.5 27 16.4101 27 20C27 23.5899 24.0899 26.5 20.5 26.5H13.5V13.5Z"
+    fill="#FFFFFF"
+  />
+  <rect
+    x="18.5"
+    y="4"
+    width="3.2"
+    height="32"
+    rx="1.6"
+    transform="rotate(35 20 20)"
+    fill="url(#monolith-base-grad)"
+  />
 </svg>

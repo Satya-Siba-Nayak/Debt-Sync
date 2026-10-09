@@ -13,49 +13,52 @@ interface BrandIconProps {
 
 /**
  * Modern vector emblem for DebtSync inspired by clean fintech marks (Revolut, Wise).
- * Default: The Solid Monolith — A radiant gradient squircle with a crisp, high-contrast
- * white geometric 'D' with precision synchronization counter-flow arcs and center node.
+ * The Solid Monolith: A vibrant cyan-teal gradient squircle with a crisp, geometric
+ * 'D' silhouette and a precision 35° diagonal synchronization slice.
  * 100% vector-pure, high visibility in light and dark themes on both mobile and desktop.
  */
-export function BrandIcon({ size = 40, variant = 'monolith', className = '' }: BrandIconProps) {
+export function BrandIcon({ size = 40, className = '' }: BrandIconProps) {
   const numericSize = typeof size === 'number' ? size : parseInt(String(size), 10) || 40;
 
   return (
-    <div
-      className={`inline-flex items-center justify-center shrink-0 rounded-[26%] shadow-sm overflow-hidden select-none ${className}`}
-      style={{
-        width: numericSize,
-        height: numericSize,
-        background: 'linear-gradient(135deg, #00F0FF 0%, #00757F 100%)',
-        boxShadow: '0 2px 8px rgba(0, 240, 255, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.28)',
-      }}
+    <svg
+      width={numericSize}
+      height={numericSize}
+      viewBox="0 0 40 40"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={`shrink-0 select-none ${className}`}
       aria-hidden="true"
     >
-      <svg
-        width={Math.round(numericSize * 0.65)}
-        height={Math.round(numericSize * 0.65)}
-        viewBox="0 0 24 24"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-        className="shrink-0"
-      >
-        {/* Vertical Ledger Spine */}
-        <rect x="2" y="2" width="3.5" height="20" rx="1.75" fill="#FFFFFF" />
-        {/* Upper Synchronization Arc */}
-        <path
-          d="M8 2H13C17.4183 2 21 5.58172 21 10C21 11.4 20.6 12.7 19.9 13.8L15.6 9.5C15.3 7.8 13.8 6.5 12 6.5H8V2Z"
-          fill="#FFFFFF"
-        />
-        {/* Lower Return Arc */}
-        <path
-          d="M8 22H13C17.4183 22 21 18.4183 21 14C21 13.6 20.9 13.2 20.8 12.8L16.5 17.1C15.5 18 14 18.5 12.5 18.5H8V22Z"
-          fill="#FFFFFF"
-          opacity="0.95"
-        />
-        {/* Center Synchronized Node */}
-        <circle cx="11.5" cy="12" r="1.75" fill="#FFFFFF" />
-      </svg>
-    </div>
+      <defs>
+        <linearGradient id="monolith-base-grad" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#00F0FF" />
+          <stop offset="100%" stopColor="#00757F" />
+        </linearGradient>
+      </defs>
+      {/* Vibrant Squircle Monolith Base */}
+      <rect width="40" height="40" rx="10.5" fill="url(#monolith-base-grad)" />
+      <rect x="0.75" y="0.75" width="38.5" height="38.5" rx="9.75" stroke="#FFFFFF" strokeOpacity="0.25" strokeWidth="1.5" />
+
+      {/* Geometric 'D' Monolith Silhouette */}
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M10.5 8.5C9.39543 8.5 8.5 9.39543 8.5 10.5V29.5C8.5 30.6046 9.39543 31.5 10.5 31.5H21C27.3513 31.5 32.5 26.3513 32.5 20C32.5 13.6487 27.3513 8.5 21 8.5H10.5ZM13.5 13.5H20.5C24.0899 13.5 27 16.4101 27 20C27 23.5899 24.0899 26.5 20.5 26.5H13.5V13.5Z"
+        fill="#FFFFFF"
+      />
+
+      {/* Precision Diagonal Sync Slice */}
+      <rect
+        x="18.5"
+        y="4"
+        width="3.2"
+        height="32"
+        rx="1.6"
+        transform="rotate(35 20 20)"
+        fill="url(#monolith-base-grad)"
+      />
+    </svg>
   );
 }
 
