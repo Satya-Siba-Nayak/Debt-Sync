@@ -277,32 +277,34 @@ export function CashflowChart({
   return (
     <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-4 sm:p-6 md:p-8 border border-[var(--outline-variant)]/30 flex flex-col h-[400px] shadow-sm overflow-hidden">
       {/* Header with Title, Mode Switcher & Timeframe Buttons */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-        <div>
-          <div className="flex items-center gap-2">
+      <div className="w-full flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 min-w-0">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
             <h3 className="font-heading text-lg md:text-xl font-bold text-[var(--on-surface)]">
               {viewMode === 'growth' ? 'Portfolio Growth & Projection' : 'Cashflow Movement'}
             </h3>
             {viewMode === 'growth' && growthData.hasActiveInterest && (
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider flex items-center gap-1">
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider flex items-center gap-1 shrink-0">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 Live Interest
               </span>
             )}
           </div>
-          <p className="font-mono text-xs text-[var(--on-surface-variant)] mt-0.5">
+          <p className="font-mono text-xs text-[var(--on-surface-variant)] mt-0.5 truncate max-w-md">
             {viewMode === 'growth'
               ? 'Historical balances with continuous compound interest projection'
               : 'Money In (Repayments collected) vs Money Out (Loans disbursed)'}
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 self-start sm:self-auto">
+        {/* Action Pills: Pinned strictly to the top-right corner on desktop */}
+        <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto sm:ml-auto">
           {/* Mode Selector */}
-          <div className="flex bg-[var(--surface-container)] p-0.5 rounded-xl border border-[var(--outline-variant)]/20">
+          <div className="flex bg-[var(--surface-container)] p-0.5 rounded-xl border border-[var(--outline-variant)]/20 shrink-0">
             <button
+              type="button"
               onClick={() => setViewMode('growth')}
-              className={`px-2.5 py-1 text-xs font-mono font-bold rounded-lg transition-all ${
+              className={`px-2.5 sm:px-3 py-1 text-xs font-mono font-bold rounded-lg transition-all cursor-pointer ${
                 viewMode === 'growth'
                   ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-xs'
                   : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
@@ -311,8 +313,9 @@ export function CashflowChart({
               Growth
             </button>
             <button
+              type="button"
               onClick={() => setViewMode('cashflow')}
-              className={`px-2.5 py-1 text-xs font-mono font-bold rounded-lg transition-all ${
+              className={`px-2.5 sm:px-3 py-1 text-xs font-mono font-bold rounded-lg transition-all cursor-pointer ${
                 viewMode === 'cashflow'
                   ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-xs'
                   : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
@@ -324,12 +327,13 @@ export function CashflowChart({
 
           {/* Timeframe Selector */}
           {viewMode === 'growth' ? (
-            <div className="flex bg-[var(--surface-container)] p-0.5 rounded-xl border border-[var(--outline-variant)]/20">
+            <div className="flex bg-[var(--surface-container)] p-0.5 rounded-xl border border-[var(--outline-variant)]/20 shrink-0">
               {([30, 90, 365] as const).map((days) => (
                 <button
                   key={days}
+                  type="button"
                   onClick={() => setProjDays(days)}
-                  className={`px-2.5 py-1 text-xs font-mono font-bold rounded-lg transition-all ${
+                  className={`px-2 sm:px-2.5 py-1 text-xs font-mono font-bold rounded-lg transition-all cursor-pointer ${
                     projDays === days
                       ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-xs'
                       : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
@@ -340,12 +344,13 @@ export function CashflowChart({
               ))}
             </div>
           ) : (
-            <div className="flex bg-[var(--surface-container)] p-0.5 rounded-xl border border-[var(--outline-variant)]/20">
+            <div className="flex bg-[var(--surface-container)] p-0.5 rounded-xl border border-[var(--outline-variant)]/20 shrink-0">
               {(['1M', '3M', '1Y'] as const).map((p) => (
                 <button
                   key={p}
+                  type="button"
                   onClick={() => setCashflowPeriod(p)}
-                  className={`px-2.5 py-1 text-xs font-mono font-bold rounded-lg transition-all ${
+                  className={`px-2 sm:px-2.5 py-1 text-xs font-mono font-bold rounded-lg transition-all cursor-pointer ${
                     cashflowPeriod === p
                       ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-xs'
                       : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'

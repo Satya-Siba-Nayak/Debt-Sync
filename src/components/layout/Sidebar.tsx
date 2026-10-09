@@ -50,12 +50,12 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
   const navItems: NavItem[] = inAdminMode ? adminNavItems : userNavItems;
 
   return (
-    <aside className="hidden md:flex bg-[var(--surface-container)] docked left-0 h-screen w-60 fixed left-0 top-0 flex-col p-4 border-r border-[var(--outline-variant)]/30 z-40 transition-colors">
+    <aside className="hidden md:flex bg-[var(--surface-container)] docked left-0 h-screen w-60 fixed left-0 top-0 flex-col p-4 border-r border-[var(--outline-variant)]/30 z-40 transition-colors overflow-hidden">
       {/* Brand Header */}
-      <div className="mb-6">
+      <div className="mb-6 w-full max-w-full overflow-hidden">
         <BrandLogo
           size="md"
-          tagline={inAdminMode ? 'Admin Console' : 'Synced Ledgers. Zero Friction.'}
+          tagline={inAdminMode ? 'Admin Console' : 'Synced Ledgers'}
           href="/"
         />
       </div>
