@@ -17,6 +17,7 @@ import { getLedgerCache, setLedgerCache, computeDashboardStats } from '@/lib/sto
 import { SkeletonBalanceCards, SkeletonTableRows } from '@/components/ui/Skeleton';
 import { parseSplitDetails, getCleanDebtNotes } from '@/lib/utils/split-bills';
 import { EditPendingDebtModal } from '@/components/debts/EditPendingDebtModal';
+import { respondToDebtAgreement } from '@/lib/utils/debt-acceptance';
 import Link from 'next/link';
 
 export default function GlobalDashboardPage() {
@@ -146,28 +147,7 @@ export default function GlobalDashboardPage() {
 
   const handleAcceptDebt = async (debtId: string, decision: 'active' | 'declined') => {
     try {
-      // 1. Try secure RPC
-      let success = false;
-      try {
-        const { data: rpcRes, error: rpcErr } = await supabase.rpc('accept_debt', {
-          p_debt_id: debtId,
-          p_decision: decision,
-        });
-        if (!rpcErr && rpcRes && rpcRes.success) success = true;
-      } catch (_) {}
-
-      if (!success) {
-        const { error: updateErr } = await supabase
-          .from('debts')
-          .update({
-            status: decision,
-            accepted_at: decision === 'active' ? new Date().toISOString() : null,
-          })
-          .eq('id', debtId);
-        if (updateErr) throw updateErr;
-      }
-
-      window.dispatchEvent(new CustomEvent('debtsync:refresh'));
+      await respondToDebtAgreement(supabase, debtId, decision);
       fetchDashboardData();
     } catch (err: any) {
       console.error('Error updating debt:', err);

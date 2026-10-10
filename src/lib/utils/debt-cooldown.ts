@@ -8,6 +8,9 @@ export interface CooldownCheckResult {
   remainingAttempts?: number;
   cooldownUntil?: Date;
   cooldownRemainingFormatted?: string;
+  requiresConnection?: boolean;
+  contactRequestStatus?: 'none' | 'pending' | 'accepted' | 'declined';
+  contactRequestId?: string;
   reason?: string;
   code?: string;
   message?: string;
@@ -30,52 +33,50 @@ export function invalidateCooldownCache(targetUserId?: string): void {
 }
 
 /**
- * Formats a millisecond duration into a clean human-readable countdown string.
+ * Sends a connection request to a target user who previously declined or who needs to connect.
  */
-export function formatTimeRemaining(ms: number): string {
-  if (ms <= 0) return '0 minutes';
+export async function sendConnectRequestToUser(
+  supabase: SupabaseClient,
+  targetUserId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const user = await getCurrentUserFast(supabase);
+    if (!user) throw new Error('You must be logged in to send a connection request');
+    if (user.id === targetUserId) throw new Error('Cannot connect with yourself');
 
-  const totalMinutes = Math.ceil(ms / (60 * 1000));
-  const days = Math.floor(totalMinutes / (24 * 60));
-  const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
-  const minutes = totalMinutes % 60;
+    const { error } = await supabase
+      .from('contact_requests')
+      .upsert({
+        sender_id: user.id,
+        receiver_id: targetUserId,
+        status: 'pending',
+      }, { onConflict: 'sender_id,receiver_id' });
 
-  if (days > 0) {
-    return hours > 0 ? `${days}d ${hours}h` : `${days} days`;
+    if (error) throw error;
+    invalidateCooldownCache(targetUserId);
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to send connection request' };
   }
-  if (hours > 0) {
-    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours} hours`;
-  }
-  return `${minutes} min`;
 }
 
 /**
  * Checks whether the current user is permitted to send a new debt or lending request
- * to the specified counterparty, enforcing privacy anti-harassment cooldowns:
- * - 3 consecutive declines -> 3-day cooldown
- * - 4+ consecutive declines -> 30-day (1 month) cooldown
+ * to the specified counterparty:
+ * 1. If already in contacts or has active/settled history -> Allowed directly.
+ * 2. If target user previously declined a debt from caller and they are not contacts:
+ *    -> BLOCKED until target user accepts a connection request.
+ * 3. If no previous declines (first interaction) -> Allowed directly without needing prior connection.
  */
 export async function checkDebtRequestCooldown(
   supabase: SupabaseClient,
   targetUserId: string
 ): Promise<CooldownCheckResult> {
-  if (!targetUserId) return { allowed: true, declinedCount: 0 };
+  if (!targetUserId) return { allowed: true, declinedCount: 0, requiresConnection: false };
 
   const cached = cooldownCache.get(targetUserId);
   if (cached && Date.now() - cached.timestamp < COOLDOWN_CACHE_TTL) {
-    if (!cached.result.allowed && cached.result.cooldownUntil) {
-      const remainingMs = Math.max(0, cached.result.cooldownUntil.getTime() - Date.now());
-      if (remainingMs <= 0) {
-        cooldownCache.delete(targetUserId);
-      } else {
-        return {
-          ...cached.result,
-          cooldownRemainingFormatted: formatTimeRemaining(remainingMs),
-        };
-      }
-    } else {
-      return cached.result;
-    }
+    return cached.result;
   }
 
   const setAndReturn = (result: CooldownCheckResult): CooldownCheckResult => {
@@ -85,122 +86,143 @@ export async function checkDebtRequestCooldown(
 
   try {
     const user = await getCurrentUserFast(supabase);
-    if (!user) return { allowed: true, declinedCount: 0 };
+    if (!user || user.id === targetUserId) {
+      return { allowed: true, declinedCount: 0, requiresConnection: false };
+    }
 
-    // 1. Try secure RPC function
+    // 1. Try secure RPC function check_can_request_debt
     try {
       const { data: rpcRes, error: rpcErr } = await supabase.rpc(
-        'check_debt_request_cooldown',
+        'check_can_request_debt',
         { p_target_id: targetUserId }
       );
 
       if (!rpcErr && rpcRes) {
-        if (rpcRes.allowed === false) {
-          const cooldownUntil = rpcRes.cooldown_until ? new Date(rpcRes.cooldown_until) : undefined;
-          const remainingMs = cooldownUntil ? Math.max(0, cooldownUntil.getTime() - Date.now()) : 0;
-          const formattedTime = formatTimeRemaining(remainingMs);
-          const code = rpcRes.code || (rpcRes.reason === 'cooldown_30d' ? ERROR_CODES.DEBT_REQUEST_COOLDOWN_30D : ERROR_CODES.DEBT_REQUEST_COOLDOWN_3D);
-
-          return setAndReturn({
-            allowed: false,
-            declinedCount: rpcRes.declined_count || 3,
-            cooldownUntil,
-            cooldownRemainingFormatted: formattedTime,
-            reason: rpcRes.reason,
-            code,
-            message: formatErrorWithCode(
-              rpcRes.message || `Requesting this person is paused for ${formattedTime}.`,
-              code
-            ),
-          });
-        }
-
         return setAndReturn({
-          allowed: true,
+          allowed: rpcRes.allowed !== false,
+          requiresConnection: Boolean(rpcRes.requires_connection),
+          contactRequestStatus: rpcRes.contact_request_status || 'none',
+          contactRequestId: rpcRes.contact_request_id,
           declinedCount: rpcRes.declined_count || 0,
-          remainingAttempts: rpcRes.remaining_attempts,
+          reason: rpcRes.reason,
+          code: rpcRes.code,
+          message: rpcRes.message,
         });
       }
     } catch (_) {
       // Fall through to client query fallback
     }
 
-    // 2. Direct client query fallback
-    const { data: debts, error: debtsErr } = await supabase
+    // 2. Client query fallback
+    // Step A: Check if target is already in caller's contacts
+    const { data: contactRow } = await supabase
+      .from('contacts')
+      .select('id')
+      .eq('owner_id', user.id)
+      .eq('contact_id', targetUserId)
+      .maybeSingle();
+
+    if (contactRow) {
+      return setAndReturn({
+        allowed: true,
+        declinedCount: 0,
+        requiresConnection: false,
+      });
+    }
+
+    // Step B: Check if they have ANY active or settled debts together
+    const { data: activeOrSettled } = await supabase
       .from('debts')
-      .select('status, created_at, lender_id, borrower_id')
+      .select('id')
+      .or(
+        `and(lender_id.eq.${user.id},borrower_id.eq.${targetUserId}),and(borrower_id.eq.${user.id},lender_id.eq.${targetUserId})`
+      )
+      .in('status', ['active', 'settled'])
+      .limit(1);
+
+    if (activeOrSettled && activeOrSettled.length > 0) {
+      return setAndReturn({
+        allowed: true,
+        declinedCount: 0,
+        requiresConnection: false,
+      });
+    }
+
+    // Step C: Check if target user has declined ANY debt created by caller
+    const { data: declinedDebts } = await supabase
+      .from('debts')
+      .select('id, created_at')
       .eq('created_by', user.id)
       .or(
         `and(lender_id.eq.${user.id},borrower_id.eq.${targetUserId}),and(borrower_id.eq.${user.id},lender_id.eq.${targetUserId})`
       )
+      .eq('status', 'declined')
       .order('created_at', { ascending: false });
 
-    if (debtsErr || !debts) {
-      return setAndReturn({ allowed: true, declinedCount: 0 });
-    }
+    if (declinedDebts && declinedDebts.length > 0) {
+      // Check contact_requests table
+      const { data: reqRow } = await supabase
+        .from('contact_requests')
+        .select('id, status')
+        .eq('sender_id', user.id)
+        .eq('receiver_id', targetUserId)
+        .maybeSingle();
 
-    let declinedCount = 0;
-    let lastDeclinedAt: Date | null = null;
-
-    for (const d of debts) {
-      if (d.status === 'active' || d.status === 'settled') {
-        break; // An accepted agreement resets the consecutive decline streak
-      }
-      if (d.status === 'declined') {
-        declinedCount++;
-        if (!lastDeclinedAt) {
-          lastDeclinedAt = new Date(d.created_at);
-        }
-      }
-    }
-
-    if (declinedCount >= 4 && lastDeclinedAt) {
-      const cooldownEnd = new Date(lastDeclinedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
-      const remainingMs = cooldownEnd.getTime() - Date.now();
-      if (remainingMs > 0) {
-        const formatted = formatTimeRemaining(remainingMs);
-        const code = ERROR_CODES.DEBT_REQUEST_COOLDOWN_30D;
+      if (reqRow?.status === 'accepted') {
         return setAndReturn({
-          allowed: false,
-          declinedCount,
-          cooldownUntil: cooldownEnd,
-          cooldownRemainingFormatted: formatted,
-          reason: 'cooldown_30d',
-          code,
-          message: formatErrorWithCode(
-            `This user has declined your requests multiple times. For privacy, you cannot request them again for ${formatted} (1-month cooldown).`,
-            code
-          ),
+          allowed: true,
+          declinedCount: declinedDebts.length,
+          requiresConnection: false,
+          contactRequestStatus: 'accepted',
         });
       }
-    } else if (declinedCount === 3 && lastDeclinedAt) {
-      const cooldownEnd = new Date(lastDeclinedAt.getTime() + 3 * 24 * 60 * 60 * 1000);
-      const remainingMs = cooldownEnd.getTime() - Date.now();
-      if (remainingMs > 0) {
-        const formatted = formatTimeRemaining(remainingMs);
-        const code = ERROR_CODES.DEBT_REQUEST_COOLDOWN_3D;
+
+      if (reqRow?.status === 'pending') {
         return setAndReturn({
           allowed: false,
-          declinedCount,
-          cooldownUntil: cooldownEnd,
-          cooldownRemainingFormatted: formatted,
-          reason: 'cooldown_3d',
-          code,
-          message: formatErrorWithCode(
-            `This user declined your previous 3 requests. For privacy, you cannot request them again for ${formatted} (3-day cooldown).`,
-            code
-          ),
+          declinedCount: declinedDebts.length,
+          requiresConnection: true,
+          contactRequestStatus: 'pending',
+          contactRequestId: reqRow.id,
+          reason: 'connect_pending',
+          code: 'ERR_CONNECT_REQUEST_PENDING',
+          message: 'This person declined your previous request. Your connection request is currently pending their approval in Notifications.',
         });
       }
+
+      if (reqRow?.status === 'declined') {
+        return setAndReturn({
+          allowed: false,
+          declinedCount: declinedDebts.length,
+          requiresConnection: true,
+          contactRequestStatus: 'declined',
+          contactRequestId: reqRow.id,
+          reason: 'connect_declined',
+          code: 'ERR_CONNECT_REQUEST_DECLINED',
+          message: 'This person declined your transaction and declined to connect. To protect user privacy, you cannot send requests to them.',
+        });
+      }
+
+      // No contact request sent yet:
+      return setAndReturn({
+        allowed: false,
+        declinedCount: declinedDebts.length,
+        requiresConnection: true,
+        contactRequestStatus: 'none',
+        reason: 'must_connect',
+        code: 'ERR_MUST_CONNECT_FIRST',
+        message: 'This person declined your previous request. To prevent spam, you must send a connection request and be accepted as a contact before sending new transaction requests.',
+      });
     }
 
+    // Step D: First interaction! (No previous declines and no existing debts)
     return setAndReturn({
       allowed: true,
-      declinedCount,
-      remainingAttempts: declinedCount < 3 ? 3 - declinedCount : 1,
+      declinedCount: 0,
+      requiresConnection: false,
     });
   } catch (err) {
-    console.warn('Debt request cooldown check notice:', err);
-    return { allowed: true, declinedCount: 0 };
+    console.warn('Debt request permission check notice:', err);
+    return { allowed: true, declinedCount: 0, requiresConnection: false };
   }
 }

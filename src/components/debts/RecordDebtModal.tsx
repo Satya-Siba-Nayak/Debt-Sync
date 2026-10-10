@@ -7,7 +7,7 @@ import { Contact, Profile } from '@/lib/types/database';
 import { formatCurrency, SUPPORTED_CURRENCIES } from '@/lib/utils/currency';
 import { projectDebtGrowth, round2, calculateDebtBalance } from '@/lib/utils/interest';
 import { findProfileByIdentifier, searchProfiles } from '@/lib/utils/profile-lookup';
-import { checkDebtRequestCooldown, invalidateCooldownCache, type CooldownCheckResult } from '@/lib/utils/debt-cooldown';
+import { checkDebtRequestCooldown, sendConnectRequestToUser, invalidateCooldownCache, type CooldownCheckResult } from '@/lib/utils/debt-cooldown';
 import { sendNotificationEmail } from '@/lib/utils/email-notifier';
 import { PhoneInput } from '../ui/PhoneInput';
 import { Avatar } from '../ui/Avatar';
@@ -95,9 +95,11 @@ export function RecordDebtModal({
   const [defaultCountryCode, setDefaultCountryCode] = useState('+91');
   const [isAddingNewPerson, setIsAddingNewPerson] = useState(false);
 
-  // Anti-harassment cooldown states
+  // Anti-harassment cooldown & connection gate states
   const [cooldown, setCooldown] = useState<CooldownCheckResult | null>(null);
   const [checkingCooldown, setCheckingCooldown] = useState(false);
+  const [isSendingConnectRequest, setIsSendingConnectRequest] = useState(false);
+  const [connectSuccessMessage, setConnectSuccessMessage] = useState('');
   const [isCurrentUserIsolated, setIsCurrentUserIsolated] = useState(false);
 
   // Numeric states backed by clean strings to avoid leading zero bugs and support 2 decimal places
@@ -120,6 +122,7 @@ export function RecordDebtModal({
   useEffect(() => {
     if (!isOpen) return;
 
+    setConnectSuccessMessage('');
     if (preselectedPerson) {
       setSelectedPersonId(preselectedPerson.id);
       setIsAddingNewPerson(false);
@@ -143,6 +146,7 @@ export function RecordDebtModal({
   useEffect(() => {
     async function verifyCooldown() {
       const targetId = selectedPersonId;
+      setConnectSuccessMessage('');
       if (!targetId || isAddingNewPerson) {
         setCooldown(null);
         return;
@@ -162,6 +166,26 @@ export function RecordDebtModal({
       verifyCooldown();
     }
   }, [selectedPersonId, isAddingNewPerson, isOpen, supabase]);
+
+  const handleSendConnectRequest = async () => {
+    if (!selectedPersonId) return;
+    setIsSendingConnectRequest(true);
+    setError('');
+    try {
+      const res = await sendConnectRequestToUser(supabase, selectedPersonId);
+      if (!res.success) {
+        throw new Error(res.error || 'Failed to send connection request');
+      }
+      setConnectSuccessMessage('Connection request sent! Once they accept in Notifications, you can record transactions together.');
+      invalidateCooldownCache(selectedPersonId);
+      const updated = await checkDebtRequestCooldown(supabase, selectedPersonId);
+      setCooldown(updated);
+    } catch (err: any) {
+      setError(err.message || 'Failed to send connection request');
+    } finally {
+      setIsSendingConnectRequest(false);
+    }
+  };
 
   // Load contacts and counterparties with background revalidation
   useEffect(() => {
@@ -671,17 +695,64 @@ export function RecordDebtModal({
           </div>
         )}
 
-        {cooldown && !cooldown.allowed && (
-          <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 space-y-1">
+        {connectSuccessMessage && (
+          <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 space-y-1">
             <div className="flex items-center gap-2 font-mono text-xs font-bold uppercase tracking-wider">
-              <span className="material-symbols-outlined text-[18px]">lock_clock</span>
-              <span>Anti-Harassment Cooldown Active</span>
+              <span className="material-symbols-outlined text-[18px]">check_circle</span>
+              <span>Connection Request Sent</span>
             </div>
             <p className="text-xs leading-relaxed">
-              This contact declined your previous {cooldown.declinedCount} request{cooldown.declinedCount > 1 ? 's' : ''}.
-              To protect privacy and prevent spam, new requests to this contact are paused for another{' '}
-              <span className="font-bold font-mono underline">{cooldown.cooldownRemainingFormatted || 'cooldown period'}</span>.
+              {connectSuccessMessage}
             </p>
+          </div>
+        )}
+
+        {cooldown && !cooldown.allowed && (
+          <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 space-y-2">
+            <div className="flex items-center gap-2 font-mono text-xs font-bold uppercase tracking-wider">
+              <span className="material-symbols-outlined text-[18px]">
+                {cooldown.requiresConnection
+                  ? cooldown.contactRequestStatus === 'pending'
+                    ? 'hourglass_top'
+                    : cooldown.contactRequestStatus === 'declined'
+                    ? 'block'
+                    : 'person_add'
+                  : 'lock_clock'}
+              </span>
+              <span>
+                {cooldown.requiresConnection
+                  ? cooldown.contactRequestStatus === 'pending'
+                    ? 'Connection Request Pending'
+                    : cooldown.contactRequestStatus === 'declined'
+                    ? 'Connection Restricted'
+                    : 'Connection Required Before Transacting'
+                  : 'Anti-Harassment Protection Active'}
+              </span>
+            </div>
+            <p className="text-xs leading-relaxed">
+              {cooldown.message || (
+                cooldown.requiresConnection
+                  ? 'This counterparty previously declined your transaction. To prevent spam and respect boundaries, you must connect with them first before sending new transaction proposals.'
+                  : `This contact declined your previous requests. New requests to this contact are paused.`
+              )}
+            </p>
+            {cooldown.requiresConnection && (!cooldown.contactRequestStatus || cooldown.contactRequestStatus === 'none') && (
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={handleSendConnectRequest}
+                  disabled={isSendingConnectRequest}
+                  className="px-3.5 py-2 rounded-lg bg-amber-600 text-white dark:bg-amber-500 dark:text-black font-mono text-xs font-bold hover:opacity-90 active:scale-95 transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                >
+                  <span className="material-symbols-outlined text-[16px]">
+                    {isSendingConnectRequest ? 'sync' : 'person_add'}
+                  </span>
+                  <span>
+                    {isSendingConnectRequest ? 'Sending Request...' : 'Send Connection Request'}
+                  </span>
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -1333,7 +1404,13 @@ export function RecordDebtModal({
                     : checkingCooldown
                     ? 'Checking...'
                     : cooldown && !cooldown.allowed
-                    ? 'Cooldown Active'
+                    ? cooldown.requiresConnection
+                      ? cooldown.contactRequestStatus === 'pending'
+                        ? 'Connection Pending'
+                        : cooldown.contactRequestStatus === 'declined'
+                        ? 'Connection Declined'
+                        : 'Connection Required'
+                      : 'Request Restricted'
                     : 'Send Request'}
                 </span>
               </button>

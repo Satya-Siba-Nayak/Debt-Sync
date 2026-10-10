@@ -15,6 +15,7 @@ import { CounterpartyNoteModal } from './CounterpartyNoteModal';
 import { formatPaymentMethodDisplay } from '@/lib/utils/upi-link';
 import { parseSplitDetails, getCleanDebtNotes } from '@/lib/utils/split-bills';
 import { EditPendingDebtModal } from './EditPendingDebtModal';
+import { respondToDebtAgreement } from '@/lib/utils/debt-acceptance';
 
 export interface DebtDetailModalProps {
   isOpen: boolean;
@@ -208,25 +209,7 @@ export function DebtDetailModal({
     if (!debt) return;
     setActionLoading(true);
     try {
-      const { error: err } = await supabase
-        .from('debts')
-        .update({
-          status: decision,
-          accepted_at: decision === 'active' ? new Date().toISOString() : null,
-        })
-        .eq('id', debt.id)
-        .eq('status', 'pending');
-
-      if (err) throw err;
-
-      await supabase.from('activity_log').insert({
-        user_id: currentUserId,
-        debt_id: debt.id,
-        action: decision === 'active' ? 'debt_accepted' : 'debt_declined',
-        details: { decided_by: currentUserId },
-      });
-
-      window.dispatchEvent(new CustomEvent('debtsync:refresh'));
+      await respondToDebtAgreement(supabase, debt.id, decision);
       await fetchDebtDetails();
       onDebtUpdated?.();
     } catch (e: any) {

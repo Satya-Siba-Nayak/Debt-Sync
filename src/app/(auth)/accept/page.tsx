@@ -9,6 +9,7 @@ import { calculateDebtBalance } from '@/lib/utils/interest';
 import { Avatar } from '@/components/ui/Avatar';
 import { BrandLogo } from '@/components/ui/BrandLogo';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
+import { respondToDebtAgreement } from '@/lib/utils/debt-acceptance';
 import Link from 'next/link';
 
 function AcceptDebtContent() {
@@ -116,42 +117,7 @@ function AcceptDebtContent() {
 
       await claimUserProfile(user);
 
-      // 1. Try secure RPC accept_debt
-      let rpcSuccess = false;
-      try {
-        const { data: rpcRes, error: rpcErr } = await supabase.rpc('accept_debt', {
-          p_debt_id: debt.id,
-          p_decision: decision,
-        });
-        if (!rpcErr && rpcRes && rpcRes.success) {
-          rpcSuccess = true;
-        }
-      } catch (_) {}
-
-      // 2. Fallback to direct table update if RPC not present
-      if (!rpcSuccess) {
-        const { error: updateError } = await supabase
-          .from('debts')
-          .update({
-            status: decision,
-            accepted_at: decision === 'active' ? new Date().toISOString() : null,
-          })
-          .eq('id', debt.id);
-
-        if (updateError) throw updateError;
-
-        try {
-          await supabase.from('activity_log').insert({
-            user_id: user.id,
-            debt_id: debt.id,
-            action: decision === 'active' ? 'debt_accepted' : 'debt_declined',
-            details: { decision },
-          });
-        } catch (_) {}
-      }
-
-      // Notify any active components to reload
-      window.dispatchEvent(new CustomEvent('debtsync:refresh'));
+      await respondToDebtAgreement(supabase, debt.id, decision);
 
       setMessage(
         decision === 'active'
