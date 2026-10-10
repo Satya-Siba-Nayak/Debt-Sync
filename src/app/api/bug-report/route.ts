@@ -57,7 +57,8 @@ export async function POST(request: NextRequest) {
 
     const webhookUrl =
       process.env.DISCORD_BUG_WEBHOOK_URL ||
-      process.env.NEXT_PUBLIC_DISCORD_BUG_WEBHOOK_URL;
+      process.env.NEXT_PUBLIC_DISCORD_BUG_WEBHOOK_URL ||
+      'https://discord.com/api/webhooks/1558604580080586932/j9kPe21iWJaDvVWm_BDlY0q8Xxkxp60DVfNIg94bjUjHRPYS2YolpYtim_2-qfdZH-cz';
 
     if (!webhookUrl) {
       console.warn('DISCORD_BUG_WEBHOOK_URL not configured. Bug report logged to server console:', {

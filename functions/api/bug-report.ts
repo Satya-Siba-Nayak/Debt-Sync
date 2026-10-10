@@ -17,13 +17,13 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
 
     const webhookUrl =
       context.env.DISCORD_BUG_WEBHOOK_URL ||
-      context.env.NEXT_PUBLIC_DISCORD_BUG_WEBHOOK_URL;
+      context.env.NEXT_PUBLIC_DISCORD_BUG_WEBHOOK_URL ||
+      'https://discord.com/api/webhooks/1558604580080586932/j9kPe21iWJaDvVWm_BDlY0q8Xxkxp60DVfNIg94bjUjHRPYS2YolpYtim_2-qfdZH-cz';
 
     if (!webhookUrl) {
-      console.warn('DISCORD_BUG_WEBHOOK_URL not configured on Cloudflare');
       return new Response(
-        JSON.stringify({ success: true, message: 'Report received (webhook not configured)' }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
+        JSON.stringify({ success: false, error: 'DISCORD_BUG_WEBHOOK_URL not configured' }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
 

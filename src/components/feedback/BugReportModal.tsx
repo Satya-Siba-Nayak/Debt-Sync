@@ -104,7 +104,9 @@ export function BugReportModal({
 
       // 2. Direct Webhook Fallback (if hosted as pure static export on Cloudflare Pages)
       if (!isSuccess) {
-        const directWebhookUrl = process.env.NEXT_PUBLIC_DISCORD_BUG_WEBHOOK_URL;
+        const directWebhookUrl =
+          process.env.NEXT_PUBLIC_DISCORD_BUG_WEBHOOK_URL ||
+          'https://discord.com/api/webhooks/1558604580080586932/j9kPe21iWJaDvVWm_BDlY0q8Xxkxp60DVfNIg94bjUjHRPYS2YolpYtim_2-qfdZH-cz';
         if (directWebhookUrl) {
           let color = 0xed4245;
           let title = '🐛 New Bug Report';
