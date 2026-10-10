@@ -322,6 +322,18 @@ export function TopBar({
             </Link>
             <button
               type="button"
+              onClick={() => {
+                setIsDropdownOpen(false);
+                window.dispatchEvent(new CustomEvent('debtsync:open_bug_report'));
+              }}
+              className="w-full flex items-center gap-2.5 px-2.5 min-h-[44px] md:min-h-[36px] rounded-xl font-mono text-xs text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors cursor-pointer text-left"
+              role="menuitem"
+            >
+              <span className="material-symbols-outlined text-[18px] text-amber-500">bug_report</span>
+              <span>Report Issue / Feedback</span>
+            </button>
+            <button
+              type="button"
               onClick={handleSignOut}
               className="w-full flex items-center gap-2.5 px-2.5 min-h-[44px] md:min-h-[36px] rounded-xl font-mono text-xs text-[var(--error)] hover:bg-red-500/10 transition-colors cursor-pointer text-left"
               role="menuitem"

@@ -480,9 +480,25 @@ export function PersonRepaymentModal({
       <form onSubmit={handleSubmitRepayment} className="space-y-5">
         {/* Error Alert */}
         {error && (
-          <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 font-mono text-xs flex items-start gap-2">
-            <span className="material-symbols-outlined text-[18px] shrink-0 mt-0.5">error</span>
-            <span>{error}</span>
+          <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 font-mono text-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div className="flex items-start gap-2">
+              <span className="material-symbols-outlined text-[16px] shrink-0 mt-0.5">error</span>
+              <span>{error}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                window.dispatchEvent(
+                  new CustomEvent('debtsync:open_bug_report', {
+                    detail: { error, category: 'bug' },
+                  })
+                );
+              }}
+              className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-red-600 dark:text-red-400 hover:underline cursor-pointer shrink-0 self-end sm:self-auto bg-red-500/10 px-2 py-1 rounded-lg"
+            >
+              <span className="material-symbols-outlined text-[14px]">bug_report</span>
+              <span>Report this issue</span>
+            </button>
           </div>
         )}
 

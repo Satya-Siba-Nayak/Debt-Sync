@@ -678,8 +678,25 @@ export function RecordDebtModal({
         </div>
 
         {error && (
-          <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-[var(--error)] text-sm border border-[var(--error)]/20">
-            {error}
+          <div className="p-3.5 rounded-xl bg-red-500/10 text-[var(--error)] text-xs font-mono border border-[var(--error)]/25 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div className="flex items-start gap-2">
+              <span className="material-symbols-outlined text-[16px] shrink-0 mt-0.5">error</span>
+              <span>{error}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                window.dispatchEvent(
+                  new CustomEvent('debtsync:open_bug_report', {
+                    detail: { error, category: 'bug' },
+                  })
+                );
+              }}
+              className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-[var(--error)] hover:underline cursor-pointer shrink-0 self-end sm:self-auto bg-red-500/10 px-2 py-1 rounded-lg"
+            >
+              <span className="material-symbols-outlined text-[14px]">bug_report</span>
+              <span>Report this issue</span>
+            </button>
           </div>
         )}
 

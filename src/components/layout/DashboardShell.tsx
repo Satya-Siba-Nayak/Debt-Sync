@@ -6,6 +6,7 @@ import { TopBar } from './TopBar';
 import { BottomNav } from './BottomNav';
 import { RecordDebtModal } from '../debts/RecordDebtModal';
 import { SplitBillModal } from '../debts/SplitBillModal';
+import { BugReportModal, ReportCategory } from '../feedback/BugReportModal';
 import { PWAInstallPrompt } from '../ui/PWAInstallPrompt';
 import { createClient } from '@/lib/supabase/client';
 
@@ -22,6 +23,11 @@ import {
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
   const [isSplitModalOpen, setIsSplitModalOpen] = useState(false);
+  const [isBugReportOpen, setIsBugReportOpen] = useState(false);
+  const [bugReportParams, setBugReportParams] = useState<{
+    error?: string | null;
+    category?: ReportCategory;
+  } | null>(null);
   const [recordModalParams, setRecordModalParams] = useState<{
     contactId?: string;
     person?: any;
@@ -43,12 +49,19 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       setIsSplitModalOpen(true);
     };
 
+    const handleOpenBugReport = (e: any) => {
+      setBugReportParams(e.detail || null);
+      setIsBugReportOpen(true);
+    };
+
     window.addEventListener('debtsync:open_record_modal', handleOpenRecordModal);
     window.addEventListener('debtsync:open_split_modal', handleOpenSplitModal);
+    window.addEventListener('debtsync:open_bug_report', handleOpenBugReport);
 
     return () => {
       window.removeEventListener('debtsync:open_record_modal', handleOpenRecordModal);
       window.removeEventListener('debtsync:open_split_modal', handleOpenSplitModal);
+      window.removeEventListener('debtsync:open_bug_report', handleOpenBugReport);
     };
   }, []);
 
@@ -195,6 +208,17 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         onSplitCreated={() => {
           window.dispatchEvent(new CustomEvent('debtsync:refresh'));
         }}
+      />
+
+      {/* Global Bug & Feedback Modal */}
+      <BugReportModal
+        isOpen={isBugReportOpen}
+        onClose={() => {
+          setIsBugReportOpen(false);
+          setBugReportParams(null);
+        }}
+        initialError={bugReportParams?.error}
+        initialCategory={bugReportParams?.category}
       />
 
       {/* PWA Install Prompt */}
