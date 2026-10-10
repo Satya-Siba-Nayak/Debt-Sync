@@ -184,7 +184,7 @@ BEGIN
     v_is_counterparty := true;
   ELSIF EXISTS (
     SELECT 1 FROM public.profiles 
-    WHERE id = v_user_id AND (is_admin = true OR is_super_admin = true)
+    WHERE id = v_user_id AND is_admin = true
   ) THEN
     v_is_counterparty := true;
   ELSE
@@ -285,10 +285,10 @@ BEGIN
     v_target_id := NEW.lender_id;
   END IF;
 
-  -- Admin/Super-admin bypass
+  -- Admin bypass
   IF EXISTS (
     SELECT 1 FROM public.profiles
-    WHERE id = NEW.created_by AND (is_admin = true OR is_super_admin = true)
+    WHERE id = NEW.created_by AND is_admin = true
   ) THEN
     RETURN NEW;
   END IF;

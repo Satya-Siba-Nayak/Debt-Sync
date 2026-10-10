@@ -12,6 +12,7 @@ export type Profile = {
   bank_account_holder_name?: string | null;
   is_shadow: boolean;
   is_admin: boolean;
+  is_super_admin?: boolean;
   is_isolated?: boolean;
   isolation_reason?: string | null;
   is_verified?: boolean;
