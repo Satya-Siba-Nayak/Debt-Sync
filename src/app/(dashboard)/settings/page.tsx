@@ -1904,8 +1904,8 @@ export default function SettingsPage() {
       <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 md:p-8 border border-[var(--outline-variant)]/30 shadow-sm space-y-4">
         <div>
           <h3 className="font-heading text-base font-bold text-[var(--on-surface)] flex items-center gap-2">
-            <span className="material-symbols-outlined text-[18px] text-[var(--primary)]">bug_report</span>
-            Feedback &amp; Bug Reporting
+            <span className="material-symbols-outlined text-[18px] text-[var(--on-surface-variant)]">warning</span>
+            Feedback &amp; Issue Reporting
           </h3>
           <p className="text-xs text-[var(--on-surface-variant)] mt-1">
             Encountered an unexpected error, a UI glitch, or have an idea to make DebtSync better? Let us know directly.
@@ -1918,8 +1918,8 @@ export default function SettingsPage() {
             onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_bug_report'))}
             className="px-4 py-2.5 rounded-xl bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] border border-[var(--outline-variant)]/40 font-mono text-xs font-bold inline-flex items-center gap-2 transition-all cursor-pointer shadow-xs"
           >
-            <span className="material-symbols-outlined text-[18px]">feedback</span>
-            <span>Submit Feedback / Report Bug</span>
+            <span className="material-symbols-outlined text-[18px] text-[var(--on-surface-variant)]">warning</span>
+            <span>Submit Feedback / Report Issue</span>
           </button>
         </div>
       </div>

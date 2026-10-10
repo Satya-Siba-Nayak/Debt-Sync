@@ -694,7 +694,7 @@ export function RecordDebtModal({
               }}
               className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-[var(--error)] hover:underline cursor-pointer shrink-0 self-end sm:self-auto bg-red-500/10 px-2 py-1 rounded-lg"
             >
-              <span className="material-symbols-outlined text-[14px]">bug_report</span>
+              <span className="material-symbols-outlined text-[14px]">warning</span>
               <span>Report this issue</span>
             </button>
           </div>

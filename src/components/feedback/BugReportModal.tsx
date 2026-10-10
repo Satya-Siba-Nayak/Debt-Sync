@@ -292,15 +292,15 @@ export function BugReportModal({
           </div>
 
           {/* Auto-Captured Environment Context Card */}
-          <div className="p-2.5 rounded-xl bg-surface-container border border-outline-variant/20 flex items-center justify-between gap-2 text-[11px] font-mono text-on-surface-variant">
+          <div className="p-2.5 rounded-xl bg-surface-container/60 border border-outline-variant/20 flex items-center justify-between gap-2 text-[11px] font-mono text-on-surface-variant">
             <div className="flex items-center gap-1.5 truncate">
-              <span className="material-symbols-outlined text-[15px] text-primary shrink-0">info</span>
+              <span className="material-symbols-outlined text-[15px] text-on-surface-variant/70 shrink-0">info</span>
               <span className="truncate">
-                Auto-attaching: <span className="font-bold text-on-surface">{currentRoute || '/'}</span>
+                Auto-attaching: <span className="font-semibold text-on-surface">{currentRoute || '/'}</span>
               </span>
             </div>
             {device && (
-              <span className="shrink-0 text-[10px] text-on-surface-variant/80">
+              <span className="shrink-0 text-[10px] text-on-surface-variant/70">
                 {device.isMobile ? 'Mobile' : 'Desktop'}
               </span>
             )}
