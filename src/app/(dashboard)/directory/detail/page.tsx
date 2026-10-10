@@ -10,7 +10,7 @@ import { Chip } from '@/components/ui/Chip';
 import { Avatar } from '@/components/ui/Avatar';
 import { PaymentModal } from '@/components/debts/PaymentModal';
 import { RecordDebtModal } from '@/components/debts/RecordDebtModal';
-import { BulkPaymentModal } from '@/components/debts/BulkPaymentModal';
+import { PersonRepaymentModal } from '@/components/debts/PersonRepaymentModal';
 import { CounterpartyNoteModal } from '@/components/debts/CounterpartyNoteModal';
 import { getDueDateInfo } from '@/lib/utils/due-date';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
@@ -72,7 +72,8 @@ function PersonDebtDetailContent() {
   const [activeDebtForPayment, setActiveDebtForPayment] = useState<{ debt: Debt; balance: number } | null>(null);
   const [selectedDebtForNote, setSelectedDebtForNote] = useState<Debt | null>(null);
   const [isRecordDebtOpen, setIsRecordDebtOpen] = useState(false);
-  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [isPayModalOpen, setIsPayModalOpen] = useState(false);
+  const [selectedDebtIdForPay, setSelectedDebtIdForPay] = useState<string | null>(null);
   const [selectedDebtForEdit, setSelectedDebtForEdit] = useState<Debt | null>(null);
   const [verifyingPaymentId, setVerifyingPaymentId] = useState<string | null>(null);
 
@@ -504,14 +505,17 @@ function PersonDebtDetailContent() {
         </div>
 
         <div className="flex gap-2.5 flex-wrap items-center">
-          {hasActiveDebts && (
+          {totalOutstandingBorrowed > 0 && (
             <button
-              onClick={() => setIsBulkModalOpen(true)}
-              className="py-2.5 px-4 rounded-xl bg-primary text-on-primary font-mono text-xs font-bold hover:opacity-95 shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
-              title="Bulk repay multiple debts"
+              onClick={() => {
+                setSelectedDebtIdForPay(null);
+                setIsPayModalOpen(true);
+              }}
+              className="py-2.5 px-4 rounded-xl bg-primary text-on-primary font-mono text-xs font-bold hover:opacity-95 shadow-sm active:scale-[0.98] transition-all flex items-center gap-1.5 cursor-pointer"
+              title={`Pay ${person?.full_name || 'Counterparty'}`}
             >
-              <span className="material-symbols-outlined text-[18px]">bolt</span>
-              <span>Bulk Repay</span>
+              <span className="material-symbols-outlined text-[18px]">payments</span>
+              <span>Pay</span>
             </button>
           )}
           <button
@@ -709,14 +713,17 @@ function PersonDebtDetailContent() {
                 className="pl-9 pr-3 py-1.5 rounded-xl border border-outline-variant/30 bg-surface-container-low text-xs text-on-surface outline-none focus:border-primary w-52 sm:w-64 font-mono"
               />
             </div>
-            {hasActiveDebts && (
+            {totalOutstandingBorrowed > 0 && (
               <button
-                onClick={() => setIsBulkModalOpen(true)}
-                className="py-2 px-3.5 rounded-xl bg-primary text-on-primary font-mono text-xs font-bold hover:opacity-95 shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
-                title="Bulk repay multiple debts"
+                onClick={() => {
+                  setSelectedDebtIdForPay(null);
+                  setIsPayModalOpen(true);
+                }}
+                className="py-2 px-3.5 rounded-xl bg-primary text-on-primary font-mono text-xs font-bold hover:opacity-95 shadow-sm active:scale-[0.98] transition-all flex items-center gap-1.5 cursor-pointer"
+                title={`Pay ${person?.full_name || 'Counterparty'}`}
               >
-                <span className="material-symbols-outlined text-[16px]">bolt</span>
-                <span>Bulk Repay</span>
+                <span className="material-symbols-outlined text-[16px]">payments</span>
+                <span>Pay</span>
               </button>
             )}
           </div>
@@ -960,10 +967,21 @@ function PersonDebtDetailContent() {
 
                     {d.status === 'active' && calc.currentBalance > 0 && (
                       <button
-                        onClick={() => setActiveDebtForPayment({ debt: d, balance: calc.currentBalance })}
-                        className="py-1.5 px-3 rounded-lg bg-secondary text-on-secondary font-mono text-xs font-bold hover:opacity-90 transition-opacity cursor-pointer shadow-sm"
+                        onClick={() => {
+                          if (d.borrower_id === currentUserId && person) {
+                            setSelectedDebtIdForPay(d.id);
+                            setIsPayModalOpen(true);
+                          } else {
+                            setActiveDebtForPayment({ debt: d, balance: calc.currentBalance });
+                          }
+                        }}
+                        className={`py-1.5 px-3 rounded-lg font-mono text-xs font-bold hover:opacity-90 transition-opacity cursor-pointer shadow-sm ${
+                          d.borrower_id === currentUserId
+                            ? 'bg-primary text-on-primary'
+                            : 'bg-secondary text-on-secondary'
+                        }`}
                       >
-                        Record Payment
+                        {d.borrower_id === currentUserId ? 'Pay' : 'Record Payment'}
                       </button>
                     )}
                   </div>
@@ -1209,17 +1227,21 @@ function PersonDebtDetailContent() {
         onDebtCreated={fetchDetails}
       />
 
-      {/* Bulk Payment Modal */}
-      {isBulkModalOpen && (
-        <BulkPaymentModal
-          isOpen={isBulkModalOpen}
-          onClose={() => setIsBulkModalOpen(false)}
+      {/* Person Repayment Modal */}
+      {isPayModalOpen && person && (
+        <PersonRepaymentModal
+          isOpen={isPayModalOpen}
+          onClose={() => {
+            setIsPayModalOpen(false);
+            setSelectedDebtIdForPay(null);
+          }}
+          person={person}
           debts={debts}
           payments={payments}
           currentUserId={currentUserId || ''}
           currency={currency}
-          personName={person?.full_name || person?.email || 'Counterparty'}
-          onPaymentCompleted={() => {
+          initialSelectedDebtId={selectedDebtIdForPay}
+          onPaymentRecorded={() => {
             fetchDetails();
           }}
         />
