@@ -72,25 +72,107 @@ export function BugReportModal({
     setError('');
 
     try {
-      const res = await fetch('/api/bug-report', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          category,
-          description: description.trim(),
-          errorMessage: errorMessage?.trim() || null,
-          route: currentRoute,
-          device: device || undefined,
-          userName: userProfile?.name,
-          userEmail: userProfile?.email,
-        }),
-      });
+      let isSuccess = false;
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to submit report');
+      // 1. Primary: Server / Cloudflare Function API route
+      try {
+        const res = await fetch('/api/bug-report', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            category,
+            description: description.trim(),
+            errorMessage: errorMessage?.trim() || null,
+            route: currentRoute,
+            device: device || undefined,
+            userName: userProfile?.name,
+            userEmail: userProfile?.email,
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json().catch(() => ({ success: true }));
+          if (data.success !== false) {
+            isSuccess = true;
+          }
+        }
+      } catch (_) {
+        // Fall through to direct webhook fallback
+      }
+
+      // 2. Direct Webhook Fallback (if hosted as pure static export on Cloudflare Pages)
+      if (!isSuccess) {
+        const directWebhookUrl = process.env.NEXT_PUBLIC_DISCORD_BUG_WEBHOOK_URL;
+        if (directWebhookUrl) {
+          let color = 0xed4245;
+          let title = '🐛 New Bug Report';
+          if (category === 'ui') {
+            color = 0xe67e22;
+            title = '🎨 UI / Visual Glitch Report';
+          } else if (category === 'idea') {
+            color = 0x1abc9c;
+            title = '💡 Feature Idea / Suggestion';
+          }
+
+          const fields: Array<{ name: string; value: string; inline?: boolean }> = [
+            {
+              name: '👤 Reporter',
+              value: userProfile?.name
+                ? `${userProfile.name} (${userProfile.email || 'No email'})`
+                : userProfile?.email || 'Anonymous User',
+              inline: true,
+            },
+            {
+              name: '📍 Page Route',
+              value: currentRoute ? `\`${currentRoute}\`` : '`Unknown`',
+              inline: true,
+            },
+            {
+              name: '📱 Client & Device',
+              value: device
+                ? `${device.isMobile ? '📱 Mobile' : '💻 Desktop'} • ${device.os || 'Unknown OS'} • ${device.browser || 'Unknown Browser'}`
+                : 'Not captured',
+              inline: false,
+            },
+          ];
+
+          if (errorMessage) {
+            const truncated = errorMessage.length > 950 ? errorMessage.substring(0, 950) + '...' : errorMessage;
+            fields.push({
+              name: '⚠️ Captured Error Message',
+              value: `\`\`\`${truncated}\`\`\``,
+              inline: false,
+            });
+          }
+
+          const directRes = await fetch(directWebhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: 'DebtSync Bug Reporter',
+              embeds: [
+                {
+                  title,
+                  color,
+                  description: description.trim(),
+                  fields,
+                  footer: { text: 'DebtSync Frictionless Reporting' },
+                  timestamp: new Date().toISOString(),
+                },
+              ],
+            }),
+          });
+
+          if (directRes.ok || directRes.status === 204) {
+            isSuccess = true;
+          }
+        }
+      }
+
+      if (!isSuccess) {
+        throw new Error('Could not deliver report. Please verify webhook configuration.');
       }
 
       setSuccess(true);
