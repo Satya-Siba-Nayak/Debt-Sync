@@ -12,6 +12,7 @@ import { createClient } from '@/lib/supabase/client';
 
 import { useRouter } from 'next/navigation';
 import { getLocalRecentAvatars } from '@/lib/utils/avatar-storage';
+import { initErrorTracker } from '@/lib/utils/error-tracker';
 import {
   getCurrentUserFast,
   getCachedUserProfile,
@@ -38,6 +39,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   useEffect(() => {
+    initErrorTracker();
+
     const handleOpenRecordModal = (e: any) => {
       setRecordModalParams(e.detail || null);
       setIsSplitModalOpen(false);

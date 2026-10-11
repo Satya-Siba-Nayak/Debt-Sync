@@ -1,25 +1,42 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-interface BugReportPayload {
+interface DeviceData {
+  os?: string;
+  browser?: string;
+  isMobile?: boolean;
+  isTablet?: boolean;
+  screenResolution?: string;
+  viewportSize?: string;
+  pixelRatio?: string;
+  orientation?: string;
+  touchSupport?: boolean;
+  language?: string;
+  timezone?: string;
+  localTime?: string;
+  network?: string;
+  isPWA?: boolean;
+  theme?: string;
+  memory?: string;
+  cores?: string;
+  userAgent?: string;
+  recentErrors?: string[];
+}
+
+interface BugReportData {
   category: 'bug' | 'ui' | 'idea';
   description: string;
   errorMessage?: string | null;
   route?: string;
-  device?: {
-    os?: string;
-    browser?: string;
-    isMobile?: boolean;
-    screenResolution?: string;
-    userAgent?: string;
-  };
+  device?: DeviceData;
   userName?: string;
   userEmail?: string;
+  userId?: string;
 }
 
-// In-memory rate limiting map: userEmail/ip -> timestamp array
+// In-memory rate limiting map: identifier -> timestamp array
 const rateLimitMap = new Map<string, number[]>();
 const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
-const MAX_REPORTS_PER_WINDOW = 5;
+const MAX_REPORTS_PER_WINDOW = 6;
 
 function isRateLimited(identifier: string): boolean {
   const now = Date.now();
@@ -35,10 +52,49 @@ function isRateLimited(identifier: string): boolean {
   return false;
 }
 
+const DEFAULT_WEBHOOK_URL =
+  'https://discord.com/api/webhooks/1558604580080586932/j9kPe21iWJaDvVWm_BDlY0q8Xxkxp60DVfNIg94bjUjHRPYS2YolpYtim_2-qfdZH-cz';
+
 export async function POST(request: NextRequest) {
   try {
-    const body: BugReportPayload = await request.json();
-    const { category, description, errorMessage, route, device, userName, userEmail } = body;
+    const contentType = request.headers.get('content-type') || '';
+    let reportData: BugReportData;
+    const uploadedFiles: File[] = [];
+
+    if (contentType.includes('multipart/form-data')) {
+      const formData = await request.formData();
+      const payloadRaw = formData.get('payload_json');
+
+      if (payloadRaw && typeof payloadRaw === 'string') {
+        reportData = JSON.parse(payloadRaw);
+      } else {
+        const category = (formData.get('category') as any) || 'bug';
+        const description = (formData.get('description') as string) || '';
+        const errorMessage = (formData.get('errorMessage') as string) || null;
+        const route = (formData.get('route') as string) || '';
+        const userName = (formData.get('userName') as string) || '';
+        const userEmail = (formData.get('userEmail') as string) || '';
+        const userId = (formData.get('userId') as string) || '';
+        let device: DeviceData | undefined;
+        try {
+          const deviceRaw = formData.get('device');
+          if (deviceRaw && typeof deviceRaw === 'string') device = JSON.parse(deviceRaw);
+        } catch (_) {}
+
+        reportData = { category, description, errorMessage, route, device, userName, userEmail, userId };
+      }
+
+      // Collect all attached files
+      for (const [key, value] of formData.entries()) {
+        if (value instanceof File && key.startsWith('files')) {
+          uploadedFiles.push(value);
+        }
+      }
+    } else {
+      reportData = await request.json();
+    }
+
+    const { category, description, errorMessage, route, device, userName, userEmail, userId } = reportData;
 
     if (!description?.trim()) {
       return NextResponse.json(
@@ -47,7 +103,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const rateKey = userEmail || request.headers.get('x-forwarded-for') || 'anon';
+    const rateKey = userEmail || userId || request.headers.get('x-forwarded-for') || 'anon';
     if (isRateLimited(rateKey)) {
       return NextResponse.json(
         { success: false, error: 'You are submitting reports too quickly. Please wait a moment.' },
@@ -58,38 +114,24 @@ export async function POST(request: NextRequest) {
     const webhookUrl =
       process.env.DISCORD_BUG_WEBHOOK_URL ||
       process.env.NEXT_PUBLIC_DISCORD_BUG_WEBHOOK_URL ||
-      'https://discord.com/api/webhooks/1558604580080586932/j9kPe21iWJaDvVWm_BDlY0q8Xxkxp60DVfNIg94bjUjHRPYS2YolpYtim_2-qfdZH-cz';
+      DEFAULT_WEBHOOK_URL;
 
-    if (!webhookUrl) {
-      console.warn('DISCORD_BUG_WEBHOOK_URL not configured. Bug report logged to server console:', {
-        category,
-        description,
-        errorMessage,
-        route,
-        userEmail,
-      });
-      return NextResponse.json({
-        success: true,
-        loggedOnly: true,
-        message: 'Report received! (Discord webhook URL not yet configured in .env.local)',
-      });
-    }
-
-    // Color codes: Red for Bug (0xED4245), Amber for UI (0xE67E22), Cyan for Idea (0x1ABC9C)
-    let color = 0xED4245;
-    let title = '🐛 New Bug Report';
+    // Discord Embed Category Styling
+    let color = 0xED4245; // Red
+    let title = '🐛 Bug Report';
     if (category === 'ui') {
-      color = 0xE67E22;
-      title = '🎨 UI / Visual Glitch Report';
+      color = 0xE67E22; // Amber/Orange
+      title = '🎨 UI / Visual Glitch';
     } else if (category === 'idea') {
-      color = 0x1ABC9C;
-      title = '💡 Feature Idea / Suggestion';
+      color = 0x1ABC9C; // Teal/Cyan
+      title = '💡 Feature Idea & Feedback';
     }
 
+    // Build rich fields
     const fields: Array<{ name: string; value: string; inline?: boolean }> = [
       {
         name: '👤 Reporter',
-        value: userName ? `${userName} (${userEmail || 'No email'})` : userEmail || 'Anonymous User',
+        value: userName ? `**${userName}**\n${userEmail || 'No email'}` : userEmail ? `**${userEmail}**` : 'Anonymous User',
         inline: true,
       },
       {
@@ -100,57 +142,120 @@ export async function POST(request: NextRequest) {
     ];
 
     if (device) {
+      const typeLabel = device.isTablet ? '📱 Tablet' : device.isMobile ? '📱 Mobile' : '💻 Desktop';
+      const specs = [
+        `${typeLabel} • ${device.os || 'Unknown OS'} • ${device.browser || 'Unknown Browser'}`,
+        `Screen: ${device.screenResolution || 'N/A'} | Viewport: ${device.viewportSize || 'N/A'} (${device.pixelRatio || '1x'})`,
+        `Network: ${device.network || 'Online'} | Theme: ${device.theme || 'Dark'}`,
+        device.timezone ? `Timezone: ${device.timezone} • ${device.localTime || ''}` : '',
+        [device.cores, device.memory].filter(Boolean).join(' • '),
+        device.isPWA ? '⚡ Installed PWA Mode' : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
+
       fields.push({
-        name: '📱 Device & Browser',
-        value: `${device.isMobile ? 'Mobile' : 'Desktop'} • ${device.os || 'Unknown OS'} • ${device.browser || 'Unknown Browser'}\n\`${device.screenResolution || 'N/A'}\``,
+        name: '🖥️ System & Environment Diagnostics',
+        value: specs.length > 1000 ? specs.slice(0, 1000) + '...' : specs,
         inline: false,
       });
     }
 
     if (errorMessage?.trim()) {
-      const truncatedError = errorMessage.length > 950 ? errorMessage.slice(0, 950) + '...' : errorMessage;
+      const truncated = errorMessage.length > 950 ? errorMessage.slice(0, 950) + '...' : errorMessage;
       fields.push({
-        name: '⚠️ Captured Error',
-        value: `\`\`\`\n${truncatedError}\n\`\`\``,
+        name: '⚠️ In-Error Banner Message',
+        value: `\`\`\`${truncated}\`\`\``,
         inline: false,
       });
     }
 
-    const discordPayload = {
-      username: 'DebtSync Bug Bot',
-      avatar_url: 'https://raw.githubusercontent.com/Satya-Siba-Nayak/Debt-Sync/main/public/icon.svg',
-      embeds: [
-        {
-          title,
-          color,
-          description: description.trim(),
-          fields,
-          footer: {
-            text: 'DebtSync User Feedback • Live Telemetry',
-          },
-          timestamp: new Date().toISOString(),
-        },
-      ],
+    if (device?.recentErrors && device.recentErrors.length > 0) {
+      const errorDump = device.recentErrors.join('\n').slice(0, 950);
+      fields.push({
+        name: '📜 Recent Runtime JavaScript Errors',
+        value: `\`\`\`${errorDump}\`\`\``,
+        inline: false,
+      });
+    }
+
+    if (uploadedFiles.length > 0) {
+      const fileSummary = uploadedFiles
+        .map((f, i) => `#${i + 1} **${f.name}** (${(f.size / (1024 * 1024)).toFixed(2)} MB • ${f.type || 'file'})`)
+        .join('\n');
+      fields.push({
+        name: `📎 Attached Media (${uploadedFiles.length} file${uploadedFiles.length > 1 ? 's' : ''})`,
+        value: fileSummary.slice(0, 1000),
+        inline: false,
+      });
+    }
+
+    // Determine primary embedded image if any attachment is an image
+    let embeddedImageAttachment: string | undefined;
+    const firstImageFile = uploadedFiles.find((f) => f.type.startsWith('image/'));
+    if (firstImageFile) {
+      embeddedImageAttachment = firstImageFile.name;
+    }
+
+    const embed: any = {
+      title,
+      color,
+      description: `### User Note\n${description.trim()}`,
+      fields,
+      footer: {
+        text: 'DebtSync Live Telemetry & User Feedback',
+      },
+      timestamp: new Date().toISOString(),
     };
 
-    const discordRes = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(discordPayload),
-    });
+    if (embeddedImageAttachment) {
+      embed.image = { url: `attachment://${embeddedImageAttachment}` };
+    }
 
-    if (!discordRes.ok) {
+    const discordPayload = {
+      username: 'DebtSync Telemetry',
+      avatar_url: 'https://raw.githubusercontent.com/Satya-Siba-Nayak/Debt-Sync/main/public/icon.svg',
+      embeds: [embed],
+    };
+
+    let discordRes: Response;
+
+    if (uploadedFiles.length > 0) {
+      const discordFormData = new FormData();
+      discordFormData.append('payload_json', JSON.stringify(discordPayload));
+
+      for (let i = 0; i < uploadedFiles.length; i++) {
+        const file = uploadedFiles[i];
+        discordFormData.append(`files[${i}]`, file, file.name);
+      }
+
+      discordRes = await fetch(webhookUrl, {
+        method: 'POST',
+        body: discordFormData,
+      });
+    } else {
+      discordRes = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(discordPayload),
+      });
+    }
+
+    if (!discordRes.ok && discordRes.status !== 204) {
       const errText = await discordRes.text();
-      console.error('Failed to dispatch Discord webhook:', discordRes.status, errText);
+      console.error('Discord webhook dispatch failed:', discordRes.status, errText);
       return NextResponse.json(
-        { success: false, error: 'Could not deliver report to Discord. Please check webhook configuration.' },
+        { success: false, error: `Discord rejected webhook (${discordRes.status}).` },
         { status: 502 }
       );
     }
 
-    return NextResponse.json({ success: true, message: 'Bug report sent to Discord successfully.' });
+    return NextResponse.json({
+      success: true,
+      message: 'Bug report sent to Discord successfully with attachments.',
+    });
   } catch (err: any) {
     console.error('Bug report API error:', err);
     return NextResponse.json(
