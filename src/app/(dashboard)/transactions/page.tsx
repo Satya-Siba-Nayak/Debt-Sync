@@ -300,9 +300,12 @@ function TransactionsPageContent() {
                               </span>
                             )}
                             {shareMeta?.globalEnabled && (
-                              <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25 flex items-center gap-0.5 shrink-0">
+                              <span
+                                className="px-1.5 py-0.5 rounded text-[9px] font-mono text-[var(--on-surface-variant)] bg-[var(--surface-container-high)]/70 border border-[var(--outline-variant)]/25 flex items-center gap-0.5 shrink-0"
+                                title="Global public link enabled"
+                              >
                                 <span className="material-symbols-outlined text-[10px]">public</span>
-                                <span>Global Link</span>
+                                <span>Public</span>
                               </span>
                             )}
                           </div>
@@ -565,9 +568,12 @@ function TransactionsPageContent() {
                                   </span>
                                 )}
                                 {shareMeta?.globalEnabled && (
-                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25 flex items-center gap-1">
-                                    <span className="material-symbols-outlined text-[11px]">public</span>
-                                    <span>Global Link</span>
+                                  <span
+                                    className="px-1.5 py-0.5 rounded text-[9px] font-mono text-[var(--on-surface-variant)] bg-[var(--surface-container-high)]/70 border border-[var(--outline-variant)]/25 flex items-center gap-0.5"
+                                    title="Global public link enabled"
+                                  >
+                                    <span className="material-symbols-outlined text-[10px]">public</span>
+                                    <span>Public</span>
                                   </span>
                                 )}
                               </div>
@@ -671,11 +677,11 @@ function TransactionsPageContent() {
                             <button
                               type="button"
                               onClick={() => setSelectedDebtForDetail(d)}
-                              className="px-2.5 py-1.5 rounded-lg bg-[var(--primary)]/10 hover:bg-[var(--primary)]/20 text-[var(--primary)] font-mono text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                              className="px-2.5 py-1.5 rounded-lg bg-[var(--primary)]/10 hover:bg-[var(--primary)]/20 text-[var(--primary)] font-mono text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap"
                               title="View full debt logs, receipts, sharing and audit trail"
                             >
                               <span className="material-symbols-outlined text-[14px]">receipt_long</span>
-                              <span>Details &amp; Share</span>
+                              <span>Details</span>
                             </button>
 
                             {/* Two-sided Note Button */}

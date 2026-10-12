@@ -849,9 +849,12 @@ function PersonDebtDetailContent() {
                         </span>
                       )}
                       {shareMeta?.globalEnabled && (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25 flex items-center gap-1">
-                          <span className="material-symbols-outlined text-[12px]">public</span>
-                          <span>Global Link ON</span>
+                        <span
+                          className="px-1.5 py-0.5 rounded text-[9px] font-mono text-on-surface-variant bg-surface-container-high/70 border border-outline-variant/25 flex items-center gap-0.5"
+                          title="Global public link enabled"
+                        >
+                          <span className="material-symbols-outlined text-[10px]">public</span>
+                          <span>Public</span>
                         </span>
                       )}
                       {dueDateInfo && d.status !== 'declined' && (
@@ -924,15 +927,15 @@ function PersonDebtDetailContent() {
                     className="flex items-center gap-2 self-end sm:self-auto flex-wrap"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    {/* Details & Share Button */}
+                    {/* Details Button */}
                     <button
                       type="button"
                       onClick={() => setSelectedDebtForDetail(d)}
-                      className="py-1.5 px-2.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary font-mono text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                      className="py-1.5 px-2.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary font-mono text-xs font-bold flex items-center gap-1 whitespace-nowrap transition-colors cursor-pointer"
                       title="View full agreement details, audit trail, and share link"
                     >
                       <span className="material-symbols-outlined text-[14px]">receipt_long</span>
-                      <span>Details &amp; Share</span>
+                      <span>Details</span>
                     </button>
 
                     {/* Two-sided Note Button */}

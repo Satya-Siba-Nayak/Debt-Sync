@@ -425,9 +425,12 @@ export default function GlobalDashboardPage() {
                           <div className="font-semibold text-sm text-[var(--on-surface)] group-hover:text-[var(--primary)] group-hover:underline truncate flex items-center gap-1.5 flex-wrap">
                             <span className="truncate">{name}</span>
                             {shareMeta?.globalEnabled && (
-                              <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25 flex items-center gap-0.5 shrink-0">
+                              <span
+                                className="px-1.5 py-0.5 rounded text-[9px] font-mono text-[var(--on-surface-variant)] bg-[var(--surface-container-high)]/70 border border-[var(--outline-variant)]/25 flex items-center gap-0.5 shrink-0"
+                                title="Global public link enabled"
+                              >
                                 <span className="material-symbols-outlined text-[10px]">public</span>
-                                <span>Global Link</span>
+                                <span>Public</span>
                               </span>
                             )}
                           </div>
@@ -615,9 +618,12 @@ export default function GlobalDashboardPage() {
                                   </span>
                                 )}
                                 {shareMeta?.globalEnabled && (
-                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25 flex items-center gap-1">
-                                    <span className="material-symbols-outlined text-[11px]">public</span>
-                                    <span>Global Link</span>
+                                  <span
+                                    className="px-1.5 py-0.5 rounded text-[9px] font-mono text-[var(--on-surface-variant)] bg-[var(--surface-container-high)]/70 border border-[var(--outline-variant)]/25 flex items-center gap-0.5"
+                                    title="Global public link enabled"
+                                  >
+                                    <span className="material-symbols-outlined text-[10px]">public</span>
+                                    <span>Public</span>
                                   </span>
                                 )}
                               </div>
@@ -704,14 +710,14 @@ export default function GlobalDashboardPage() {
                             {d.status === 'pending' && d.created_by !== currentUserId ? (
                               <button
                                 onClick={() => handleAcceptDebt(d.id, 'active')}
-                                className="px-2.5 py-1 rounded-lg bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 shadow-xs cursor-pointer"
+                                className="px-2.5 py-1 rounded-lg bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 shadow-xs cursor-pointer whitespace-nowrap"
                               >
                                 Accept
                               </button>
                             ) : d.status === 'pending' && d.created_by === currentUserId ? (
                               <button
                                 onClick={() => setSelectedDebtForEdit(d)}
-                                className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 border border-amber-500/30 font-mono text-xs font-bold transition-colors cursor-pointer flex items-center gap-1"
+                                className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 border border-amber-500/30 font-mono text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 whitespace-nowrap"
                               >
                                 <span className="material-symbols-outlined text-[13px]">edit</span>
                                 <span>Edit</span>
@@ -720,11 +726,11 @@ export default function GlobalDashboardPage() {
                             <button
                               type="button"
                               onClick={() => setSelectedDebtForDetail(d)}
-                              className="px-2.5 py-1 rounded-lg bg-[var(--primary)]/10 hover:bg-[var(--primary)]/20 text-[var(--primary)] font-mono text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                              className="px-2.5 py-1 rounded-lg bg-[var(--primary)]/10 hover:bg-[var(--primary)]/20 text-[var(--primary)] font-mono text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap"
                               title="View full agreement details, audit trail, and share link"
                             >
                               <span className="material-symbols-outlined text-[13px]">receipt_long</span>
-                              <span>Details &amp; Share</span>
+                              <span>Details</span>
                             </button>
                           </div>
                         </td>

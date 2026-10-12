@@ -125,7 +125,7 @@ export function DebtDetailModal({
         const updatedShare: TransactionShareMetadata = {
           ...currentShare,
           snapshot: {
-            counterpartyNotes: fetchedDebt.counterparty_notes || null,
+            counterpartyNotes: null,
             dueDate: fetchedDebt.due_date || null,
             settledAt: fetchedDebt.settled_at || null,
             payments: fetchedPayments.slice(0, 10).map((p: any) => ({
@@ -137,7 +137,7 @@ export function DebtDetailModal({
               verified_at: p.verified_at || null,
               payment_method: p.payment_method || null,
               transaction_ref: p.transaction_ref || null,
-              note: p.note || null,
+              note: null,
             })),
             auditLog: fetchedLogs.slice(0, 12).map((l: any) => ({
               id: l.id,
@@ -286,7 +286,7 @@ export function DebtDetailModal({
               disabledAt: null,
               dismissedAlertBy: [currentUserId],
               snapshot: {
-                counterpartyNotes: debt.counterparty_notes || null,
+                counterpartyNotes: null,
                 dueDate: debt.due_date || null,
                 settledAt: debt.settled_at || null,
                 payments: payments.slice(0, 10).map((p: any) => ({
@@ -298,7 +298,7 @@ export function DebtDetailModal({
                   verified_at: p.verified_at || null,
                   payment_method: p.payment_method || null,
                   transaction_ref: p.transaction_ref || null,
-                  note: p.note || null,
+                  note: null,
                 })),
                 auditLog: updatedLogs.slice(0, 12).map((l: any) => ({
                   id: l.id,
@@ -487,23 +487,23 @@ export function DebtDetailModal({
         maxWidth="max-w-2xl"
       >
         <div className="space-y-5">
-          {/* Live Global Sharing Status Banner (always visible when active so either party can turn it off) */}
+          {/* Live Global Sharing Status Banner (minimal & subtle, always visible when active so either party can turn it off) */}
           {isGlobalShared && (
-            <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-start gap-2.5 min-w-0">
-                <span className="material-symbols-outlined text-emerald-500 text-[20px] shrink-0 mt-0.5 animate-pulse">
+            <div className="p-3 rounded-xl bg-[var(--surface-container-low)] border border-[var(--outline-variant)]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-2 min-w-0">
+                <span className="material-symbols-outlined text-[var(--on-surface-variant)] text-[16px] shrink-0 mt-0.5">
                   public
                 </span>
                 <div className="min-w-0">
-                  <div className="font-mono text-xs font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5 flex-wrap">
-                    <span>Global Public Link Active</span>
-                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 border border-emerald-500/30">
+                  <div className="font-mono text-xs font-bold text-[var(--on-surface)] flex items-center gap-1.5 flex-wrap">
+                    <span>Public Link Active</span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/25 text-[var(--on-surface-variant)]">
                       Read-Only
                     </span>
                   </div>
                   <p className="text-[11px] font-mono text-[var(--on-surface-variant)] mt-0.5 leading-relaxed">
                     Enabled by <strong>{shareMeta?.enabledBy === currentUserId ? 'You' : (shareMeta?.enabledByName || otherName)}</strong>
-                    {shareMeta?.enabledAt ? ` on ${new Date(shareMeta.enabledAt).toLocaleDateString()}` : ''}. Anyone with the global link can view this transaction. Either participant can turn this off anytime.
+                    {shareMeta?.enabledAt ? ` on ${new Date(shareMeta.enabledAt).toLocaleDateString()}` : ''}. Notes and emails are hidden on the public link. Either party can turn this off anytime.
                   </p>
                 </div>
               </div>
@@ -511,7 +511,7 @@ export function DebtDetailModal({
                 <button
                   type="button"
                   onClick={() => handleCopyShareLink('global')}
-                  className="py-1.5 px-2.5 rounded-lg bg-emerald-600 text-white font-mono text-[11px] font-bold hover:bg-emerald-700 transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
+                  className="py-1.5 px-2.5 rounded-lg bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/40 text-[var(--on-surface)] font-mono text-[11px] font-bold hover:bg-[var(--surface-container-highest)] transition-colors flex items-center gap-1 cursor-pointer"
                 >
                   <span className="material-symbols-outlined text-[13px]">
                     {copiedLinkType === 'global' ? 'check' : 'content_copy'}

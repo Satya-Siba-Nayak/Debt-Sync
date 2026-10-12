@@ -23,8 +23,8 @@ import {
 function maskEmailAddress(email?: string | null): string {
   if (!email || !email.includes('@')) return 'Protected Email';
   const [local, domain] = email.split('@');
-  if (local.length <= 2) return `${local[0] || '*'}***@${domain}`;
-  return `${local.slice(0, 2)}***${local.slice(-1)}@${domain}`;
+  if (local.length <= 1) return `${local[0] || '*'}***@${domain}`;
+  return `${local[0]}***${local.slice(-1)}@${domain}`;
 }
 
 function ShareTransactionContent() {
@@ -286,7 +286,7 @@ function ShareTransactionContent() {
           dismissedAlertBy: [currentUser.id],
           snapshot: {
             updatedAt: nowIso,
-            counterpartyNotes: debt.counterparty_notes || null,
+            counterpartyNotes: null,
             dueDate: debt.due_date || null,
             settledAt: debt.settled_at || null,
             payments: payments.slice(0, 15).map((p) => ({
@@ -298,7 +298,7 @@ function ShareTransactionContent() {
               verified_at: p.verified_at || null,
               payment_method: p.payment_method || null,
               transaction_ref: p.transaction_ref || null,
-              note: getCleanDebtNotes(p.note || p.notes),
+              note: null,
             })),
             auditLog: [
               {
@@ -554,8 +554,14 @@ function ShareTransactionContent() {
   const splitDetails = parseSplitDetails(debt);
   const cleanCreatorNote = getCleanDebtNotes(debt.notes);
 
-  const lenderName = debt.lender?.full_name || debt.lender?.email || 'Lender';
-  const borrowerName = debt.borrower?.full_name || debt.borrower?.email || 'Borrower';
+  const lenderName =
+    debt.lender?.full_name ||
+    (isParticipant ? debt.lender?.email : maskEmailAddress(debt.lender?.email)) ||
+    'Lender';
+  const borrowerName =
+    debt.borrower?.full_name ||
+    (isParticipant ? debt.borrower?.email : maskEmailAddress(debt.borrower?.email)) ||
+    'Borrower';
   const lenderEmailDisplay = isParticipant
     ? debt.lender?.email
     : maskEmailAddress(debt.lender?.email);
@@ -659,17 +665,20 @@ function ShareTransactionContent() {
 
             {/* Global Link Status & Mutual Kill-Switch for Participants */}
             {shareMeta?.globalEnabled ? (
-              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="p-3 rounded-xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-start gap-2">
-                  <span className="material-symbols-outlined text-amber-500 text-[18px] shrink-0 mt-0.5">
+                  <span className="material-symbols-outlined text-[var(--on-surface-variant)] text-[16px] shrink-0 mt-0.5">
                     public
                   </span>
                   <div>
-                    <div className="font-heading font-bold text-xs text-amber-600 dark:text-amber-400">
-                      Global Public Link is Currently ON
+                    <div className="font-heading font-bold text-xs text-[var(--on-surface)] flex items-center gap-1.5">
+                      <span>Public Link Enabled</span>
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/25 text-[var(--on-surface-variant)]">
+                        Public
+                      </span>
                     </div>
                     <p className="text-[11px] text-[var(--on-surface-variant)]">
-                      Enabled by <strong>{shareMeta.enabledByName || 'a participant'}</strong>. Anyone with the tokenized link can view a read-only summary.
+                      Enabled by <strong>{shareMeta.enabledByName || 'a participant'}</strong>. Notes and emails are hidden from public viewers.
                     </p>
                   </div>
                 </div>
@@ -678,7 +687,7 @@ function ShareTransactionContent() {
                     <button
                       type="button"
                       onClick={() => copyLink(globalShareUrl, 'global')}
-                      className="py-1.5 px-2.5 rounded-lg bg-amber-500 text-white font-mono text-[10px] font-bold hover:opacity-95 cursor-pointer min-h-[34px]"
+                      className="py-1.5 px-2.5 rounded-lg bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/40 text-[var(--on-surface)] font-mono text-[10px] font-bold hover:bg-[var(--surface-container-highest)] cursor-pointer min-h-[34px]"
                     >
                       {copiedType === 'global' ? 'Copied!' : 'Copy Public Link'}
                     </button>
@@ -690,7 +699,7 @@ function ShareTransactionContent() {
                       disabled={shareLoading}
                       className="py-1.5 px-3 rounded-lg bg-red-500/15 border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/25 font-mono text-[10px] font-bold cursor-pointer disabled:opacity-50 min-h-[34px]"
                     >
-                      {shareLoading ? 'Disabling...' : 'Turn Off Global Link'}
+                      {shareLoading ? 'Disabling...' : 'Turn Off'}
                     </button>
                   )}
                 </div>
@@ -701,16 +710,16 @@ function ShareTransactionContent() {
                 <div className="pt-2 border-t border-[var(--outline-variant)]/15 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <span className="font-mono text-[11px] text-[var(--on-surface-variant)] flex items-center gap-1.5">
                     <span className="material-symbols-outlined text-[14px]">lock</span>
-                    <span>Global public sharing is OFF (Restricted to participants only)</span>
+                    <span>Public sharing is OFF (Restricted to participants only)</span>
                   </span>
                   <button
                     type="button"
                     onClick={() => handleToggleGlobalShare('enable')}
                     disabled={shareLoading}
-                    className="py-1.5 px-3 rounded-lg border border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 font-mono text-[10px] font-bold flex items-center gap-1 cursor-pointer disabled:opacity-50 self-start sm:self-auto min-h-[34px]"
+                    className="py-1.5 px-3 rounded-lg border border-[var(--outline-variant)]/40 text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container)] font-mono text-[10px] font-bold flex items-center gap-1 cursor-pointer disabled:opacity-50 self-start sm:self-auto min-h-[34px]"
                   >
                     <span className="material-symbols-outlined text-[13px]">public</span>
-                    <span>{shareLoading ? 'Enabling...' : 'Enable Global Link'}</span>
+                    <span>{shareLoading ? 'Enabling...' : 'Enable Public Link'}</span>
                   </button>
                 </div>
               )
@@ -732,33 +741,33 @@ function ShareTransactionContent() {
           </div>
         ) : (
           /* Public Global Viewer Banner */
-          <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="p-3.5 rounded-2xl bg-[var(--surface-container-low)] border border-[var(--outline-variant)]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-start gap-2.5">
-              <span className="material-symbols-outlined text-amber-500 text-[20px] shrink-0 mt-0.5">
+              <span className="material-symbols-outlined text-[var(--on-surface-variant)] text-[18px] shrink-0 mt-0.5">
                 public
               </span>
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-heading font-bold text-xs md:text-sm text-amber-600 dark:text-amber-400">
-                    Public Shared Transaction (Read-Only)
+                  <span className="font-heading font-bold text-xs md:text-sm text-[var(--on-surface)]">
+                    Shared Transaction Summary
                   </span>
-                  <span className="px-2 py-0.5 rounded-md font-mono text-[9px] font-bold uppercase bg-amber-500/15 text-amber-600 dark:text-amber-400">
-                    Global View Active
+                  <span className="px-1.5 py-0.5 rounded font-mono text-[9px] bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/25 text-[var(--on-surface-variant)]">
+                    Public • Read-Only
                   </span>
                 </div>
                 <p className="text-[11px] text-[var(--on-surface-variant)] mt-0.5">
-                  Shared publicly by <strong>{shareMeta?.enabledByName || 'a transaction participant'}</strong>. Personal email addresses are masked for privacy.
+                  Shared by <strong>{shareMeta?.enabledByName?.includes('@') ? maskEmailAddress(shareMeta.enabledByName) : (shareMeta?.enabledByName || 'a transaction participant')}</strong>. Emails and private notes are hidden for non-participants.
                 </p>
               </div>
             </div>
             <Link
               href={`/login?next=${encodeURIComponent(currentRelativeUrl)}`}
-              className="py-2 px-3 rounded-xl bg-[var(--surface-container-lowest)] border border-amber-500/30 font-mono text-[11px] font-bold text-[var(--on-surface)] hover:bg-[var(--surface-container)] shrink-0 self-start sm:self-center min-h-[38px] flex items-center gap-1.5"
+              className="py-2 px-3 rounded-xl bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)]/40 font-mono text-[11px] font-bold text-[var(--on-surface)] hover:bg-[var(--surface-container)] shrink-0 self-start sm:self-center min-h-[38px] flex items-center gap-1.5"
             >
-              <span className="material-symbols-outlined text-[14px] text-amber-500">
+              <span className="material-symbols-outlined text-[14px] text-[var(--primary)]">
                 manage_accounts
               </span>
-              <span>Participant? Sign in to manage</span>
+              <span>Participant? Sign in</span>
             </Link>
           </div>
         )}
@@ -930,63 +939,71 @@ function ShareTransactionContent() {
                     All Split Participants ({splitDetails.participants.length})
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                    {splitDetails.participants.map((part, idx) => (
-                      <div
-                        key={`${part.userId}-${idx}`}
-                        className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)]/20 text-xs"
-                      >
-                        <div className="flex items-center gap-1.5 truncate pr-2">
-                          <span className="material-symbols-outlined text-[13px] text-[var(--primary)]">
-                            {part.isPayer ? 'stars' : 'person'}
-                          </span>
-                          <span className="font-medium text-[var(--on-surface)] truncate">
-                            {part.name} {part.isPayer ? '(Payer)' : ''}
+                    {splitDetails.participants.map((part, idx) => {
+                      const partNameDisplay =
+                        !isParticipant && part.name?.includes('@')
+                          ? maskEmailAddress(part.name)
+                          : part.name;
+                      return (
+                        <div
+                          key={`${part.userId}-${idx}`}
+                          className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)]/20 text-xs"
+                        >
+                          <div className="flex items-center gap-1.5 truncate pr-2">
+                            <span className="material-symbols-outlined text-[13px] text-[var(--primary)]">
+                              {part.isPayer ? 'stars' : 'person'}
+                            </span>
+                            <span className="font-medium text-[var(--on-surface)] truncate">
+                              {partNameDisplay} {part.isPayer ? '(Payer)' : ''}
+                            </span>
+                          </div>
+                          <span className="font-numeric-ticker font-bold text-[var(--primary)] shrink-0">
+                            {formatCurrency(part.shareAmount, splitDetails.currency || debtCurrency)}
                           </span>
                         </div>
-                        <span className="font-numeric-ticker font-bold text-[var(--primary)] shrink-0">
-                          {formatCurrency(part.shareAmount, splitDetails.currency || debtCurrency)}
-                        </span>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
             </div>
           )}
 
-          {/* Agreement Notes */}
-          <div className="space-y-3">
-            <h3 className="font-heading font-bold text-sm text-[var(--on-surface)]">
-              Agreement Notes &amp; Context
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="p-3.5 rounded-xl bg-[var(--surface-container-low)] border border-[var(--outline-variant)]/20">
-                <div className="font-mono text-[10px] uppercase text-[var(--primary)] font-bold mb-1">
-                  Creator&apos;s Note
+          {/* Agreement Notes (Visible strictly to verified participants) */}
+          {isParticipant && (
+            <div className="space-y-3">
+              <h3 className="font-heading font-bold text-sm text-[var(--on-surface)]">
+                Agreement Notes &amp; Context
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="p-3.5 rounded-xl bg-[var(--surface-container-low)] border border-[var(--outline-variant)]/20">
+                  <div className="font-mono text-[10px] uppercase text-[var(--primary)] font-bold mb-1">
+                    Creator&apos;s Note
+                  </div>
+                  <p className="text-xs text-[var(--on-surface)] whitespace-pre-wrap">
+                    {cleanCreatorNote || (
+                      <span className="italic text-[var(--on-surface-variant)]">
+                        No note added by creator.
+                      </span>
+                    )}
+                  </p>
                 </div>
-                <p className="text-xs text-[var(--on-surface)] whitespace-pre-wrap">
-                  {cleanCreatorNote || (
-                    <span className="italic text-[var(--on-surface-variant)]">
-                      No note added by creator.
-                    </span>
-                  )}
-                </p>
-              </div>
 
-              <div className="p-3.5 rounded-xl bg-[var(--surface-container-low)] border border-[var(--outline-variant)]/20">
-                <div className="font-mono text-[10px] uppercase text-[var(--secondary)] font-bold mb-1">
-                  Counterparty&apos;s Note
+                <div className="p-3.5 rounded-xl bg-[var(--surface-container-low)] border border-[var(--outline-variant)]/20">
+                  <div className="font-mono text-[10px] uppercase text-[var(--secondary)] font-bold mb-1">
+                    Counterparty&apos;s Note
+                  </div>
+                  <p className="text-xs text-[var(--on-surface)] whitespace-pre-wrap">
+                    {debt.counterparty_notes || (
+                      <span className="italic text-[var(--on-surface-variant)]">
+                        No note added by counterparty.
+                      </span>
+                    )}
+                  </p>
                 </div>
-                <p className="text-xs text-[var(--on-surface)] whitespace-pre-wrap">
-                  {debt.counterparty_notes || (
-                    <span className="italic text-[var(--on-surface-variant)]">
-                      No note added by counterparty.
-                    </span>
-                  )}
-                </p>
               </div>
             </div>
-          </div>
+          )}
 
           {/* Repayment History */}
           <div className="space-y-3">
@@ -1031,7 +1048,7 @@ function ShareTransactionContent() {
                         <div className="font-mono text-[10px] text-[var(--on-surface-variant)]">
                           Paid on {new Date(p.created_at || p.paid_at).toLocaleString()}
                         </div>
-                        {cleanPaymentNote && (
+                        {isParticipant && cleanPaymentNote && (
                           <p className="text-xs text-[var(--on-surface)] italic">
                             &ldquo;{cleanPaymentNote}&rdquo;
                           </p>
@@ -1059,7 +1076,14 @@ function ShareTransactionContent() {
                 {activityLogs.map((log) => {
                   let dotColor = 'bg-[var(--outline)]';
                   let title = log.action;
-                  const actor = (log.details as any)?.actorName || (log.details as any)?.by_name || 'Participant';
+                  const rawActor =
+                    (log.details as any)?.actorName ||
+                    (log.details as any)?.by_name ||
+                    'Participant';
+                  const actor =
+                    !isParticipant && rawActor.includes('@')
+                      ? maskEmailAddress(rawActor)
+                      : rawActor;
 
                   if (log.action === 'payment_made') {
                     dotColor = 'bg-[var(--secondary)]';
@@ -1095,14 +1119,14 @@ function ShareTransactionContent() {
                     dotColor = 'bg-emerald-500';
                     title = 'Debt Agreement Fully Settled';
                   } else if (log.action === 'global_share_enabled') {
-                    dotColor = 'bg-amber-500';
-                    title = `Global Public Link Enabled by ${actor}`;
+                    dotColor = 'bg-[var(--outline)]';
+                    title = `Public Link Enabled by ${actor}`;
                   } else if (log.action === 'global_share_disabled') {
                     dotColor = 'bg-[var(--outline)]';
-                    title = `Global Public Link Disabled by ${actor}`;
+                    title = `Public Link Disabled by ${actor}`;
                   } else if (log.action === 'global_share_regenerated') {
-                    dotColor = 'bg-amber-500';
-                    title = `Global Public Link Rotated by ${actor}`;
+                    dotColor = 'bg-[var(--outline)]';
+                    title = `Public Link Rotated by ${actor}`;
                   }
 
                   return (
@@ -1118,7 +1142,7 @@ function ShareTransactionContent() {
                           {new Date(log.created_at).toLocaleString()}
                         </div>
                       </div>
-                      {log.details && (log.details as any).note && (
+                      {isParticipant && log.details && (log.details as any).note && (
                         <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">
                           {(log.details as any).note}
                         </p>
