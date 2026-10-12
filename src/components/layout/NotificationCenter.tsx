@@ -14,6 +14,7 @@ import {
 import { formatPaymentMethodDisplay } from '@/lib/utils/upi-link';
 import { respondToDebtAgreement } from '@/lib/utils/debt-acceptance';
 import { invalidateCooldownCache } from '@/lib/utils/debt-cooldown';
+import { parseSplitDetails, getCleanDebtNotes } from '@/lib/utils/split-bills';
 
 interface IncomingDebtRequest {
   id: string;
@@ -583,11 +584,27 @@ export function NotificationCenter() {
                             {formatCurrency(req.principal, req.currency)}
                           </strong>
                         </p>
-                        {req.notes && (
-                          <p className="text-[11px] text-on-surface-variant/80 italic mt-1 line-clamp-2">
-                            &quot;{req.notes}&quot;
-                          </p>
-                        )}
+                        {(() => {
+                          const split = parseSplitDetails(req);
+                          const cleanNote = getCleanDebtNotes(req.notes);
+                          return (
+                            <>
+                              {split && (
+                                <div className="mt-1">
+                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-primary/15 text-primary border border-primary/25 text-[10px] font-mono font-bold">
+                                    <span className="material-symbols-outlined text-[11px]">call_split</span>
+                                    <span>Split: {split.title}</span>
+                                  </span>
+                                </div>
+                              )}
+                              {cleanNote && (
+                                <p className="text-[11px] text-on-surface-variant/80 italic mt-1 line-clamp-2">
+                                  &quot;{cleanNote}&quot;
+                                </p>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                     </Link>
 

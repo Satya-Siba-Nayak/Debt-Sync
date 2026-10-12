@@ -10,6 +10,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { BrandLogo } from '@/components/ui/BrandLogo';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { respondToDebtAgreement } from '@/lib/utils/debt-acceptance';
+import { parseSplitDetails, getCleanDebtNotes } from '@/lib/utils/split-bills';
 import Link from 'next/link';
 
 function AcceptDebtContent() {
@@ -276,12 +277,30 @@ function AcceptDebtContent() {
               );
             })()}
 
-            {debt.notes && (
-              <div className="pt-2 border-t border-outline-variant/10">
-                <span className="text-on-surface-variant block mb-1">Notes / Terms:</span>
-                <p className="text-on-surface italic">{debt.notes}</p>
-              </div>
-            )}
+            {(() => {
+              const split = parseSplitDetails(debt);
+              const cleanNote = getCleanDebtNotes(debt.notes);
+              if (!split && !cleanNote) return null;
+              return (
+                <div className="pt-2 border-t border-outline-variant/10 space-y-1.5">
+                  {split && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-on-surface-variant">Split Expense</span>
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-primary/15 text-primary border border-primary/25 text-[11px] font-bold">
+                        <span className="material-symbols-outlined text-[12px]">call_split</span>
+                        <span>{split.title}</span>
+                      </span>
+                    </div>
+                  )}
+                  {cleanNote && (
+                    <div>
+                      <span className="text-on-surface-variant block mb-1">Notes / Terms:</span>
+                      <p className="text-on-surface italic">{cleanNote}</p>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
 

@@ -8,6 +8,7 @@ import { calculateDebtBalance, round2 } from '@/lib/utils/interest';
 import { formatCurrency } from '@/lib/utils/currency';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { sendNotificationEmail } from '@/lib/utils/email-notifier';
+import { parseSplitDetails, getCleanDebtNotes, getDebtDisplayLabel } from '@/lib/utils/split-bills';
 import {
   generateUPILink,
   generateUPIQRCodeDataURL,
@@ -557,25 +558,47 @@ export function PersonRepaymentModal({
               {eligibleDebts.map((item) => {
                 const isSelected = item.debt.id === selectedDebtId;
                 const d = item.debt;
+                const split = parseSplitDetails(d);
+                const cleanNote = getCleanDebtNotes(d.notes);
+                const displayTitle = split?.title
+                  ? split.title
+                  : cleanNote || `Loan #${d.id.slice(0, 6)}`;
+
                 return (
                   <button
                     key={d.id}
                     type="button"
                     onClick={() => handleSelectDebt(d.id)}
-                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-1 ${
                       isSelected
                         ? 'border-primary bg-primary/5 shadow-xs'
                         : 'border-outline-variant/30 bg-surface-container-low hover:border-outline-variant/60'
                     }`}
                   >
-                    <div className="flex justify-between items-start mb-1">
-                      <span className="font-mono text-xs font-bold text-on-surface truncate max-w-[140px]">
-                        {d.notes || `Loan #${d.id.slice(0, 6)}`}
-                      </span>
-                      <span className={`font-mono text-xs font-bold ${isSelected ? 'text-primary' : 'text-on-surface'}`}>
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="min-w-0 flex-1 flex items-center gap-1.5">
+                        {split && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-primary/15 text-primary border border-primary/25 text-[10px] font-mono font-bold shrink-0">
+                            <span className="material-symbols-outlined text-[11px]">call_split</span>
+                            <span>Split</span>
+                          </span>
+                        )}
+                        <span
+                          className="font-mono text-xs font-bold text-on-surface truncate"
+                          title={getDebtDisplayLabel(d)}
+                        >
+                          {displayTitle}
+                        </span>
+                      </div>
+                      <span className={`font-mono text-xs font-bold shrink-0 ${isSelected ? 'text-primary' : 'text-on-surface'}`}>
                         {formatCurrency(item.allowableBalance, currency)}
                       </span>
                     </div>
+                    {split?.title && cleanNote && (
+                      <div className="text-[11px] font-mono text-on-surface-variant truncate italic">
+                        &ldquo;{cleanNote}&rdquo;
+                      </div>
+                    )}
                     <div className="flex items-center gap-2 text-[11px] font-mono text-on-surface-variant">
                       <span>{d.interest_rate ? `${d.interest_rate}% APR` : '0%'}</span>
                       {d.due_date && (
@@ -591,7 +614,7 @@ export function PersonRepaymentModal({
 
         {/* 2B. Bulk Strategy Selector (when in bulk mode) */}
         {repayMode === 'bulk' && (
-          <div className="space-y-2">
+          <div className="space-y-2.5">
             <div className="flex justify-between items-center">
               <label className="font-mono text-xs uppercase tracking-wider text-on-surface-variant font-semibold">
                 Payoff Allocation Strategy
@@ -621,6 +644,47 @@ export function PersonRepaymentModal({
                 </button>
               ))}
             </div>
+
+            {bulkAllocations.length > 0 && (
+              <div className="rounded-xl border border-outline-variant/25 bg-surface-container-low p-2.5 space-y-1.5 max-h-36 overflow-y-auto overscroll-contain">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-on-surface-variant font-semibold px-1">
+                  Allocation Preview ({bulkAllocations.filter((a) => a.allocated > 0).length} of {bulkAllocations.length} loans)
+                </div>
+                {bulkAllocations.map((alloc) => {
+                  const split = parseSplitDetails(alloc.debt);
+                  const cleanNote = getCleanDebtNotes(alloc.debt.notes);
+                  const title = split?.title
+                    ? split.title
+                    : cleanNote || `Loan #${alloc.debt.id.slice(0, 6)}`;
+                  return (
+                    <div
+                      key={alloc.debt.id}
+                      className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-xs font-mono ${
+                        alloc.allocated > 0 ? 'bg-surface-container text-on-surface' : 'opacity-50 text-on-surface-variant'
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1 flex items-center gap-1.5">
+                        {split && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-primary/15 text-primary text-[10px] font-bold shrink-0">
+                            <span className="material-symbols-outlined text-[11px]">call_split</span>
+                            <span>Split</span>
+                          </span>
+                        )}
+                        <span className="truncate font-semibold">{title}</span>
+                      </div>
+                      <div className="shrink-0 flex items-center gap-2">
+                        <span className="text-[11px] text-on-surface-variant">
+                          of {formatCurrency(alloc.allowableBalance, currency)}
+                        </span>
+                        <span className={`font-bold ${alloc.allocated > 0 ? 'text-primary' : 'text-on-surface-variant'}`}>
+                          {formatCurrency(alloc.allocated, currency)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 

@@ -14,6 +14,7 @@ import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { getLedgerCache, setLedgerCache } from '@/lib/stores/ledger-store';
 import { SkeletonDirectoryGrid } from '@/components/ui/Skeleton';
 import { calculateTrustScore } from '@/lib/utils/trust-score';
+import { getCleanDebtNotes, parseSplitDetails } from '@/lib/utils/split-bills';
 
 type SortOption = 'recent' | 'alpha_asc' | 'alpha_desc' | 'balance_desc' | 'trust_score';
 
@@ -146,8 +147,13 @@ export default function PeopleDirectoryPage() {
         }
 
         // Collect two-sided notes for instant directory searchability
-        if (d.notes && !person.notes?.includes(d.notes)) {
-          person.notes = person.notes ? [...person.notes, d.notes] : [d.notes];
+        const splitInfo = parseSplitDetails(d);
+        const cleanNote = getCleanDebtNotes(d.notes);
+        const searchableNote = splitInfo?.title
+          ? (cleanNote ? `Split: ${splitInfo.title} - ${cleanNote}` : `Split: ${splitInfo.title}`)
+          : cleanNote;
+        if (searchableNote && !person.notes?.includes(searchableNote)) {
+          person.notes = person.notes ? [...person.notes, searchableNote] : [searchableNote];
         }
         if (d.counterparty_notes && !person.notes?.includes(d.counterparty_notes)) {
           person.notes = person.notes ? [...person.notes, d.counterparty_notes] : [d.counterparty_notes];

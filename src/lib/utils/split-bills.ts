@@ -115,6 +115,8 @@ export function getCleanDebtNotes(notes: string | null | undefined): string {
     const lastBracket = cleaned.lastIndexOf(']');
     if (lastBracket !== -1) {
       cleaned = cleaned.slice(lastBracket + 1).trim();
+    } else {
+      cleaned = cleaned.slice(0, cleaned.indexOf('[SPLIT:')).trim();
     }
   }
 
@@ -127,6 +129,23 @@ export function getCleanDebtNotes(notes: string | null | undefined): string {
   cleaned = cleaned.replace(/^Split:\s*[^-\n]+(\s*-\s*)?/i, '').trim();
 
   return cleaned.trim();
+}
+
+/**
+ * Returns a clean, human-readable title/label for any debt (handling split bills, custom notes, and fallback IDs).
+ */
+export function getDebtDisplayLabel(debt: Debt | any): string {
+  if (!debt) return 'Loan';
+  const split = parseSplitDetails(debt);
+  const cleanNote = getCleanDebtNotes(debt.notes);
+
+  if (split?.title) {
+    return cleanNote ? `Split: ${split.title} (${cleanNote})` : `Split: ${split.title}`;
+  }
+  if (cleanNote) {
+    return cleanNote;
+  }
+  return debt.id ? `Loan #${String(debt.id).slice(0, 6)}` : 'Loan';
 }
 
 /**

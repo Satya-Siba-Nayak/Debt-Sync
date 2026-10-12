@@ -1,5 +1,6 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { calculateDebtBalance } from './interest';
+import { getDebtDisplayLabel, getCleanDebtNotes, parseSplitDetails } from './split-bills';
 
 function escapeCSV(val: any): string {
   if (val === null || val === undefined) return '';
@@ -130,7 +131,14 @@ export async function exportUserDataToCSV(
           calc.currentBalance,
           d.status,
           d.due_date ? new Date(d.due_date).toISOString().split('T')[0] : '',
-          d.notes || '',
+          (() => {
+            const split = parseSplitDetails(d);
+            const cleanNote = getCleanDebtNotes(d.notes);
+            if (split?.title) {
+              return cleanNote ? `[Split: ${split.title}] ${cleanNote}` : `[Split: ${split.title}]`;
+            }
+            return cleanNote || '';
+          })(),
         ]
           .map(escapeCSV)
           .join(',')

@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Modal } from '../ui/Modal';
 import { createClient } from '@/lib/supabase/client';
 import { Debt } from '@/lib/types/database';
+import { getCleanDebtNotes, parseSplitDetails, buildSplitNotes } from '@/lib/utils/split-bills';
 
 interface CounterpartyNoteModalProps {
   isOpen: boolean;
@@ -23,7 +24,7 @@ export function CounterpartyNoteModal({
   const supabase = React.useMemo(() => createClient(), []);
   const isCreator = debt.created_by === currentUserId;
 
-  const [creatorNote, setCreatorNote] = useState(debt.notes || '');
+  const [creatorNote, setCreatorNote] = useState(() => getCleanDebtNotes(debt.notes));
   const [counterpartyNote, setCounterpartyNote] = useState(debt.counterparty_notes || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -40,14 +41,14 @@ export function CounterpartyNoteModal({
     const isDifferentDebt = prevDebtIdRef.current !== debt.id;
 
     if (isJustOpening || isDifferentDebt) {
-      setCreatorNote(debt.notes || '');
+      setCreatorNote(getCleanDebtNotes(debt.notes));
       setCounterpartyNote(debt.counterparty_notes || '');
       setError('');
       prevDebtIdRef.current = debt.id;
     }
 
     prevIsOpenRef.current = true;
-  }, [debt.id, isOpen]);
+  }, [debt.id, debt.notes, debt.counterparty_notes, isOpen]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,7 +58,12 @@ export function CounterpartyNoteModal({
     try {
       const updates: Partial<Debt> = {};
       if (isCreator) {
-        updates.notes = creatorNote.trim() || null;
+        const splitDetails = parseSplitDetails(debt);
+        if (splitDetails) {
+          updates.notes = buildSplitNotes(splitDetails, creatorNote.trim());
+        } else {
+          updates.notes = creatorNote.trim() || null;
+        }
       } else {
         updates.counterparty_notes = counterpartyNote.trim() || null;
       }
@@ -132,7 +138,7 @@ export function CounterpartyNoteModal({
             />
           ) : (
             <div className="p-3 rounded-xl bg-[var(--surface-container-low)] border border-[var(--outline-variant)]/20 text-xs text-[var(--on-surface)] italic">
-              {debt.notes ? `"${debt.notes}"` : <span className="text-[var(--outline)] not-italic">No note added by creator.</span>}
+              {getCleanDebtNotes(debt.notes) ? `"${getCleanDebtNotes(debt.notes)}"` : <span className="text-[var(--outline)] not-italic">No note added by creator.</span>}
             </div>
           )}
         </div>

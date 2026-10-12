@@ -7,6 +7,7 @@ import { Debt, Payment } from '@/lib/types/database';
 import { calculateDebtBalance, round2 } from '@/lib/utils/interest';
 import { formatCurrency } from '@/lib/utils/currency';
 import { getDueDateInfo } from '@/lib/utils/due-date';
+import { parseSplitDetails, getCleanDebtNotes } from '@/lib/utils/split-bills';
 
 export type BulkStrategy = 'avalanche' | 'due_date' | 'fifo';
 
@@ -391,6 +392,8 @@ export function BulkPaymentModal({
               {allocations.map((item) => {
                 const dueInfo = getDueDateInfo(item.debt.due_date, item.debt.status);
                 const isCleared = item.newBalance <= 0.01;
+                const split = parseSplitDetails(item.debt);
+                const cleanNote = getCleanDebtNotes(item.debt.notes);
 
                 return (
                   <div
@@ -405,6 +408,17 @@ export function BulkPaymentModal({
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
+                        {split && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-primary/15 text-primary border border-primary/25 text-[10px] font-bold">
+                            <span className="material-symbols-outlined text-[11px]">call_split</span>
+                            <span>{split.title || 'Split'}</span>
+                          </span>
+                        )}
+                        {!split && cleanNote && (
+                          <span className="font-bold text-on-surface truncate max-w-[160px]">
+                            {cleanNote}
+                          </span>
+                        )}
                         <span className="font-bold text-on-surface">
                           Orig: {formatCurrency(item.debt.principal, item.debt.currency || currency)}
                         </span>

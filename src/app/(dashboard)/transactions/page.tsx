@@ -363,12 +363,12 @@ export default function TransactionsPage() {
                     </div>
 
                     {/* Notes preview */}
-                    {(d.notes || d.counterparty_notes) && (
+                    {(cleanNotes || d.counterparty_notes) && (
                       <div className="mt-2.5 pt-2 border-t border-[var(--outline-variant)]/10 text-xs space-y-1">
-                        {d.notes && (
+                        {cleanNotes && (
                           <div className="flex items-center gap-1.5 text-[var(--on-surface-variant)]">
                             <span className="material-symbols-outlined text-[14px] text-[var(--primary)]">edit_note</span>
-                            <span className="truncate"><strong>Creator:</strong> {d.notes}</span>
+                            <span className="truncate"><strong>Creator:</strong> {cleanNotes}</span>
                           </div>
                         )}
                         {d.counterparty_notes && (
@@ -392,9 +392,9 @@ export default function TransactionsPage() {
                           className="py-1 px-2.5 rounded-lg border border-[var(--outline-variant)]/30 text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] font-mono text-xs flex items-center gap-1"
                         >
                           <span className="material-symbols-outlined text-[14px]">
-                            {d.notes || d.counterparty_notes ? 'note' : 'add_comment'}
+                            {cleanNotes || d.counterparty_notes ? 'note' : 'add_comment'}
                           </span>
-                          <span>{d.notes || d.counterparty_notes ? 'Notes' : '+ Note'}</span>
+                          <span>{cleanNotes || d.counterparty_notes ? 'Notes' : '+ Note'}</span>
                         </button>
 
                         <Link
