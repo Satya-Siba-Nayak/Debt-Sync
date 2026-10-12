@@ -6,7 +6,7 @@ import { Modal } from '../ui/Modal';
 import { createClient } from '@/lib/supabase/client';
 import { formatCurrency, SUPPORTED_CURRENCIES } from '@/lib/utils/currency';
 import { round2 } from '@/lib/utils/interest';
-import { parseSplitDetails, getCleanDebtNotes, buildSplitNotes } from '@/lib/utils/split-bills';
+import { parseSplitDetails, getCleanDebtNotes, buildSplitNotes, buildDebtNotesWithMetadata } from '@/lib/utils/split-bills';
 import { Debt, SplitBillDetails } from '@/lib/types/database';
 import { Avatar } from '../ui/Avatar';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
@@ -134,7 +134,7 @@ export function EditPendingDebtModal({
         interest_rate: interestType !== 'none' ? round2(interestRate) : null,
         compound_freq: interestType === 'compound' ? compoundFreq : null,
         due_date: dueDate ? new Date(dueDate + 'T23:59:59Z').toISOString() : null,
-        notes: cleanNote || null,
+        notes: buildDebtNotesWithMetadata(debt, { userNote: cleanNote }) || null,
       };
 
       // Handle split bill updates
@@ -158,7 +158,7 @@ export function EditPendingDebtModal({
         };
 
         // Always encode structured split notes for universal database compatibility
-        updatePayload.notes = buildSplitNotes(updatedSplitDetails, cleanNote);
+        updatePayload.notes = buildSplitNotes(updatedSplitDetails, cleanNote, debt.notes);
         updatePayload.split_details = updatedSplitDetails;
 
         // If batch-updating all pending participants in this split group
@@ -181,7 +181,7 @@ export function EditPendingDebtModal({
 
               for (const other of matchingOtherDebts) {
                 const otherCleanNote = getCleanDebtNotes(other.notes);
-                const otherEncodedNotes = buildSplitNotes(updatedSplitDetails, otherCleanNote);
+                const otherEncodedNotes = buildSplitNotes(updatedSplitDetails, otherCleanNote, other.notes);
 
                 const otherPayload: any = {
                   interest_type: interestType,

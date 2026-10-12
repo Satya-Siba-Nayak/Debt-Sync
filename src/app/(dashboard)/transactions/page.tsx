@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment } from '@/lib/types/database';
 import { calculateDebtBalance, sortDebtsActiveFirst } from '@/lib/utils/interest';
@@ -15,12 +16,14 @@ import { getDueDateInfo } from '@/lib/utils/due-date';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { getLedgerCache, setLedgerCache } from '@/lib/stores/ledger-store';
 import { SkeletonTableRows } from '@/components/ui/Skeleton';
-import { parseSplitDetails, getCleanDebtNotes } from '@/lib/utils/split-bills';
+import { parseSplitDetails, parseShareMetadata, getCleanDebtNotes } from '@/lib/utils/split-bills';
 import { respondToDebtAgreement } from '@/lib/utils/debt-acceptance';
 import Link from 'next/link';
 
-export default function TransactionsPage() {
+function TransactionsPageContent() {
   const supabase = createClient();
+  const searchParams = useSearchParams();
+  const deepLinkedDebtId = searchParams.get('debt');
 
   const initialCache = getLedgerCache();
   const [loading, setLoading] = useState(!initialCache);
@@ -33,6 +36,15 @@ export default function TransactionsPage() {
   const [selectedDebtForNote, setSelectedDebtForNote] = useState<Debt | null>(null);
   const [selectedDebtForDetail, setSelectedDebtForDetail] = useState<Debt | null>(null);
   const [selectedDebtForEdit, setSelectedDebtForEdit] = useState<Debt | null>(null);
+
+  useEffect(() => {
+    if (deepLinkedDebtId && debts.length > 0 && !selectedDebtForDetail) {
+      const target = debts.find((d) => d.id === deepLinkedDebtId);
+      if (target) {
+        setSelectedDebtForDetail(target);
+      }
+    }
+  }, [deepLinkedDebtId, debts, selectedDebtForDetail]);
 
   const fetchTransactions = useCallback(async () => {
     try {
@@ -253,6 +265,7 @@ export default function TransactionsPage() {
                 const calc = calculateDebtBalance(d, debtPayments);
                 const dueDateInfo = getDueDateInfo(d.due_date, d.status);
                 const split = parseSplitDetails(d);
+                const shareMeta = parseShareMetadata(d.notes);
                 const cleanNotes = getCleanDebtNotes(d.notes);
 
                 return (
@@ -284,6 +297,12 @@ export default function TransactionsPage() {
                               <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/20 flex items-center gap-0.5 shrink-0">
                                 <span className="material-symbols-outlined text-[10px]">call_split</span>
                                 <span>{split.title}</span>
+                              </span>
+                            )}
+                            {shareMeta?.globalEnabled && (
+                              <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25 flex items-center gap-0.5 shrink-0">
+                                <span className="material-symbols-outlined text-[10px]">public</span>
+                                <span>Global Link</span>
                               </span>
                             )}
                           </div>
@@ -507,6 +526,7 @@ export default function TransactionsPage() {
                     const calc = calculateDebtBalance(d, debtPayments);
                     const dueDateInfo = getDueDateInfo(d.due_date, d.status);
                     const split = parseSplitDetails(d);
+                    const shareMeta = parseShareMetadata(d.notes);
                     const cleanNotes = getCleanDebtNotes(d.notes);
 
                     return (
@@ -542,6 +562,12 @@ export default function TransactionsPage() {
                                   <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/20 flex items-center gap-1">
                                     <span className="material-symbols-outlined text-[11px]">call_split</span>
                                     <span>{split.title}</span>
+                                  </span>
+                                )}
+                                {shareMeta?.globalEnabled && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25 flex items-center gap-1">
+                                    <span className="material-symbols-outlined text-[11px]">public</span>
+                                    <span>Global Link</span>
                                   </span>
                                 )}
                               </div>
@@ -646,10 +672,10 @@ export default function TransactionsPage() {
                               type="button"
                               onClick={() => setSelectedDebtForDetail(d)}
                               className="px-2.5 py-1.5 rounded-lg bg-[var(--primary)]/10 hover:bg-[var(--primary)]/20 text-[var(--primary)] font-mono text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
-                              title="View full debt logs, receipts and audit trail"
+                              title="View full debt logs, receipts, sharing and audit trail"
                             >
                               <span className="material-symbols-outlined text-[14px]">receipt_long</span>
-                              <span>Details</span>
+                              <span>Details &amp; Share</span>
                             </button>
 
                             {/* Two-sided Note Button */}
@@ -764,5 +790,13 @@ export default function TransactionsPage() {
         />
       )}
     </div>
+  );
+}
+
+export default function TransactionsPage() {
+  return (
+    <Suspense fallback={<SkeletonTableRows rows={8} />}>
+      <TransactionsPageContent />
+    </Suspense>
   );
 }

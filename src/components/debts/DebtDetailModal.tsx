@@ -13,9 +13,17 @@ import { getDueDateInfo } from '@/lib/utils/due-date';
 import { PaymentModal } from './PaymentModal';
 import { CounterpartyNoteModal } from './CounterpartyNoteModal';
 import { formatPaymentMethodDisplay } from '@/lib/utils/upi-link';
-import { parseSplitDetails, getCleanDebtNotes } from '@/lib/utils/split-bills';
+import {
+  parseSplitDetails,
+  getCleanDebtNotes,
+  parseShareMetadata,
+  buildDebtNotesWithMetadata,
+  generateShareToken,
+  TransactionShareMetadata,
+} from '@/lib/utils/split-bills';
 import { EditPendingDebtModal } from './EditPendingDebtModal';
 import { respondToDebtAgreement } from '@/lib/utils/debt-acceptance';
+import { sendNotificationEmail } from '@/lib/utils/email-notifier';
 
 export interface DebtDetailModalProps {
   isOpen: boolean;
@@ -43,6 +51,12 @@ export function DebtDetailModal({
   const [verifyingPaymentId, setVerifyingPaymentId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
 
+  // Share & Visibility states
+  const [isShareDrawerOpen, setIsShareDrawerOpen] = useState(false);
+  const [shareUpdating, setShareUpdating] = useState(false);
+  const [copiedLinkType, setCopiedLinkType] = useState<'participant' | 'global' | null>(null);
+  const [isCurrentUserIsolated, setIsCurrentUserIsolated] = useState(false);
+
   // Sub-modals
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isNoteModalOpen, setIsNoteModalOpen] = useState(false);
@@ -53,6 +67,7 @@ export function DebtDetailModal({
   useEffect(() => {
     if (initialDebt?.id && initialDebt.id !== prevDebtIdRef.current) {
       setInternalDebt(initialDebt);
+      setIsShareDrawerOpen(false);
       prevDebtIdRef.current = initialDebt.id;
     }
   }, [initialDebt]);
@@ -63,7 +78,7 @@ export function DebtDetailModal({
     if (!initialDebt?.id) return;
     setLoading(true);
     try {
-      const [debtRes, paymentsRes, logsRes] = await Promise.all([
+      const [debtRes, paymentsRes, logsRes, myProfRes] = await Promise.all([
         supabase
           .from('debts')
           .select(`
@@ -86,19 +101,67 @@ export function DebtDetailModal({
           .select('*')
           .eq('debt_id', initialDebt.id)
           .order('created_at', { ascending: false }),
+        currentUserId
+          ? supabase.from('profiles').select('is_isolated').eq('id', currentUserId).single()
+          : Promise.resolve({ data: null }),
       ]);
 
+      const fetchedDebt = (debtRes.data as any) || initialDebt;
+      const fetchedPayments: Payment[] = (paymentsRes.data as any) || [];
+      const fetchedLogs: ActivityLogEntry[] = (logsRes.data as any) || [];
+
       if (debtRes.data) {
-        setInternalDebt(debtRes.data as any);
+        setInternalDebt(fetchedDebt);
       }
-      setPayments((paymentsRes.data as any) || []);
-      setActivityLogs((logsRes.data as any) || []);
+      setPayments(fetchedPayments);
+      setActivityLogs(fetchedLogs);
+      if (myProfRes?.data) {
+        setIsCurrentUserIsolated(Boolean((myProfRes.data as any).is_isolated));
+      }
+
+      // If global sharing is currently enabled on this debt, keep its snapshot fresh for public viewers
+      const currentShare = parseShareMetadata(fetchedDebt);
+      if (currentShare?.globalEnabled && currentShare.globalToken && debtRes.data) {
+        const updatedShare: TransactionShareMetadata = {
+          ...currentShare,
+          snapshot: {
+            counterpartyNotes: fetchedDebt.counterparty_notes || null,
+            dueDate: fetchedDebt.due_date || null,
+            settledAt: fetchedDebt.settled_at || null,
+            payments: fetchedPayments.slice(0, 10).map((p: any) => ({
+              id: p.id,
+              amount: Number(p.amount) || 0,
+              currency: p.currency || fetchedDebt.currency || 'inr',
+              created_at: p.created_at,
+              is_verified: p.is_verified,
+              verified_at: p.verified_at || null,
+              payment_method: p.payment_method || null,
+              transaction_ref: p.transaction_ref || null,
+              note: p.note || null,
+            })),
+            auditLog: fetchedLogs.slice(0, 12).map((l: any) => ({
+              id: l.id,
+              action: l.action,
+              created_at: l.created_at,
+              details: l.details || {},
+            })),
+            updatedAt: new Date().toISOString(),
+          },
+        };
+        const updatedNotesStr = buildDebtNotesWithMetadata(fetchedDebt, {
+          shareMetadata: updatedShare,
+        });
+        if (updatedNotesStr !== fetchedDebt.notes) {
+          await supabase.from('debts').update({ notes: updatedNotesStr }).eq('id', fetchedDebt.id);
+          setInternalDebt({ ...fetchedDebt, notes: updatedNotesStr });
+        }
+      }
     } catch (err) {
       console.error('Error loading debt details modal data:', err);
     } finally {
       setLoading(false);
     }
-  }, [initialDebt?.id, supabase]);
+  }, [initialDebt, currentUserId, supabase]);
 
   useEffect(() => {
     if (isOpen && initialDebt?.id) {
@@ -109,11 +172,200 @@ export function DebtDetailModal({
   if (!debt) return null;
 
   const isLender = debt.lender_id === currentUserId;
+  const myPerson = isLender ? debt.lender : debt.borrower;
+  const myName = myPerson?.full_name || myPerson?.email || 'Participant';
   const otherPerson = isLender ? debt.borrower : debt.lender;
   const otherName = otherPerson?.full_name || otherPerson?.email || 'Counterparty';
   const calc = calculateDebtBalance(debt, payments);
   const dueDateInfo = getDueDateInfo(debt.due_date, debt.status);
   const debtCurrency = debt.currency || currency;
+  const shareMeta = parseShareMetadata(debt);
+  const isGlobalShared = Boolean(shareMeta?.globalEnabled && shareMeta?.globalToken);
+  const splitInfo = parseSplitDetails(debt);
+
+  const getOrigin = () =>
+    typeof window !== 'undefined' ? window.location.origin : 'https://debt-sync.satya-nayak.dev';
+
+  const participantShareUrl = `${getOrigin()}/share?id=${debt.id}&mode=participants`;
+  const globalShareUrl =
+    isGlobalShared && shareMeta?.globalToken
+      ? `${getOrigin()}/share?id=${debt.id}&token=${shareMeta.globalToken}`
+      : '';
+
+  const handleCopyShareLink = async (type: 'participant' | 'global', customUrl?: string) => {
+    const targetUrl = customUrl || (type === 'participant' ? participantShareUrl : globalShareUrl);
+    if (!targetUrl) return;
+    try {
+      await navigator.clipboard.writeText(targetUrl);
+      setCopiedLinkType(type);
+      setTimeout(() => setCopiedLinkType(null), 2500);
+    } catch (e) {
+      console.error('Copy failed:', e);
+    }
+  };
+
+  const handleNativeShare = async (type: 'participant' | 'global') => {
+    const targetUrl = type === 'participant' ? participantShareUrl : globalShareUrl;
+    if (!targetUrl) return;
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({
+          title: splitInfo
+            ? `DebtSync Split Bill: ${splitInfo.title}`
+            : `DebtSync Agreement (${formatCurrency(debt.principal, debtCurrency)})`,
+          text:
+            type === 'participant'
+              ? `View our transaction record on DebtSync (Restricted to participating members):`
+              : `View this shared transaction record on DebtSync:`,
+          url: targetUrl,
+        });
+        return;
+      } catch (_) {}
+    }
+    handleCopyShareLink(type, targetUrl);
+  };
+
+  const handleToggleGlobalShare = async (action: 'enable' | 'disable' | 'regenerate') => {
+    if (!debt || shareUpdating) return;
+    if (isCurrentUserIsolated && action !== 'disable') {
+      alert('Your account is in security quarantine. Public link creation is restricted.');
+      return;
+    }
+    if (debt.status === 'declined' && action !== 'disable') {
+      alert('Cannot enable global public sharing on a declined agreement.');
+      return;
+    }
+
+    setShareUpdating(true);
+    try {
+      const nowIso = new Date().toISOString();
+      const newToken = action === 'disable' ? null : generateShareToken('gsh');
+      const logAction =
+        action === 'enable'
+          ? 'global_share_enabled'
+          : action === 'regenerate'
+          ? 'global_share_regenerated'
+          : 'global_share_disabled';
+
+      const newLogEntry: ActivityLogEntry = {
+        id: `temp-${Date.now()}`,
+        user_id: currentUserId,
+        debt_id: debt.id,
+        action: logAction,
+        details: {
+          by_user_id: currentUserId,
+          by_name: myName,
+          timestamp: nowIso,
+        },
+        created_at: nowIso,
+      };
+
+      const updatedLogs = [newLogEntry, ...activityLogs];
+
+      const newShareMeta: TransactionShareMetadata =
+        action === 'disable'
+          ? {
+              globalEnabled: false,
+              globalToken: null,
+              enabledBy: shareMeta?.enabledBy || null,
+              enabledByName: shareMeta?.enabledByName || null,
+              enabledAt: shareMeta?.enabledAt || null,
+              disabledBy: currentUserId,
+              disabledByName: myName,
+              disabledAt: nowIso,
+              dismissedAlertBy: [],
+            }
+          : {
+              globalEnabled: true,
+              globalToken: newToken,
+              enabledBy: currentUserId,
+              enabledByName: myName,
+              enabledAt: nowIso,
+              disabledBy: null,
+              disabledByName: null,
+              disabledAt: null,
+              dismissedAlertBy: [currentUserId],
+              snapshot: {
+                counterpartyNotes: debt.counterparty_notes || null,
+                dueDate: debt.due_date || null,
+                settledAt: debt.settled_at || null,
+                payments: payments.slice(0, 10).map((p: any) => ({
+                  id: p.id,
+                  amount: Number(p.amount) || 0,
+                  currency: p.currency || debtCurrency,
+                  created_at: p.created_at,
+                  is_verified: p.is_verified,
+                  verified_at: p.verified_at || null,
+                  payment_method: p.payment_method || null,
+                  transaction_ref: p.transaction_ref || null,
+                  note: p.note || null,
+                })),
+                auditLog: updatedLogs.slice(0, 12).map((l: any) => ({
+                  id: l.id,
+                  action: l.action,
+                  created_at: l.created_at,
+                  details: l.details || {},
+                })),
+                updatedAt: nowIso,
+              },
+            };
+
+      const encodedNotes = buildDebtNotesWithMetadata(debt, {
+        shareMetadata: newShareMeta,
+      });
+
+      const { error: updErr } = await supabase
+        .from('debts')
+        .update({ notes: encodedNotes })
+        .eq('id', debt.id);
+
+      if (updErr) throw updErr;
+
+      // Insert audit log entry so counterparty gets real-time notification and audit trail record
+      await supabase.from('activity_log').insert({
+        user_id: currentUserId,
+        debt_id: debt.id,
+        action: logAction,
+        details: {
+          by_user_id: currentUserId,
+          by_name: myName,
+          counterparty_id: otherPerson?.id || null,
+          principal: debt.principal,
+          currency: debtCurrency,
+          timestamp: nowIso,
+        },
+      });
+
+      // Notify counterparty via email when global sharing is enabled
+      if (action === 'enable' && otherPerson?.email) {
+        sendNotificationEmail({
+          type: 'debt_recorded',
+          recipientEmail: otherPerson.email,
+          recipientName: otherName,
+          senderName: myName,
+          amount: debt.principal,
+          currency: debtCurrency,
+          notes: `${myName} enabled a Global Public Share Link for your transaction. You can view or turn off global sharing anytime from your DebtSync notifications or transaction details.`,
+          debtId: debt.id,
+        });
+      }
+
+      setInternalDebt({ ...debt, notes: encodedNotes });
+      if (action !== 'disable' && newToken) {
+        const freshUrl = `${getOrigin()}/share?id=${debt.id}&token=${newToken}`;
+        handleCopyShareLink('global', freshUrl);
+      }
+
+      window.dispatchEvent(new CustomEvent('debtsync:refresh'));
+      await fetchDebtDetails();
+      onDebtUpdated?.();
+    } catch (err: any) {
+      console.error('Failed to update share settings:', err);
+      alert(err.message || 'Could not update sharing permissions.');
+    } finally {
+      setShareUpdating(false);
+    }
+  };
 
   const handleVerifyRepayment = async (paymentId: string, decision: 'verified' | 'disputed') => {
     setVerifyingPaymentId(paymentId);
@@ -222,6 +474,9 @@ export function DebtDetailModal({
 
   const sortedPayments = sortPaymentsPendingFirst(payments);
 
+  const totalObligation = calc.principal + calc.totalAccruedInterest;
+  const paidPct = totalObligation > 0 ? Math.min(100, Math.round((calc.totalPaid / totalObligation) * 100)) : 0;
+
   return (
     <>
       <Modal
@@ -231,7 +486,52 @@ export function DebtDetailModal({
         subtitle={`ID: ${debt.id.substring(0, 8)} • Recorded on ${new Date(debt.created_at).toLocaleDateString()}`}
         maxWidth="max-w-2xl"
       >
-        <div className="space-y-6">
+        <div className="space-y-5">
+          {/* Live Global Sharing Status Banner (always visible when active so either party can turn it off) */}
+          {isGlobalShared && (
+            <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <span className="material-symbols-outlined text-emerald-500 text-[20px] shrink-0 mt-0.5 animate-pulse">
+                  public
+                </span>
+                <div className="min-w-0">
+                  <div className="font-mono text-xs font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5 flex-wrap">
+                    <span>Global Public Link Active</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 border border-emerald-500/30">
+                      Read-Only
+                    </span>
+                  </div>
+                  <p className="text-[11px] font-mono text-[var(--on-surface-variant)] mt-0.5 leading-relaxed">
+                    Enabled by <strong>{shareMeta?.enabledBy === currentUserId ? 'You' : (shareMeta?.enabledByName || otherName)}</strong>
+                    {shareMeta?.enabledAt ? ` on ${new Date(shareMeta.enabledAt).toLocaleDateString()}` : ''}. Anyone with the global link can view this transaction. Either participant can turn this off anytime.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                <button
+                  type="button"
+                  onClick={() => handleCopyShareLink('global')}
+                  className="py-1.5 px-2.5 rounded-lg bg-emerald-600 text-white font-mono text-[11px] font-bold hover:bg-emerald-700 transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
+                >
+                  <span className="material-symbols-outlined text-[13px]">
+                    {copiedLinkType === 'global' ? 'check' : 'content_copy'}
+                  </span>
+                  <span>{copiedLinkType === 'global' ? 'Copied!' : 'Copy Link'}</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={shareUpdating}
+                  onClick={() => handleToggleGlobalShare('disable')}
+                  className="py-1.5 px-2.5 rounded-lg border border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400 font-mono text-[11px] font-bold hover:bg-red-500/20 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                  title="Immediately revoke public access to the global link"
+                >
+                  <span className="material-symbols-outlined text-[13px]">link_off</span>
+                  <span>Turn Off</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Header Card: Counterparty & Position */}
           <div className="p-4 rounded-2xl bg-[var(--surface-container-low)] border border-[var(--outline-variant)]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <Link
@@ -277,26 +577,206 @@ export function DebtDetailModal({
               </div>
             </Link>
 
-            <div className="sm:text-right">
-              <span
-                className={`font-mono text-xs font-bold uppercase tracking-wider inline-flex items-center gap-1 ${
-                  isLender ? 'text-[var(--secondary)]' : 'text-[var(--error)]'
-                }`}
-              >
-                <span className="material-symbols-outlined text-[16px]">
-                  {isLender ? 'arrow_upward' : 'arrow_downward'}
+            <div className="flex items-center justify-between sm:justify-end gap-3">
+              <div className="sm:text-right">
+                <span
+                  className={`font-mono text-xs font-bold uppercase tracking-wider inline-flex items-center gap-1 ${
+                    isLender ? 'text-[var(--secondary)]' : 'text-[var(--error)]'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[16px]">
+                    {isLender ? 'arrow_upward' : 'arrow_downward'}
+                  </span>
+                  {isLender ? 'You Lent (Receivable)' : 'You Borrowed (Payable)'}
                 </span>
-                {isLender ? 'You Lent (Receivable)' : 'You Borrowed (Payable)'}
-              </span>
-              <div className="font-mono text-xl font-bold text-[var(--on-surface)] mt-0.5">
-                {debt.status === 'declined' ? (
-                  <span className="text-red-500 line-through text-sm">Void</span>
-                ) : (
-                  formatCurrency(calc.currentBalance, debtCurrency, { showDecimals: true })
-                )}
+                <div className="font-mono text-xl font-bold text-[var(--on-surface)] mt-0.5">
+                  {debt.status === 'declined' ? (
+                    <span className="text-red-500 line-through text-sm">Void</span>
+                  ) : (
+                    formatCurrency(calc.currentBalance, debtCurrency, { showDecimals: true })
+                  )}
+                </div>
               </div>
+
+              <button
+                type="button"
+                onClick={() => setIsShareDrawerOpen(!isShareDrawerOpen)}
+                className={`p-2.5 rounded-xl border font-mono text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                  isShareDrawerOpen || isGlobalShared
+                    ? 'border-[var(--primary)] bg-[var(--primary)]/10 text-[var(--primary)] shadow-xs'
+                    : 'border-[var(--outline-variant)]/40 bg-[var(--surface)] text-[var(--on-surface)] hover:border-[var(--primary)]/50'
+                }`}
+                title="Share transaction link or manage visibility"
+              >
+                <span className="material-symbols-outlined text-[18px]">
+                  {isGlobalShared ? 'public' : 'share'}
+                </span>
+                <span className="hidden xs:inline">Share</span>
+              </button>
             </div>
           </div>
+
+          {/* Expandable Share & Visibility Control Panel */}
+          {isShareDrawerOpen && (
+            <div className="p-4 rounded-2xl bg-[var(--surface-container)] border border-[var(--primary)]/30 space-y-4 animate-in fade-in slide-in-from-top-1 duration-150">
+              <div className="flex items-center justify-between border-b border-[var(--outline-variant)]/20 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[18px] text-[var(--primary)]">
+                    shield_lock
+                  </span>
+                  <div>
+                    <h4 className="font-heading font-bold text-xs sm:text-sm text-[var(--on-surface)]">
+                      Share Transaction &amp; Link Privacy
+                    </h4>
+                    <p className="font-mono text-[11px] text-[var(--on-surface-variant)]">
+                      Share privately with participating members or enable a public read-only link
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsShareDrawerOpen(false)}
+                  className="p-1 rounded-lg text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[16px]">close</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {/* 1. Participants-Only Link Card */}
+                <div className="p-3.5 rounded-xl bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)]/30 flex flex-col justify-between gap-3">
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-xs font-bold text-[var(--on-surface)] flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">
+                          lock
+                        </span>
+                        <span>Participants-Only Link</span>
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[var(--primary)]/10 text-[var(--primary)] border border-[var(--primary)]/20">
+                        Default • Private
+                      </span>
+                    </div>
+                    <p className="text-[11px] font-mono text-[var(--on-surface-variant)] mt-1.5 leading-relaxed">
+                      {splitInfo
+                        ? `Can ONLY be opened by you, ${otherName}, and the ${splitInfo.participants.length} participating members of "${splitInfo.title}" when signed in.`
+                        : `Can ONLY be opened by you and ${otherName} when signed into your DebtSync accounts.`}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => handleCopyShareLink('participant')}
+                      className="flex-1 py-2 px-3 rounded-lg bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-95 transition-opacity flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">
+                        {copiedLinkType === 'participant' ? 'check' : 'content_copy'}
+                      </span>
+                      <span>
+                        {copiedLinkType === 'participant' ? 'Copied Member Link!' : 'Copy Member Link'}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleNativeShare('participant')}
+                      className="p-2 rounded-lg border border-[var(--outline-variant)]/40 text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors cursor-pointer"
+                      title="Share via device share sheet"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">ios_share</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Global Public Link Card */}
+                <div
+                  className={`p-3.5 rounded-xl border flex flex-col justify-between gap-3 ${
+                    isGlobalShared
+                      ? 'bg-emerald-500/5 border-emerald-500/30'
+                      : 'bg-[var(--surface-container-lowest)] border-[var(--outline-variant)]/30'
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-xs font-bold text-[var(--on-surface)] flex items-center gap-1.5">
+                        <span
+                          className={`material-symbols-outlined text-[16px] ${
+                            isGlobalShared ? 'text-emerald-500' : 'text-[var(--on-surface-variant)]'
+                          }`}
+                        >
+                          public
+                        </span>
+                        <span>Global Share Link</span>
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border ${
+                          isGlobalShared
+                            ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                            : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)] border-[var(--outline-variant)]/30'
+                        }`}
+                      >
+                        {isGlobalShared ? 'Active • Public' : 'Off'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] font-mono text-[var(--on-surface-variant)] mt-1.5 leading-relaxed">
+                      {isGlobalShared
+                        ? `Anyone with this secret token link can view a read-only summary. ${otherName} is notified and either of you can turn it off anytime.`
+                        : `Create a separate public read-only link viewable by anyone. ${otherName} will receive a notification and can disable it anytime.`}
+                    </p>
+                  </div>
+
+                  {isGlobalShared ? (
+                    <div className="flex items-center gap-1.5 pt-1 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => handleCopyShareLink('global')}
+                        className="flex-1 py-2 px-2.5 rounded-lg bg-emerald-600 text-white font-mono text-xs font-bold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-1 cursor-pointer shadow-xs"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">
+                          {copiedLinkType === 'global' ? 'check' : 'link'}
+                        </span>
+                        <span>{copiedLinkType === 'global' ? 'Copied Global Link!' : 'Copy Global Link'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={shareUpdating}
+                        onClick={() => handleToggleGlobalShare('regenerate')}
+                        className="p-2 rounded-lg border border-[var(--outline-variant)]/40 text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors cursor-pointer disabled:opacity-50"
+                        title="Rotate link token (invalidates previously shared global links)"
+                      >
+                        <span className="material-symbols-outlined text-[15px]">refresh</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={shareUpdating}
+                        onClick={() => handleToggleGlobalShare('disable')}
+                        className="py-2 px-2.5 rounded-lg border border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400 font-mono text-xs font-bold hover:bg-red-500/20 transition-colors cursor-pointer disabled:opacity-50"
+                        title="Turn off global sharing"
+                      >
+                        Off
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        disabled={shareUpdating || debt.status === 'declined' || isCurrentUserIsolated}
+                        onClick={() => handleToggleGlobalShare('enable')}
+                        className="w-full py-2 px-3 rounded-lg border border-[var(--outline-variant)]/50 bg-[var(--surface-container)] hover:border-[var(--primary)]/50 hover:text-[var(--primary)] text-[var(--on-surface)] font-mono text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <span className="material-symbols-outlined text-[15px]">
+                          {shareUpdating ? 'sync' : 'add_link'}
+                        </span>
+                        <span>
+                          {shareUpdating ? 'Enabling...' : 'Enable Global Sharing & Copy Link'}
+                        </span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Financial Metrics Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -343,6 +823,27 @@ export function DebtDetailModal({
               </div>
             </div>
           </div>
+
+          {/* Repayment Progress Bar */}
+          {debt.status !== 'declined' && totalObligation > 0 && (
+            <div className="px-3.5 py-2.5 rounded-xl bg-[var(--surface-container-low)] border border-[var(--outline-variant)]/20 space-y-1.5">
+              <div className="flex items-center justify-between text-[11px] font-mono text-[var(--on-surface-variant)]">
+                <span>Settlement Progress ({paidPct}% Paid)</span>
+                <span>
+                  Remaining:{' '}
+                  <strong className="text-[var(--on-surface)]">
+                    {formatCurrency(calc.currentBalance, debtCurrency, { showDecimals: true })}
+                  </strong>
+                </span>
+              </div>
+              <div className="w-full h-2 rounded-full bg-[var(--surface-container-high)] overflow-hidden flex">
+                <div
+                  className="bg-emerald-500 h-full transition-all duration-300"
+                  style={{ width: `${paidPct}%` }}
+                />
+              </div>
+            </div>
+          )}
 
           {/* Pending / Disputed Repayment Warning Banners */}
           {(calc.pendingVerificationPaid || 0) > 0 && (
@@ -746,6 +1247,15 @@ export function DebtDetailModal({
                     } else if (log.action === 'debt_settled') {
                       dotColor = 'bg-emerald-500';
                       title = 'Debt Agreement Fully Settled';
+                    } else if (log.action === 'global_share_enabled') {
+                      dotColor = 'bg-amber-500';
+                      title = `Global Public Link Enabled by ${(log.details as any)?.actorName || 'Participant'}`;
+                    } else if (log.action === 'global_share_disabled') {
+                      dotColor = 'bg-[var(--outline)]';
+                      title = `Global Public Link Disabled by ${(log.details as any)?.actorName || 'Participant'}`;
+                    } else if (log.action === 'global_share_regenerated') {
+                      dotColor = 'bg-amber-500';
+                      title = `Global Public Link Rotated by ${(log.details as any)?.actorName || 'Participant'}`;
                     }
 
                     return (

@@ -12,6 +12,7 @@ import { PaymentModal } from '@/components/debts/PaymentModal';
 import { RecordDebtModal } from '@/components/debts/RecordDebtModal';
 import { PersonRepaymentModal } from '@/components/debts/PersonRepaymentModal';
 import { CounterpartyNoteModal } from '@/components/debts/CounterpartyNoteModal';
+import { DebtDetailModal } from '@/components/debts/DebtDetailModal';
 import { getDueDateInfo } from '@/lib/utils/due-date';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
@@ -20,7 +21,7 @@ import { SkeletonBalanceCards, SkeletonTableRows } from '@/components/ui/Skeleto
 import { calculateTrustScore } from '@/lib/utils/trust-score';
 import { detectUPIApp, formatPaymentMethodDisplay } from '@/lib/utils/upi-link';
 import { getLedgerCache } from '@/lib/stores/ledger-store';
-import { parseSplitDetails, getCleanDebtNotes } from '@/lib/utils/split-bills';
+import { parseSplitDetails, parseShareMetadata, getCleanDebtNotes } from '@/lib/utils/split-bills';
 import { EditPendingDebtModal } from '@/components/debts/EditPendingDebtModal';
 import { respondToDebtAgreement } from '@/lib/utils/debt-acceptance';
 import Link from 'next/link';
@@ -71,6 +72,7 @@ function PersonDebtDetailContent() {
   const [filterDirection, setFilterDirection] = useState<'all' | 'they_owe' | 'you_owe'>('all');
   const [activeDebtForPayment, setActiveDebtForPayment] = useState<{ debt: Debt; balance: number } | null>(null);
   const [selectedDebtForNote, setSelectedDebtForNote] = useState<Debt | null>(null);
+  const [selectedDebtForDetail, setSelectedDebtForDetail] = useState<Debt | null>(null);
   const [isRecordDebtOpen, setIsRecordDebtOpen] = useState(false);
   const [isPayModalOpen, setIsPayModalOpen] = useState(false);
   const [selectedDebtIdForPay, setSelectedDebtIdForPay] = useState<string | null>(null);
@@ -129,13 +131,17 @@ function PersonDebtDetailContent() {
       // Fetch all debts between user and this person
       const { data: debtRows } = await supabase
         .from('debts')
-        .select('*')
+        .select(`
+          *,
+          lender:profiles!debts_lender_id_fkey(id, email, full_name, avatar_url),
+          borrower:profiles!debts_borrower_id_fkey(id, email, full_name, avatar_url)
+        `)
         .or(
           `and(lender_id.eq.${user.id},borrower_id.eq.${resolvedPersonId}),and(lender_id.eq.${resolvedPersonId},borrower_id.eq.${user.id})`
         )
         .order('created_at', { ascending: false });
 
-      const allDebts: Debt[] = debtRows || [];
+      const allDebts: Debt[] = (debtRows as any) || [];
       setDebts(allDebts);
 
       // Auto-purge any historical unverified payments for settled debts
@@ -795,17 +801,19 @@ function PersonDebtDetailContent() {
               const calc = calculateDebtBalance(d, debtPayments);
               const dueDateInfo = getDueDateInfo(d.due_date, d.status);
               const split = parseSplitDetails(d);
+              const shareMeta = parseShareMetadata(d.notes);
               const cleanNotes = getCleanDebtNotes(d.notes);
 
               return (
                 <div
                   key={d.id}
-                  className={`p-4 rounded-xl border ${
+                  onClick={() => setSelectedDebtForDetail(d)}
+                  className={`p-4 rounded-xl border transition-colors cursor-pointer ${
                     isIncomingPending
-                      ? 'border-amber-500/40 bg-amber-500/5'
+                      ? 'border-amber-500/40 bg-amber-500/5 hover:bg-amber-500/10'
                       : d.status === 'declined'
                       ? 'border-red-500/20 bg-surface-container-low/40 opacity-85'
-                      : 'border-outline-variant/20 bg-surface-container-low'
+                      : 'border-outline-variant/20 bg-surface-container-low hover:bg-surface-container-high/70'
                   } flex flex-col sm:flex-row sm:items-center justify-between gap-4`}
                 >
                   <div className="flex-1">
@@ -838,6 +846,12 @@ function PersonDebtDetailContent() {
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-primary/15 text-primary border border-primary/25 flex items-center gap-1">
                           <span className="material-symbols-outlined text-[12px]">call_split</span>
                           <span>Split: {split.title}</span>
+                        </span>
+                      )}
+                      {shareMeta?.globalEnabled && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25 flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[12px]">public</span>
+                          <span>Global Link ON</span>
                         </span>
                       )}
                       {dueDateInfo && d.status !== 'declined' && (
@@ -906,7 +920,21 @@ function PersonDebtDetailContent() {
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
+                  <div
+                    className="flex items-center gap-2 self-end sm:self-auto flex-wrap"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {/* Details & Share Button */}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDebtForDetail(d)}
+                      className="py-1.5 px-2.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary font-mono text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                      title="View full agreement details, audit trail, and share link"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">receipt_long</span>
+                      <span>Details &amp; Share</span>
+                    </button>
+
                     {/* Two-sided Note Button */}
                     <button
                       onClick={() => setSelectedDebtForNote(d)}
@@ -914,9 +942,9 @@ function PersonDebtDetailContent() {
                       title="View or edit 2-sided notes"
                     >
                       <span className="material-symbols-outlined text-[14px]">
-                        {d.notes || d.counterparty_notes ? 'note' : 'add_comment'}
+                        {cleanNotes || d.counterparty_notes ? 'note' : 'add_comment'}
                       </span>
-                      <span>{d.notes || d.counterparty_notes ? 'Notes' : '+ Note'}</span>
+                      <span>{cleanNotes || d.counterparty_notes ? 'Notes' : '+ Note'}</span>
                     </button>
 
                     {/* Dismiss Declined Debt from active UI */}
@@ -1157,6 +1185,15 @@ function PersonDebtDetailContent() {
                 } else if (log.action === 'debt_settled') {
                   dotColor = 'bg-emerald-500';
                   title = 'Debt Agreement Fully Settled';
+                } else if (log.action === 'global_share_enabled') {
+                  dotColor = 'bg-amber-500';
+                  title = `Global Public Link Enabled by ${(log.details as any)?.actorName || 'Participant'}`;
+                } else if (log.action === 'global_share_disabled') {
+                  dotColor = 'bg-outline';
+                  title = `Global Public Link Disabled by ${(log.details as any)?.actorName || 'Participant'}`;
+                } else if (log.action === 'global_share_regenerated') {
+                  dotColor = 'bg-amber-500';
+                  title = `Global Public Link Rotated by ${(log.details as any)?.actorName || 'Participant'}`;
                 }
 
                 return (
@@ -1204,6 +1241,18 @@ function PersonDebtDetailContent() {
           currentUserId={currentUserId || ''}
           onClose={() => setSelectedDebtForNote(null)}
           onNoteUpdated={fetchDetails}
+        />
+      )}
+
+      {/* Detailed Debt Agreement & Share Modal */}
+      {selectedDebtForDetail && (
+        <DebtDetailModal
+          isOpen={Boolean(selectedDebtForDetail)}
+          debt={selectedDebtForDetail}
+          currentUserId={currentUserId || ''}
+          currency={currency}
+          onClose={() => setSelectedDebtForDetail(null)}
+          onDebtUpdated={fetchDetails}
         />
       )}
 

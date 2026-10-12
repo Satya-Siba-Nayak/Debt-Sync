@@ -15,8 +15,9 @@ import { getDueDateInfo } from '@/lib/utils/due-date';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { getLedgerCache, setLedgerCache, computeDashboardStats } from '@/lib/stores/ledger-store';
 import { SkeletonBalanceCards, SkeletonTableRows } from '@/components/ui/Skeleton';
-import { parseSplitDetails, getCleanDebtNotes } from '@/lib/utils/split-bills';
+import { parseSplitDetails, parseShareMetadata, getCleanDebtNotes } from '@/lib/utils/split-bills';
 import { EditPendingDebtModal } from '@/components/debts/EditPendingDebtModal';
+import { DebtDetailModal } from '@/components/debts/DebtDetailModal';
 import { respondToDebtAgreement } from '@/lib/utils/debt-acceptance';
 import Link from 'next/link';
 
@@ -30,6 +31,7 @@ export default function GlobalDashboardPage() {
   const [payments, setPayments] = useState<Payment[]>(initialCache?.payments || []);
   const [currentUserId, setCurrentUserId] = useState<string | null>(initialCache?.userId || null);
   const [selectedDebtForEdit, setSelectedDebtForEdit] = useState<Debt | null>(null);
+  const [selectedDebtForDetail, setSelectedDebtForDetail] = useState<Debt | null>(null);
 
   const initialStats = initialCache && initialCache.userId
     ? computeDashboardStats(initialCache.debts, initialCache.payments, initialCache.userId)
@@ -212,7 +214,8 @@ export default function GlobalDashboardPage() {
               return (
                 <div
                   key={d.id}
-                  className="bg-[var(--surface-container-lowest)] p-4 rounded-xl border border-[var(--outline-variant)]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs"
+                  onClick={() => setSelectedDebtForDetail(d)}
+                  className="bg-[var(--surface-container-lowest)] hover:bg-[var(--surface-container-low)] p-4 rounded-xl border border-[var(--outline-variant)]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs transition-colors cursor-pointer"
                 >
                   <div className="flex items-start gap-3">
                     <Avatar src={counterparty?.avatar_url} name={name} size="md" />
@@ -276,7 +279,17 @@ export default function GlobalDashboardPage() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 self-end sm:self-auto">
+                  <div
+                    className="flex items-center gap-2 self-end sm:self-auto flex-wrap"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDebtForDetail(d)}
+                      className="px-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 text-[var(--on-surface)] font-mono text-xs font-bold hover:bg-[var(--surface-container)] transition-colors cursor-pointer"
+                    >
+                      Details
+                    </button>
                     <button
                       onClick={() => handleAcceptDebt(d.id, 'declined')}
                       className="px-3 py-1.5 rounded-xl border border-error/30 text-error font-mono text-xs font-bold hover:bg-error/10 transition-colors cursor-pointer"
@@ -384,34 +397,45 @@ export default function GlobalDashboardPage() {
                 const calc = calculateDebtBalance(d, debtPayments);
                 const dueDateInfo = getDueDateInfo(d.due_date, d.status);
                 const split = parseSplitDetails(d);
+                const shareMeta = parseShareMetadata(d.notes);
                 const cleanNotes = getCleanDebtNotes(d.notes);
 
                 return (
-                  <Link
+                  <div
                     key={d.id}
-                    href={`/directory/detail?id=${otherPerson?.id || d.id}`}
-                    className={`block p-4 rounded-xl border transition-all shadow-xs ${
+                    onClick={() => setSelectedDebtForDetail(d)}
+                    className={`block p-4 rounded-xl border transition-all shadow-xs cursor-pointer ${
                       d.status === 'declined'
                         ? 'bg-[var(--surface-container-low)]/40 border-red-500/20 opacity-85'
                         : 'bg-[var(--surface-container-low)]/70 hover:bg-[var(--surface-container-high)]/70 border-[var(--outline-variant)]/20'
                     }`}
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-3 min-w-0">
+                      <Link
+                        href={`/directory/detail?id=${otherPerson?.id || d.id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="flex items-center gap-3 min-w-0 hover:opacity-90 group"
+                      >
                         <Avatar
                           src={otherPerson?.avatar_url}
                           name={name}
                           size="md"
                         />
                         <div className="min-w-0">
-                          <p className="font-semibold text-sm text-[var(--on-surface)] truncate">
-                            {name}
-                          </p>
+                          <div className="font-semibold text-sm text-[var(--on-surface)] group-hover:text-[var(--primary)] group-hover:underline truncate flex items-center gap-1.5 flex-wrap">
+                            <span className="truncate">{name}</span>
+                            {shareMeta?.globalEnabled && (
+                              <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25 flex items-center gap-0.5 shrink-0">
+                                <span className="material-symbols-outlined text-[10px]">public</span>
+                                <span>Global Link</span>
+                              </span>
+                            )}
+                          </div>
                           <p className="font-mono text-xs text-[var(--on-surface-variant)] truncate">
                             {otherPerson?.email}
                           </p>
                         </div>
-                      </div>
+                      </Link>
                       <div className="flex flex-col items-end gap-1">
                         <Chip
                           label={d.status}
@@ -492,22 +516,19 @@ export default function GlobalDashboardPage() {
                     </div>
 
                     {d.status === 'pending' && d.created_by !== currentUserId && (
-                      <div className="mt-3 pt-2.5 border-t border-[var(--outline-variant)]/15 flex items-center justify-end gap-2">
+                      <div
+                        className="mt-3 pt-2.5 border-t border-[var(--outline-variant)]/15 flex items-center justify-end gap-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <button
-                          onClick={(e) => {
-                            e.preventDefault();
-                            handleAcceptDebt(d.id, 'declined');
-                          }}
-                          className="px-3 py-1 rounded-lg border border-error/30 text-error font-mono text-xs font-bold hover:bg-error/10"
+                          onClick={() => handleAcceptDebt(d.id, 'declined')}
+                          className="px-3 py-1 rounded-lg border border-error/30 text-error font-mono text-xs font-bold hover:bg-error/10 cursor-pointer"
                         >
                           Decline
                         </button>
                         <button
-                          onClick={(e) => {
-                            e.preventDefault();
-                            handleAcceptDebt(d.id, 'active');
-                          }}
-                          className="px-3.5 py-1 rounded-lg bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 shadow-xs"
+                          onClick={() => handleAcceptDebt(d.id, 'active')}
+                          className="px-3.5 py-1 rounded-lg bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 shadow-xs cursor-pointer"
                         >
                           Accept
                         </button>
@@ -515,16 +536,16 @@ export default function GlobalDashboardPage() {
                     )}
 
                     {d.status === 'pending' && d.created_by === currentUserId && (
-                      <div className="mt-3 pt-2.5 border-t border-[var(--outline-variant)]/15 flex items-center justify-between gap-2">
+                      <div
+                        className="mt-3 pt-2.5 border-t border-[var(--outline-variant)]/15 flex items-center justify-between gap-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <span className="text-[11px] font-mono text-amber-500/90 flex items-center gap-1">
                           <span className="material-symbols-outlined text-[13px]">schedule</span>
                           <span>Awaiting acceptance</span>
                         </span>
                         <button
-                          onClick={(e) => {
-                            e.preventDefault();
-                            setSelectedDebtForEdit(d);
-                          }}
+                          onClick={() => setSelectedDebtForEdit(d)}
                           className="px-3 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 border border-amber-500/30 font-mono text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
                         >
                           <span className="material-symbols-outlined text-[13px]">edit</span>
@@ -532,7 +553,7 @@ export default function GlobalDashboardPage() {
                         </button>
                       </div>
                     )}
-                  </Link>
+                  </div>
                 );
               })}
             </div>
@@ -559,12 +580,14 @@ export default function GlobalDashboardPage() {
                     const calc = calculateDebtBalance(d, debtPayments);
                     const dueDateInfo = getDueDateInfo(d.due_date, d.status);
                     const split = parseSplitDetails(d);
+                    const shareMeta = parseShareMetadata(d.notes);
                     const cleanNotes = getCleanDebtNotes(d.notes);
 
                     return (
                       <tr
                         key={d.id}
-                        className={`transition-colors ${
+                        onClick={() => setSelectedDebtForDetail(d)}
+                        className={`transition-colors cursor-pointer ${
                           d.status === 'declined'
                             ? 'bg-red-500/5 hover:bg-red-500/10 opacity-80'
                             : 'hover:bg-[var(--surface-container-low)]/50'
@@ -573,6 +596,7 @@ export default function GlobalDashboardPage() {
                         <td className="py-4">
                           <Link
                             href={`/directory/detail?id=${otherPerson?.id || d.id}`}
+                            onClick={(e) => e.stopPropagation()}
                             className="flex items-center gap-3 hover:opacity-90 group cursor-pointer"
                             title={`View ${name}'s contact ledger`}
                           >
@@ -588,6 +612,12 @@ export default function GlobalDashboardPage() {
                                   <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/20 flex items-center gap-1">
                                     <span className="material-symbols-outlined text-[11px]">call_split</span>
                                     <span>{split.title}</span>
+                                  </span>
+                                )}
+                                {shareMeta?.globalEnabled && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25 flex items-center gap-1">
+                                    <span className="material-symbols-outlined text-[11px]">public</span>
+                                    <span>Global Link</span>
                                   </span>
                                 )}
                               </div>
@@ -669,7 +699,7 @@ export default function GlobalDashboardPage() {
                           </div>
                         </td>
 
-                        <td className="py-4 text-right">
+                        <td className="py-4 text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-end gap-2">
                             {d.status === 'pending' && d.created_by !== currentUserId ? (
                               <button
@@ -687,12 +717,15 @@ export default function GlobalDashboardPage() {
                                 <span>Edit</span>
                               </button>
                             ) : null}
-                            <Link
-                              href={`/directory/detail?id=${otherPerson?.id || d.id}`}
-                              className="font-mono text-xs text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] font-bold hover:underline"
+                            <button
+                              type="button"
+                              onClick={() => setSelectedDebtForDetail(d)}
+                              className="px-2.5 py-1 rounded-lg bg-[var(--primary)]/10 hover:bg-[var(--primary)]/20 text-[var(--primary)] font-mono text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                              title="View full agreement details, audit trail, and share link"
                             >
-                              Details
-                            </Link>
+                              <span className="material-symbols-outlined text-[13px]">receipt_long</span>
+                              <span>Details &amp; Share</span>
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -704,6 +737,18 @@ export default function GlobalDashboardPage() {
           </div>
         )}
       </section>
+
+      {/* Detailed Debt Agreement & Share Modal */}
+      {selectedDebtForDetail && (
+        <DebtDetailModal
+          isOpen={Boolean(selectedDebtForDetail)}
+          debt={selectedDebtForDetail}
+          currentUserId={currentUserId || ''}
+          currency={currency}
+          onClose={() => setSelectedDebtForDetail(null)}
+          onDebtUpdated={fetchDashboardData}
+        />
+      )}
 
       {/* Edit Pending Debt Modal */}
       {selectedDebtForEdit && (

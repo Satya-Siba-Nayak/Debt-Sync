@@ -14,7 +14,12 @@ import {
 import { formatPaymentMethodDisplay } from '@/lib/utils/upi-link';
 import { respondToDebtAgreement } from '@/lib/utils/debt-acceptance';
 import { invalidateCooldownCache } from '@/lib/utils/debt-cooldown';
-import { parseSplitDetails, getCleanDebtNotes } from '@/lib/utils/split-bills';
+import {
+  parseSplitDetails,
+  parseShareMetadata,
+  getCleanDebtNotes,
+  buildDebtNotesWithMetadata,
+} from '@/lib/utils/split-bills';
 
 interface IncomingDebtRequest {
   id: string;
@@ -63,12 +68,29 @@ interface PendingRepayment {
   };
 }
 
+interface GlobalShareAlert {
+  debtId: string;
+  principal: number;
+  currency: string;
+  notes: string | null;
+  enabledBy: string;
+  enabledByName: string;
+  enabledAt: string;
+  counterparty: {
+    id: string;
+    full_name: string;
+    email: string;
+    avatar_url: string | null;
+  };
+}
+
 export function NotificationCenter() {
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'debts' | 'contacts' | 'repayments'>('all');
   const [debtRequests, setDebtRequests] = useState<IncomingDebtRequest[]>([]);
   const [contactRequests, setContactRequests] = useState<IncomingContactRequest[]>([]);
   const [pendingRepayments, setPendingRepayments] = useState<PendingRepayment[]>([]);
+  const [globalShareAlerts, setGlobalShareAlerts] = useState<GlobalShareAlert[]>([]);
   const [loading, setLoading] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [webPermission, setWebPermission] = useState<'default' | 'granted' | 'denied' | 'unsupported'>('default');
@@ -220,6 +242,59 @@ export function NotificationCenter() {
           setPendingRepayments([]);
         }
       } catch (_) {}
+
+      // 4. Fetch transactions where counterparty enabled Global Public Link sharing
+      try {
+        const { data: sharedDebts } = await supabase
+          .from('debts')
+          .select(`
+            id, principal, currency, notes, lender_id, borrower_id, status,
+            lender:profiles!debts_lender_id_fkey(id, full_name, email, avatar_url),
+            borrower:profiles!debts_borrower_id_fkey(id, full_name, email, avatar_url)
+          `)
+          .neq('status', 'declined')
+          .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`)
+          .like('notes', '%[SHARE:%');
+
+        if (sharedDebts) {
+          const alerts: GlobalShareAlert[] = [];
+          for (const d of sharedDebts as any[]) {
+            const shareMeta = parseShareMetadata(d.notes);
+            if (
+              shareMeta &&
+              shareMeta.globalEnabled &&
+              shareMeta.enabledBy &&
+              shareMeta.enabledBy !== user.id &&
+              !(shareMeta.dismissedAlertBy || []).includes(user.id)
+            ) {
+              const isLender = d.lender_id === user.id;
+              const other = isLender ? d.borrower : d.lender;
+              alerts.push({
+                debtId: d.id,
+                principal: Number(d.principal) || 0,
+                currency: d.currency || 'inr',
+                notes: d.notes,
+                enabledBy: shareMeta.enabledBy,
+                enabledByName:
+                  shareMeta.enabledByName ||
+                  other?.full_name ||
+                  other?.email ||
+                  'Counterparty',
+                enabledAt: shareMeta.enabledAt || new Date().toISOString(),
+                counterparty: {
+                  id: other?.id || '',
+                  full_name: other?.full_name || other?.email || 'Counterparty',
+                  email: other?.email || '',
+                  avatar_url: other?.avatar_url || null,
+                },
+              });
+            }
+          }
+          setGlobalShareAlerts(alerts);
+        } else {
+          setGlobalShareAlerts([]);
+        }
+      } catch (_) {}
     } catch (err) {
       console.error('Error loading notifications:', err);
     } finally {
@@ -242,6 +317,15 @@ export function NotificationCenter() {
             body: 'A counterparty has logged a debt request awaiting your review.',
             tag: `debt-${payload.new?.id}`,
           });
+        } else if (payload.eventType === 'UPDATE' && payload.new?.notes) {
+          const newShare = parseShareMetadata(payload.new.notes);
+          const oldShare = parseShareMetadata(payload.old?.notes);
+          if (newShare?.globalEnabled && !oldShare?.globalEnabled) {
+            sendWebNotification('Global Link Enabled on Transaction', {
+              body: `${newShare.enabledByName || 'A counterparty'} enabled public global sharing on a transaction. You can turn it off anytime.`,
+              tag: `share-${payload.new?.id}`,
+            });
+          }
         }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, (payload: any) => {
@@ -420,7 +504,100 @@ export function NotificationCenter() {
     }
   };
 
-  const totalNotifications = debtRequests.length + contactRequests.length + pendingRepayments.length;
+  const handleDisableGlobalShareAlert = async (alert: GlobalShareAlert) => {
+    setActionLoadingId(`share-${alert.debtId}`);
+    try {
+      const user = await getCurrentUserFast(supabase);
+      if (!user) return;
+
+      const existingShare = parseShareMetadata(alert.notes);
+      const actorName = user.user_metadata?.full_name || user.email || 'Participant';
+      const nowIso = new Date().toISOString();
+
+      const nextShareMeta = {
+        globalEnabled: false,
+        globalToken: null,
+        enabledBy: existingShare?.enabledBy || null,
+        enabledByName: existingShare?.enabledByName || null,
+        enabledAt: existingShare?.enabledAt || null,
+        disabledBy: user.id,
+        disabledByName: actorName,
+        disabledAt: nowIso,
+        dismissedAlertBy: [],
+      };
+
+      const updatedNotes = buildDebtNotesWithMetadata(alert.notes, {
+        shareMetadata: nextShareMeta,
+      });
+
+      await supabase
+        .from('debts')
+        .update({
+          notes: updatedNotes,
+          updated_at: nowIso,
+        })
+        .eq('id', alert.debtId);
+
+      await supabase.from('activity_log').insert({
+        user_id: user.id,
+        debt_id: alert.debtId,
+        action: 'global_share_disabled',
+        details: {
+          by_user_id: user.id,
+          by_name: actorName,
+          actorName,
+          note: `Global public link turned off by ${actorName} from notifications.`,
+        },
+      });
+
+      window.dispatchEvent(new CustomEvent('debtsync:refresh'));
+      await fetchNotifications();
+    } catch (err) {
+      console.error('Error disabling global share:', err);
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleDismissGlobalShareAlert = async (alert: GlobalShareAlert) => {
+    setActionLoadingId(`dismiss-${alert.debtId}`);
+    try {
+      const user = await getCurrentUserFast(supabase);
+      if (!user) return;
+
+      const existingShare = parseShareMetadata(alert.notes);
+      if (!existingShare) return;
+
+      const dismissedList = Array.from(new Set([...(existingShare.dismissedAlertBy || []), user.id]));
+      const nextShareMeta = {
+        ...existingShare,
+        dismissedAlertBy: dismissedList,
+      };
+
+      const updatedNotes = buildDebtNotesWithMetadata(alert.notes, {
+        shareMetadata: nextShareMeta,
+      });
+
+      await supabase
+        .from('debts')
+        .update({
+          notes: updatedNotes,
+        })
+        .eq('id', alert.debtId);
+
+      await fetchNotifications();
+    } catch (err) {
+      console.error('Error dismissing global share alert:', err);
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const totalNotifications =
+    debtRequests.length +
+    contactRequests.length +
+    pendingRepayments.length +
+    globalShareAlerts.length;
 
   return (
     <div className="relative">
@@ -491,7 +668,7 @@ export function NotificationCenter() {
                   : 'text-on-surface-variant hover:text-on-surface'
               }`}
             >
-              Debts ({debtRequests.length})
+              Debts ({debtRequests.length + globalShareAlerts.length})
             </button>
             <button
               onClick={() => setActiveTab('contacts')}
@@ -549,6 +726,91 @@ export function NotificationCenter() {
                 </p>
               </div>
             ) : null}
+
+            {/* Global Share Privacy Alerts */}
+            {(activeTab === 'all' || activeTab === 'debts') && globalShareAlerts.length > 0 && (
+              <div className="space-y-2.5 pt-1">
+                <div className="text-[10px] font-mono font-bold tracking-wider uppercase text-amber-600 dark:text-amber-400 px-1 flex items-center gap-1">
+                  <span className="material-symbols-outlined text-[13px] text-amber-500">public</span>
+                  <span>Global Link Sharing Active ({globalShareAlerts.length})</span>
+                </div>
+
+                {globalShareAlerts.map((alert) => {
+                  const cleanNote = getCleanDebtNotes(alert.notes);
+                  return (
+                    <div
+                      key={`share-alert-${alert.debtId}`}
+                      className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-2.5 shadow-xs"
+                    >
+                      <div className="flex items-start gap-2.5">
+                        <Avatar
+                          src={alert.counterparty.avatar_url}
+                          name={alert.counterparty.full_name}
+                          size="sm"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <p className="text-xs font-bold text-on-surface truncate">
+                              {alert.enabledByName}
+                            </p>
+                            <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-600 dark:text-amber-400 font-mono text-[9px] font-bold uppercase">
+                              Global Link ON
+                            </span>
+                          </div>
+                          <p className="font-mono text-[11px] text-on-surface-variant mt-0.5 leading-snug">
+                            Enabled public global sharing for your{' '}
+                            <strong className="text-on-surface font-bold">
+                              {formatCurrency(alert.principal, alert.currency)}
+                            </strong>{' '}
+                            transaction.
+                          </p>
+                          {cleanNote && (
+                            <p className="text-[11px] text-on-surface-variant/80 italic mt-1 line-clamp-1">
+                              &quot;{cleanNote}&quot;
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-amber-500/20">
+                        <div className="flex items-center gap-1.5">
+                          <Link
+                            href={`/transactions?debt=${alert.debtId}`}
+                            onClick={() => setIsOpen(false)}
+                            className="px-2.5 py-1 rounded-lg border border-outline-variant/40 text-on-surface font-mono text-[10px] font-bold hover:bg-surface-container transition-colors"
+                          >
+                            View Details
+                          </Link>
+                          <button
+                            type="button"
+                            disabled={actionLoadingId === `dismiss-${alert.debtId}`}
+                            onClick={() => handleDismissGlobalShareAlert(alert)}
+                            className="px-2 py-1 rounded-lg text-on-surface-variant hover:text-on-surface font-mono text-[10px] font-semibold cursor-pointer disabled:opacity-50"
+                            title="Keep global link ON and dismiss this alert"
+                          >
+                            Keep On
+                          </button>
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={actionLoadingId === `share-${alert.debtId}`}
+                          onClick={() => handleDisableGlobalShareAlert(alert)}
+                          className="px-2.5 py-1 rounded-lg bg-red-500 text-white font-mono text-[10px] font-bold hover:opacity-90 transition-opacity shadow-xs disabled:opacity-50 cursor-pointer flex items-center gap-1"
+                        >
+                          <span className="material-symbols-outlined text-[13px]">link_off</span>
+                          <span>
+                            {actionLoadingId === `share-${alert.debtId}`
+                              ? 'Turning Off...'
+                              : 'Turn Off Link'}
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             {/* Debt Requests */}
             {(activeTab === 'all' || activeTab === 'debts') && debtRequests.length > 0 && (

@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Modal } from '../ui/Modal';
 import { createClient } from '@/lib/supabase/client';
 import { Debt } from '@/lib/types/database';
-import { getCleanDebtNotes, parseSplitDetails, buildSplitNotes } from '@/lib/utils/split-bills';
+import { getCleanDebtNotes, buildDebtNotesWithMetadata } from '@/lib/utils/split-bills';
 
 interface CounterpartyNoteModalProps {
   isOpen: boolean;
@@ -58,12 +58,10 @@ export function CounterpartyNoteModal({
     try {
       const updates: Partial<Debt> = {};
       if (isCreator) {
-        const splitDetails = parseSplitDetails(debt);
-        if (splitDetails) {
-          updates.notes = buildSplitNotes(splitDetails, creatorNote.trim());
-        } else {
-          updates.notes = creatorNote.trim() || null;
-        }
+        const encodedNotes = buildDebtNotesWithMetadata(debt, {
+          userNote: creatorNote.trim(),
+        });
+        updates.notes = encodedNotes || null;
       } else {
         updates.counterparty_notes = counterpartyNote.trim() || null;
       }
