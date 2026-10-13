@@ -293,10 +293,13 @@ export default function AdminDashboardPage() {
 
   // --- Aggregate Platform Metrics ---
   const metrics = useMemo(() => {
-    const totalUsers = allProfiles.length;
-    const registeredUsers = allProfiles.filter((p) => !p.is_shadow).length;
-    const ghostUsers = allProfiles.filter((p) => p.is_shadow).length;
-    const isolatedUsers = allProfiles.filter((p) => p.is_isolated).length;
+    const regularProfiles = allProfiles.filter(
+      (p) => p.id !== '00000000-0000-0000-0000-000000000001' && !p.is_purged
+    );
+    const totalUsers = regularProfiles.length;
+    const registeredUsers = regularProfiles.filter((p) => !p.is_shadow).length;
+    const ghostUsers = regularProfiles.filter((p) => p.is_shadow).length;
+    const isolatedUsers = regularProfiles.filter((p) => p.is_isolated).length;
 
     let totalPrincipalVolume = 0;
     let totalOutstandingVolume = 0;
@@ -402,10 +405,12 @@ export default function AdminDashboardPage() {
   // Filtered users
   const filteredUsers = useMemo(() => {
     return usersWithMetrics.filter((u) => {
-      if (userFilter === 'registered' && u.is_shadow) return false;
-      if (userFilter === 'ghost' && !u.is_shadow) return false;
-      if (userFilter === 'isolated' && !u.is_isolated) return false;
-      if (userFilter === 'active_debts' && u.debtsCount === 0) return false;
+      const isTombstone = u.id === '00000000-0000-0000-0000-000000000001' || Boolean(u.is_purged);
+      if (userFilter === 'registered' && (u.is_shadow || isTombstone)) return false;
+      if (userFilter === 'ghost' && (!u.is_shadow || isTombstone)) return false;
+      if (userFilter === 'isolated' && (!u.is_isolated || isTombstone)) return false;
+      if (userFilter === 'active_debts' && (u.debtsCount === 0 || isTombstone)) return false;
+      if (userFilter === 'all' && isTombstone && !userSearch.trim()) return false;
 
       if (!userSearch.trim()) return true;
       const q = userSearch.toLowerCase().trim();
@@ -676,6 +681,14 @@ export default function AdminDashboardPage() {
   };
 
   const handlePurgeUser = async (targetUser: Profile, forceCascade = false) => {
+    if (
+      targetUser.id === '00000000-0000-0000-0000-000000000001' ||
+      targetUser.is_purged ||
+      targetUser.email === 'purged-account@debtsync.local'
+    ) {
+      alert('Protected System Account: The tombstone profile cannot be purged. It is required to preserve counterparty ledger records.');
+      return;
+    }
     setActionLoading(true);
     try {
       const userDebts = allDebts.filter((d) => d.lender_id === targetUser.id || d.borrower_id === targetUser.id);
@@ -1206,15 +1219,22 @@ export default function AdminDashboardPage() {
                   ) : (
                     filteredUsers.map((u) => {
                       const detectedVpa = detectUPIApp(u.upi_id);
+                      const isTombstone = u.id === '00000000-0000-0000-0000-000000000001' || Boolean(u.is_purged);
                       return (
                         <tr key={u.id} className="hover:bg-[var(--surface-container-low)] transition-colors">
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-2.5">
                               <Avatar src={u.avatar_url} name={u.full_name || u.email} size="sm" />
                               <div className="min-w-0">
-                                <span className="font-bold text-[var(--on-surface)] block truncate">
-                                  {u.full_name || 'Unnamed User'}
-                                </span>
+                                <div className="font-bold text-[var(--on-surface)] flex items-center gap-1.5 truncate">
+                                  <span>{u.full_name || 'Unnamed User'}</span>
+                                  {isTombstone && (
+                                    <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-neutral-500/20 text-neutral-400 border border-neutral-500/30 flex items-center gap-0.5">
+                                      <span className="material-symbols-outlined text-[10px]">shield</span>
+                                      <span>System Sentinel</span>
+                                    </span>
+                                  )}
+                                </div>
                                 <span className="text-[11px] text-[var(--on-surface-variant)] block truncate">
                                   {u.email}
                                 </span>
@@ -1223,7 +1243,12 @@ export default function AdminDashboardPage() {
                           </td>
                           <td className="py-3 px-4">
                             <div className="flex flex-wrap items-center gap-1.5">
-                              {u.is_isolated ? (
+                              {isTombstone ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-neutral-500/15 text-neutral-400 border border-neutral-500/30 flex items-center gap-1">
+                                  <span className="material-symbols-outlined text-[11px]">shield</span>
+                                  SYSTEM TOMBSTONE
+                                </span>
+                              ) : u.is_isolated ? (
                                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/15 text-red-500 border border-red-500/30">
                                   ISOLATED
                                 </span>
@@ -1241,9 +1266,11 @@ export default function AdminDashboardPage() {
                                 </span>
                               )}
 
-                              <span className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-[var(--surface-container-high)] text-[var(--outline)]">
-                                {u.is_shadow ? 'GHOST' : 'REG'}
-                              </span>
+                              {!isTombstone && (
+                                <span className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-[var(--surface-container-high)] text-[var(--outline)]">
+                                  {u.is_shadow ? 'GHOST' : 'REG'}
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className="py-3 px-4">
@@ -1294,34 +1321,46 @@ export default function AdminDashboardPage() {
                           </td>
                           <td className="py-3 px-4 text-right">
                             <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => setSelectedUser(u)}
-                                className="px-2.5 py-1 rounded-lg bg-[var(--surface-container-high)] text-[var(--primary)] font-bold hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-all cursor-pointer"
-                              >
-                                Controls
-                              </button>
-                              {u.is_isolated ? (
-                                <button
-                                  type="button"
-                                  onClick={() => handleToggleIsolation(u, false)}
-                                  className="px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 font-bold hover:bg-emerald-500/20 transition-all cursor-pointer text-[10px]"
-                                  title="Lift quarantine"
+                              {isTombstone ? (
+                                <span
+                                  className="px-2.5 py-1 rounded-lg bg-neutral-500/10 text-neutral-400 font-bold text-[11px] flex items-center gap-1 cursor-default border border-neutral-500/20"
+                                  title="Protected system sentinel account: cannot be isolated or purged"
                                 >
-                                  Unfreeze
-                                </button>
+                                  <span className="material-symbols-outlined text-[13px]">lock</span>
+                                  Protected
+                                </span>
                               ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setIsolationTarget(u);
-                                    setIsolationReasonInput('');
-                                  }}
-                                  className="px-2 py-1 rounded-lg bg-red-500/10 text-red-500 font-bold hover:bg-red-500/20 transition-all cursor-pointer text-[10px]"
-                                  title="Quarantine account"
-                                >
-                                  Isolate
-                                </button>
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedUser(u)}
+                                    className="px-2.5 py-1 rounded-lg bg-[var(--surface-container-high)] text-[var(--primary)] font-bold hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-all cursor-pointer"
+                                  >
+                                    Controls
+                                  </button>
+                                  {u.is_isolated ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleIsolation(u, false)}
+                                      className="px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 font-bold hover:bg-emerald-500/20 transition-all cursor-pointer text-[10px]"
+                                      title="Lift quarantine"
+                                    >
+                                      Unfreeze
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setIsolationTarget(u);
+                                        setIsolationReasonInput('');
+                                      }}
+                                      className="px-2 py-1 rounded-lg bg-red-500/10 text-red-500 font-bold hover:bg-red-500/20 transition-all cursor-pointer text-[10px]"
+                                      title="Quarantine account"
+                                    >
+                                      Isolate
+                                    </button>
+                                  )}
+                                </>
                               )}
                             </div>
                           </td>
@@ -1569,79 +1608,91 @@ export default function AdminDashboardPage() {
             )}
 
             {/* Moderation Powers Action Bar */}
-            <div className="p-4 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 space-y-3">
-              <span className="font-bold text-[var(--on-surface)] uppercase tracking-wider block">
-                Administrative Powers &amp; Controls
-              </span>
-              <div className="flex flex-wrap items-center gap-2">
-                {selectedUser.is_isolated ? (
-                  <button
-                    type="button"
-                    disabled={actionLoading}
-                    onClick={() => handleToggleIsolation(selectedUser, false)}
-                    className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition-all cursor-pointer flex items-center gap-1.5"
-                  >
-                    <span className="material-symbols-outlined text-[16px]">lock_open</span>
-                    <span>Lift Isolation / Unfreeze</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={actionLoading}
-                    onClick={() => {
-                      setIsolationTarget(selectedUser);
-                      setIsolationReasonInput('');
-                    }}
-                    className="px-3.5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold transition-all cursor-pointer flex items-center gap-1.5"
-                  >
-                    <span className="material-symbols-outlined text-[16px]">security</span>
-                    <span>Isolate / Quarantine User</span>
-                  </button>
-                )}
-
-                {selectedUser.is_verified ? (
-                  <button
-                    type="button"
-                    disabled={actionLoading}
-                    onClick={() => handleToggleVerification(selectedUser, false)}
-                    className="px-3.5 py-2 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-bold transition-all cursor-pointer flex items-center gap-1.5"
-                  >
-                    <span className="material-symbols-outlined text-[16px]">remove_moderator</span>
-                    <span>Clear Verification</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={actionLoading}
-                    onClick={() => handleToggleVerification(selectedUser, true)}
-                    className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold transition-all cursor-pointer flex items-center gap-1.5"
-                  >
-                    <span className="material-symbols-outlined text-[16px]">verified</span>
-                    <span>Grant Admin Verification</span>
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  disabled={actionLoading}
-                  onClick={() => handleForceReverification(selectedUser)}
-                  className="px-3.5 py-2 rounded-xl border border-amber-500/40 text-amber-600 hover:bg-amber-500/10 font-bold transition-all cursor-pointer flex items-center gap-1.5"
-                >
-                  <span className="material-symbols-outlined text-[16px]">contact_page</span>
-                  <span>Require Reverification</span>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={actionLoading}
-                  onClick={() => setPurgeTarget(selectedUser)}
-                  className="px-3.5 py-2 rounded-xl bg-red-500/10 text-red-500 hover:bg-red-500/20 font-bold transition-all cursor-pointer flex items-center gap-1.5 ml-auto"
-                >
-                  <span className="material-symbols-outlined text-[16px]">delete_forever</span>
-                  <span>Purge User</span>
-                </button>
+            {selectedUser.id === '00000000-0000-0000-0000-000000000001' || selectedUser.is_purged ? (
+              <div className="p-4 rounded-2xl bg-neutral-500/10 border border-neutral-500/30 text-neutral-400 space-y-1.5">
+                <div className="font-bold flex items-center gap-1.5 text-xs text-neutral-300">
+                  <span className="material-symbols-outlined text-[18px]">lock</span>
+                  <span>Protected System Tombstone Sentinel</span>
+                </div>
+                <p className="text-[11px] leading-relaxed">
+                  This internal system account maintains historical debt and payment references so counterparties whose original partners were purged can still view their records as <em>(Transaction purged by admin)</em> and contact support (support@satya-nayak.dev). It cannot be isolated, reverified, or purged.
+                </p>
               </div>
-            </div>
+            ) : (
+              <div className="p-4 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 space-y-3">
+                <span className="font-bold text-[var(--on-surface)] uppercase tracking-wider block">
+                  Administrative Powers &amp; Controls
+                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  {selectedUser.is_isolated ? (
+                    <button
+                      type="button"
+                      disabled={actionLoading}
+                      onClick={() => handleToggleIsolation(selectedUser, false)}
+                      className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">lock_open</span>
+                      <span>Lift Isolation / Unfreeze</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={actionLoading}
+                      onClick={() => {
+                        setIsolationTarget(selectedUser);
+                        setIsolationReasonInput('');
+                      }}
+                      className="px-3.5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">security</span>
+                      <span>Isolate / Quarantine User</span>
+                    </button>
+                  )}
+
+                  {selectedUser.is_verified ? (
+                    <button
+                      type="button"
+                      disabled={actionLoading}
+                      onClick={() => handleToggleVerification(selectedUser, false)}
+                      className="px-3.5 py-2 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">remove_moderator</span>
+                      <span>Clear Verification</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={actionLoading}
+                      onClick={() => handleToggleVerification(selectedUser, true)}
+                      className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">verified</span>
+                      <span>Grant Admin Verification</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    disabled={actionLoading}
+                    onClick={() => handleForceReverification(selectedUser)}
+                    className="px-3.5 py-2 rounded-xl border border-amber-500/40 text-amber-600 hover:bg-amber-500/10 font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">contact_page</span>
+                    <span>Require Reverification</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={actionLoading}
+                    onClick={() => setPurgeTarget(selectedUser)}
+                    className="px-3.5 py-2 rounded-xl bg-red-500/10 text-red-500 hover:bg-red-500/20 font-bold transition-all cursor-pointer flex items-center gap-1.5 ml-auto"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">delete_forever</span>
+                    <span>Purge User</span>
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Network Score & 4 Pillars Breakdown */}
             {/* @ts-ignore */}

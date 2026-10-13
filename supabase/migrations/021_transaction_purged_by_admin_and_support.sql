@@ -59,6 +59,11 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Administrators cannot purge their own account via this tool.');
   END IF;
 
+  -- Prevent deletion of system tombstone profile
+  IF target_user_id = v_system_purged_id THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Protected System Account: The tombstone profile cannot be purged.');
+  END IF;
+
   SELECT email, phone, full_name INTO v_target_email, v_target_phone, v_target_name 
   FROM public.profiles WHERE id = target_user_id;
 
