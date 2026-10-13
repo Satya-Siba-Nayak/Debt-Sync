@@ -517,9 +517,10 @@ export function RecordDebtModal({
         const targetPhone = cleanPhone;
 
         // Check if profile exists across primary email, secondary emails, or phone
-        const existingProfile = targetEmail
-          ? await findProfileByIdentifier(targetEmail)
-          : await findProfileByIdentifier(targetPhone);
+        let existingProfile = targetEmail ? await findProfileByIdentifier(targetEmail) : null;
+        if (!existingProfile && targetPhone) {
+          existingProfile = await findProfileByIdentifier(targetPhone);
+        }
 
         if (existingProfile) {
           targetUserId = existingProfile.id;

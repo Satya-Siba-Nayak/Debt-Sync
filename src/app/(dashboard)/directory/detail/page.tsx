@@ -23,7 +23,7 @@ import { detectUPIApp, formatPaymentMethodDisplay } from '@/lib/utils/upi-link';
 import { getLedgerCache } from '@/lib/stores/ledger-store';
 import { parseSplitDetails, parseShareMetadata, getCleanDebtNotes } from '@/lib/utils/split-bills';
 import { EditPendingDebtModal } from '@/components/debts/EditPendingDebtModal';
-import { respondToDebtAgreement } from '@/lib/utils/debt-acceptance';
+import { respondToDebtAgreement, cancelPendingDebt } from '@/lib/utils/debt-acceptance';
 import Link from 'next/link';
 
 function PersonDebtDetailContent() {
@@ -181,6 +181,23 @@ function PersonDebtDetailContent() {
     } catch (err: any) {
       console.error('Error updating debt:', err);
       alert(err.message || 'Failed to update debt agreement');
+    }
+  };
+
+  const handleTakeBackPendingDebt = async (debtId: string) => {
+    if (
+      !confirm(
+        'Are you sure you want to take back this pending agreement? This will cancel the transaction request before counterparty acceptance.'
+      )
+    ) {
+      return;
+    }
+    try {
+      await cancelPendingDebt(supabase, debtId);
+      fetchDetails();
+    } catch (err: any) {
+      console.error('Error taking back pending debt:', err);
+      alert(err.message || 'Failed to take back pending agreement');
     }
   };
 
@@ -963,15 +980,26 @@ function PersonDebtDetailContent() {
                     )}
 
                     {isOutgoingPending && (
-                      <button
-                        type="button"
-                        onClick={() => setSelectedDebtForEdit(d)}
-                        className="py-1.5 px-3 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 border border-amber-500/30 font-mono text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
-                        title="Edit pending agreement details"
-                      >
-                        <span className="material-symbols-outlined text-[14px]">edit</span>
-                        <span>Edit Agreement</span>
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDebtForEdit(d)}
+                          className="py-1.5 px-2.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 border border-amber-500/30 font-mono text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                          title="Edit pending agreement details"
+                        >
+                          <span className="material-symbols-outlined text-[14px]">edit</span>
+                          <span>Edit</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleTakeBackPendingDebt(d.id)}
+                          className="py-1.5 px-2.5 rounded-lg border border-red-500/40 bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 font-mono text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                          title="Take back and cancel this pending request"
+                        >
+                          <span className="material-symbols-outlined text-[14px]">undo</span>
+                          <span>Take Back</span>
+                        </button>
+                      </div>
                     )}
 
                     {isIncomingPending && (

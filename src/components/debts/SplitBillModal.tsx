@@ -299,9 +299,10 @@ export function SplitBillModal({
       const targetEmail = newPersonEmail.trim().toLowerCase();
       const targetPhone = cleanPhone;
 
-      const existingProfile = targetEmail
-        ? await findProfileByIdentifier(targetEmail)
-        : await findProfileByIdentifier(targetPhone);
+      let existingProfile = targetEmail ? await findProfileByIdentifier(targetEmail) : null;
+      if (!existingProfile && targetPhone) {
+        existingProfile = await findProfileByIdentifier(targetPhone);
+      }
 
       let targetId = '';
       if (existingProfile) {

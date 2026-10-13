@@ -61,10 +61,10 @@ export default function AdminDashboardPage() {
   const [userFilter, setUserFilter] = useState<'all' | 'registered' | 'ghost' | 'isolated' | 'active_debts'>('all');
   const [selectedUser, setSelectedUser] = useState<Profile | null>(null);
 
-  // User control modals
   const [isolationTarget, setIsolationTarget] = useState<Profile | null>(null);
   const [isolationReasonInput, setIsolationReasonInput] = useState('');
   const [purgeTarget, setPurgeTarget] = useState<Profile | null>(null);
+  const [purgeForceCascade, setPurgeForceCascade] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionFeedback, setActionFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -160,13 +160,42 @@ export default function AdminDashboardPage() {
           .from('activity_log')
           .select('*')
           .order('created_at', { ascending: false })
-          .limit(40),
+          .limit(100),
       ]);
 
       if (profilesRes.data) setAllProfiles(profilesRes.data as Profile[]);
       if (debtsRes.data) setAllDebts(debtsRes.data as Debt[]);
       if (paymentsRes.data) setAllPayments(paymentsRes.data as Payment[]);
-      if (logsRes.data) setAllLogs(logsRes.data as ActivityLogEntry[]);
+      if (logsRes.data) {
+        const fetchedLogs = logsRes.data as ActivityLogEntry[];
+        setAllLogs(fetchedLogs);
+        setLiveEvents((prev) => {
+          if (prev.length > 0) return prev;
+          return fetchedLogs.slice(0, 30).map((l) => {
+            const isAdmin = l.action.startsWith('ADMIN_');
+            const actorName = (l.details as any)?.by_name || (l.details as any)?.actorName || 'User';
+            const logDate = new Date(l.created_at);
+            return {
+              id: `hist_${l.id}`,
+              timestamp: logDate.toISOString(),
+              relativeTime: logDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+              table: 'activity_log' as const,
+              eventType: 'INSERT' as const,
+              title: isAdmin
+                ? `Admin: ${l.action.replace('ADMIN_', '').replace(/_/g, ' ')}`
+                : `Action: ${l.action.replace(/_/g, ' ')}`,
+              description: (l.details as any)?.target_email
+                ? `Target: ${(l.details as any).target_email}`
+                : (l.details as any)?.note || `Logged by ${actorName}`,
+              badgeClass: isAdmin
+                ? 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30'
+                : 'bg-indigo-500/15 text-indigo-500 border-indigo-500/20',
+              icon: isAdmin ? 'admin_panel_settings' : 'security',
+              payload: l,
+            };
+          });
+        });
+      }
     } catch (err) {
       console.error('Error fetching admin data:', err);
     } finally {
@@ -488,6 +517,21 @@ export default function AdminDashboardPage() {
         payload: { userId: targetUser.id, isolate, reason },
       });
 
+      // Persist permanently in activity_log
+      try {
+        await supabase.from('activity_log').insert({
+          user_id: currentUserId,
+          action: isolate ? 'ADMIN_USER_ISOLATED' : 'ADMIN_USER_UNISOLATED',
+          details: {
+            target_user_id: targetUser.id,
+            target_email: targetUser.email,
+            reason: reason || null,
+            admin_id: currentUserId,
+            timestamp: new Date().toISOString(),
+          },
+        });
+      } catch (_) {}
+
       setIsolationTarget(null);
       setIsolationReasonInput('');
       setActionFeedback({
@@ -543,6 +587,20 @@ export default function AdminDashboardPage() {
         payload: { userId: targetUser.id, verified },
       });
 
+      // Persist permanently in activity_log
+      try {
+        await supabase.from('activity_log').insert({
+          user_id: currentUserId,
+          action: verified ? 'ADMIN_USER_VERIFIED' : 'ADMIN_USER_UNVERIFIED',
+          details: {
+            target_user_id: targetUser.id,
+            target_email: targetUser.email,
+            admin_id: currentUserId,
+            timestamp: new Date().toISOString(),
+          },
+        });
+      } catch (_) {}
+
       setActionFeedback({
         type: 'success',
         text: verified ? 'Account marked as Admin-Verified.' : 'Verification cleared.',
@@ -595,6 +653,20 @@ export default function AdminDashboardPage() {
         payload: { userId: targetUser.id },
       });
 
+      // Persist permanently in activity_log
+      try {
+        await supabase.from('activity_log').insert({
+          user_id: currentUserId,
+          action: 'ADMIN_FORCE_REVERIFICATION',
+          details: {
+            target_user_id: targetUser.id,
+            target_email: targetUser.email,
+            admin_id: currentUserId,
+            timestamp: new Date().toISOString(),
+          },
+        });
+      } catch (_) {}
+
       setActionFeedback({ type: 'success', text: 'Account flagged: Reverification will be required.' });
     } catch (err: any) {
       setActionFeedback({ type: 'error', text: err.message || 'Action failed' });
@@ -603,36 +675,75 @@ export default function AdminDashboardPage() {
     }
   };
 
-  const handlePurgeUser = async (targetUser: Profile) => {
+  const handlePurgeUser = async (targetUser: Profile, forceCascade = false) => {
     setActionLoading(true);
     try {
+      const userDebts = allDebts.filter((d) => d.lender_id === targetUser.id || d.borrower_id === targetUser.id);
+      const liveDebts = userDebts.filter((d) => d.status === 'active' || d.status === 'pending');
+
+      if (liveDebts.length > 0 && !forceCascade) {
+        throw new Error(
+          `Cannot purge account with ${liveDebts.length} active transaction(s). Please resolve or check Force Cascade Purge.`
+        );
+      }
+
       let rpcSuccess = false;
       try {
         const { data, error } = await supabase.rpc('admin_delete_user', {
           target_user_id: targetUser.id,
+          p_force_cascade: forceCascade,
         });
         if (!error && data?.success) rpcSuccess = true;
       } catch (e) {}
 
       if (!rpcSuccess) {
+        // Fallback: cascade cleanup dependent payments and debts before deleting profile to prevent FK violation
+        const userDebtIds = userDebts.map((d) => d.id);
+        if (userDebtIds.length > 0) {
+          await supabase.from('payments').delete().in('debt_id', userDebtIds);
+          await supabase
+            .from('debts')
+            .delete()
+            .or(`lender_id.eq.${targetUser.id},borrower_id.eq.${targetUser.id},created_by.eq.${targetUser.id}`);
+        }
         await supabase.from('user_settings').delete().eq('user_id', targetUser.id);
         await supabase.from('contacts').delete().or(`owner_id.eq.${targetUser.id},contact_id.eq.${targetUser.id}`);
         await supabase.from('contact_requests').delete().or(`sender_id.eq.${targetUser.id},receiver_id.eq.${targetUser.id}`);
-        await supabase.from('profiles').delete().eq('id', targetUser.id);
+        const { error: delErr } = await supabase.from('profiles').delete().eq('id', targetUser.id);
+        if (delErr) throw delErr;
       }
+
+      // Persist permanent audit record in activity_log
+      try {
+        await supabase.from('activity_log').insert({
+          user_id: currentUserId,
+          action: 'ADMIN_USER_PURGED',
+          details: {
+            target_user_id: targetUser.id,
+            target_email: targetUser.email,
+            target_phone: targetUser.phone,
+            debts_purged_count: userDebts.length,
+            active_debts_count: liveDebts.length,
+            forced_cascade: forceCascade,
+            admin_id: currentUserId,
+            timestamp: new Date().toISOString(),
+          },
+        });
+      } catch (_) {}
 
       setAllProfiles((prev) => prev.filter((p) => p.id !== targetUser.id));
       setSelectedUser(null);
       setPurgeTarget(null);
+      setPurgeForceCascade(false);
 
       addTelemetryEvent({
         table: 'profiles',
         eventType: 'DELETE',
         title: 'User Purged Permanently',
-        description: `Account ${targetUser.email} removed by administrator`,
+        description: `Account ${targetUser.email} removed by administrator ${forceCascade ? '(Cascade Cleaned)' : ''}`,
         badgeClass: 'bg-red-500/20 text-red-500 border-red-500/30',
         icon: 'delete_forever',
-        payload: { userId: targetUser.id, email: targetUser.email },
+        payload: { userId: targetUser.id, email: targetUser.email, forceCascade },
       });
 
       await fetchAdminData(true);
@@ -1671,42 +1782,87 @@ export default function AdminDashboardPage() {
       )}
 
       {/* PURGE ACCOUNT CONFIRMATION MODAL */}
-      {purgeTarget && (
-        <Modal
-          isOpen={Boolean(purgeTarget)}
-          onClose={() => setPurgeTarget(null)}
-          title="Danger: Permanent User Purge"
-          subtitle={`Target: ${purgeTarget.email}`}
-          maxWidth="max-w-md"
-        >
-          <div className="space-y-4 font-mono text-xs">
-            <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-500">
-              <span className="font-bold block mb-1">WARNING: IRREVERSIBLE OPERATION</span>
-              <p className="text-[11px]">
-                This will permanently delete this account profile, clear contact connections, and purge associated shadow records.
-              </p>
-            </div>
+      {purgeTarget && (() => {
+        const targetDebts = allDebts.filter(
+          (d) => d.lender_id === purgeTarget.id || d.borrower_id === purgeTarget.id
+        );
+        const activeDebts = targetDebts.filter((d) => d.status === 'active' || d.status === 'pending');
+        const settledDebts = targetDebts.filter((d) => d.status === 'settled');
+        const hasLiveDebts = activeDebts.length > 0;
 
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setPurgeTarget(null)}
-                className="px-3.5 py-2 rounded-xl bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-bold cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={actionLoading}
-                onClick={() => handlePurgeUser(purgeTarget)}
-                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold cursor-pointer"
-              >
-                <span>{actionLoading ? 'Purging...' : 'Permanently Delete User'}</span>
-              </button>
+        return (
+          <Modal
+            isOpen={Boolean(purgeTarget)}
+            onClose={() => {
+              setPurgeTarget(null);
+              setPurgeForceCascade(false);
+            }}
+            title="Danger: Permanent User Purge"
+            subtitle={`Target: ${purgeTarget.email}`}
+            maxWidth="max-w-md"
+          >
+            <div className="space-y-4 font-mono text-xs">
+              {hasLiveDebts ? (
+                <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/40 text-amber-600 dark:text-amber-400 space-y-2">
+                  <div className="flex items-center gap-2 font-bold text-sm">
+                    <span className="material-symbols-outlined text-[20px] text-amber-500">warning</span>
+                    <span>Account Has Live Transactions!</span>
+                  </div>
+                  <p className="text-[11px] text-[var(--on-surface)] leading-relaxed">
+                    This account currently has <strong>{activeDebts.length} active/pending transaction(s)</strong> (and {settledDebts.length} settled).
+                    Standard purge cannot proceed while transactions are live because it impacts counterparties and ledger integrity.
+                  </p>
+                  <label className="flex items-start gap-2 pt-2 border-t border-amber-500/20 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={purgeForceCascade}
+                      onChange={(e) => setPurgeForceCascade(e.target.checked)}
+                      className="mt-0.5 rounded accent-red-600 cursor-pointer"
+                    />
+                    <span className="text-[11px] font-semibold text-red-600 dark:text-red-400">
+                      Force cascade: Permanently purge all {targetDebts.length} associated debts &amp; payments before deleting account
+                    </span>
+                  </label>
+                </div>
+              ) : (
+                <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-500">
+                  <span className="font-bold block mb-1">WARNING: IRREVERSIBLE OPERATION</span>
+                  <p className="text-[11px]">
+                    This will permanently delete this account profile, clear contact connections, and purge associated shadow records.
+                  </p>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPurgeTarget(null);
+                    setPurgeForceCascade(false);
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-bold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={actionLoading || (hasLiveDebts && !purgeForceCascade)}
+                  onClick={() => handlePurgeUser(purgeTarget, purgeForceCascade)}
+                  className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold cursor-pointer transition-opacity"
+                >
+                  <span>
+                    {actionLoading
+                      ? 'Purging...'
+                      : hasLiveDebts
+                      ? 'Force Cascade & Delete'
+                      : 'Permanently Delete User'}
+                  </span>
+                </button>
+              </div>
             </div>
-          </div>
-        </Modal>
-      )}
+          </Modal>
+        );
+      })()}
 
       {/* TELEMETRY PACKET INSPECT MODAL */}
       {selectedTelemetryEvent && (

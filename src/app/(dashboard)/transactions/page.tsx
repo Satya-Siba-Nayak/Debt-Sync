@@ -17,7 +17,7 @@ import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { getLedgerCache, setLedgerCache } from '@/lib/stores/ledger-store';
 import { SkeletonTableRows } from '@/components/ui/Skeleton';
 import { parseSplitDetails, parseShareMetadata, getCleanDebtNotes } from '@/lib/utils/split-bills';
-import { respondToDebtAgreement } from '@/lib/utils/debt-acceptance';
+import { respondToDebtAgreement, cancelPendingDebt } from '@/lib/utils/debt-acceptance';
 import Link from 'next/link';
 
 function TransactionsPageContent() {
@@ -109,6 +109,23 @@ function TransactionsPageContent() {
     } catch (err: any) {
       console.error('Error updating debt:', err);
       alert(err.message || 'Failed to update debt agreement');
+    }
+  };
+
+  const handleTakeBackDebt = async (debtId: string) => {
+    if (
+      !confirm(
+        'Are you sure you want to take back this pending agreement? This will cancel the transaction request before counterparty acceptance.'
+      )
+    ) {
+      return;
+    }
+    try {
+      await cancelPendingDebt(supabase, debtId);
+      fetchTransactions();
+    } catch (err: any) {
+      console.error('Error taking back debt:', err);
+      alert(err.message || 'Failed to take back pending agreement');
     }
   };
 
@@ -481,23 +498,37 @@ function TransactionsPageContent() {
                     )}
 
                     {d.status === 'pending' && d.created_by === currentUserId && (
-                      <div className="mt-3 pt-3 border-t border-amber-500/20 flex items-center justify-between gap-2">
+                      <div className="mt-3 pt-3 border-t border-amber-500/20 flex items-center justify-between gap-2 flex-wrap">
                         <span className="text-[11px] font-mono text-amber-500/90 flex items-center gap-1">
                           <span className="material-symbols-outlined text-[13px]">schedule</span>
                           <span>Awaiting acceptance</span>
                         </span>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setSelectedDebtForEdit(d);
-                          }}
-                          className="px-3 py-1 bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 border border-amber-500/30 rounded-lg font-mono text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
-                        >
-                          <span className="material-symbols-outlined text-[14px]">edit</span>
-                          <span>Edit</span>
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setSelectedDebtForEdit(d);
+                            }}
+                            className="px-2.5 py-1 bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 border border-amber-500/30 rounded-lg font-mono text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                          >
+                            <span className="material-symbols-outlined text-[14px]">edit</span>
+                            <span>Edit</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleTakeBackDebt(d.id);
+                            }}
+                            className="px-2.5 py-1 border border-red-500/40 bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 rounded-lg font-mono text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                          >
+                            <span className="material-symbols-outlined text-[14px]">undo</span>
+                            <span>Take Back</span>
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>

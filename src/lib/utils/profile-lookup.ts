@@ -184,6 +184,60 @@ export async function checkIdentifierConflict(
   return { hasConflict: false };
 }
 
+export interface PhoneCheckResult {
+  hasExistingAccount: boolean;
+  isGhost: boolean;
+  profile?: Profile;
+}
+
+/**
+ * Checks whether a phone number belongs to an active user or a ghost/shadow account.
+ */
+export async function checkPhoneRegistrationStatus(
+  phone: string,
+  email: string
+): Promise<PhoneCheckResult> {
+  const cleanPhone = phone.trim();
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanPhone || cleanPhone.replace(/[^\d]/g, '').length < 7) {
+    return { hasExistingAccount: false, isGhost: false };
+  }
+
+  const supabase = createClient();
+  try {
+    const { data: allProfiles } = await supabase
+      .from('profiles')
+      .select('id, full_name, email, phone, is_shadow, secondary_emails');
+
+    if (!allProfiles) return { hasExistingAccount: false, isGhost: false };
+
+    for (const p of allProfiles) {
+      if (p.phone && isSamePhone(p.phone, cleanPhone)) {
+        if (p.is_shadow) {
+          return {
+            hasExistingAccount: true,
+            isGhost: true,
+            profile: p as Profile,
+          };
+        } else {
+          // Active non-ghost user
+          if (!isSameEmail(p.email, cleanEmail)) {
+            return {
+              hasExistingAccount: true,
+              isGhost: false,
+              profile: p as Profile,
+            };
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error checking phone registration status:', err);
+  }
+
+  return { hasExistingAccount: false, isGhost: false };
+}
+
 /**
  * Searches profiles by name, email, or phone prefix/substring.
  */

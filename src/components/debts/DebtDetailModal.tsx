@@ -22,7 +22,7 @@ import {
   TransactionShareMetadata,
 } from '@/lib/utils/split-bills';
 import { EditPendingDebtModal } from './EditPendingDebtModal';
-import { respondToDebtAgreement } from '@/lib/utils/debt-acceptance';
+import { respondToDebtAgreement, cancelPendingDebt } from '@/lib/utils/debt-acceptance';
 import { sendNotificationEmail } from '@/lib/utils/email-notifier';
 
 export interface DebtDetailModalProps {
@@ -472,6 +472,28 @@ export function DebtDetailModal({
     }
   };
 
+  const handleTakeBackDebt = async () => {
+    if (!debt) return;
+    if (
+      !confirm(
+        'Are you sure you want to take back this pending agreement? This will cancel the transaction request before counterparty acceptance.'
+      )
+    ) {
+      return;
+    }
+    setActionLoading(true);
+    try {
+      await cancelPendingDebt(supabase, debt.id);
+      onClose();
+      onDebtUpdated?.();
+    } catch (e: any) {
+      console.error('Failed to take back pending agreement:', e);
+      alert(e.message || 'Failed to take back pending agreement.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const sortedPayments = sortPaymentsPendingFirst(payments);
 
   const totalObligation = calc.principal + calc.totalAccruedInterest;
@@ -890,18 +912,30 @@ export function DebtDetailModal({
                     Pending Counterparty Acceptance
                   </div>
                   <p className="text-xs text-amber-800/90 dark:text-amber-300/90 mt-0.5">
-                    Waiting for {otherName} to review &amp; accept this agreement. You can edit the principal, interest, terms, or notes before they accept.
+                    Waiting for {otherName} to review &amp; accept this agreement. You can edit details or take back the request before they accept.
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsEditModalOpen(true)}
-                className="py-1.5 px-3 rounded-lg bg-amber-500 hover:bg-amber-600 text-stone-950 font-mono text-xs font-bold flex items-center justify-center gap-1.5 shrink-0 cursor-pointer shadow-xs transition-colors"
-              >
-                <span className="material-symbols-outlined text-[15px]">edit</span>
-                <span>Edit Agreement</span>
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsEditModalOpen(true)}
+                  className="py-1.5 px-3 rounded-lg bg-amber-500 hover:bg-amber-600 text-stone-950 font-mono text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                >
+                  <span className="material-symbols-outlined text-[15px]">edit</span>
+                  <span>Edit</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTakeBackDebt}
+                  disabled={actionLoading}
+                  className="py-1.5 px-3 rounded-lg border border-red-500/40 bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 font-mono text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
+                  title="Take back and cancel this pending request"
+                >
+                  <span className="material-symbols-outlined text-[15px]">undo</span>
+                  <span>Take Back</span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -1298,14 +1332,25 @@ export function DebtDetailModal({
               )}
 
               {debt.status === 'pending' && debt.created_by === currentUserId && (
-                <button
-                  type="button"
-                  onClick={() => setIsEditModalOpen(true)}
-                  className="py-2 px-3.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-95 shadow-xs flex items-center gap-1.5 cursor-pointer min-h-[40px]"
-                >
-                  <span className="material-symbols-outlined text-[15px]">edit</span>
-                  <span>Edit Agreement</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditModalOpen(true)}
+                    className="py-2 px-3.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-95 shadow-xs flex items-center gap-1.5 cursor-pointer min-h-[40px]"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">edit</span>
+                    <span>Edit Agreement</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleTakeBackDebt}
+                    disabled={actionLoading}
+                    className="py-2 px-3.5 rounded-xl border border-red-500/40 bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 font-mono text-xs font-bold flex items-center gap-1.5 cursor-pointer min-h-[40px] disabled:opacity-50"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">undo</span>
+                    <span>Take Back</span>
+                  </button>
+                </div>
               )}
 
               {debt.status === 'pending' && debt.created_by !== currentUserId && (

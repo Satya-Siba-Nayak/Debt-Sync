@@ -120,3 +120,95 @@ export async function respondToDebtAgreement(
     throw err;
   }
 }
+
+/**
+ * Allows the creator of a pending debt agreement to take it back (cancel before acceptance).
+ */
+export async function cancelPendingDebt(
+  supabase: SupabaseClient,
+  debtId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // 1. Try secure RPC cancel_pending_debt
+    let rpcSuccess = false;
+    try {
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc('cancel_pending_debt', {
+        p_debt_id: debtId,
+      });
+      if (!rpcErr && rpcRes && rpcRes.success) {
+        rpcSuccess = true;
+      }
+    } catch (_) {}
+
+    // 2. Client fallback
+    if (!rpcSuccess) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      const currentUserId = user?.id;
+
+      const { data: debt, error: fetchErr } = await supabase
+        .from('debts')
+        .select('*')
+        .eq('id', debtId)
+        .single();
+
+      if (fetchErr || !debt) {
+        throw new Error('Transaction record not found.');
+      }
+
+      if (debt.status !== 'pending') {
+        throw new Error('Only pending transactions that have not yet been accepted can be taken back.');
+      }
+
+      // Delete payments attached to this debt if any
+      await supabase.from('payments').delete().eq('debt_id', debtId);
+
+      // Attempt delete of debt
+      const { error: delErr } = await supabase.from('debts').delete().eq('id', debtId);
+      if (delErr) {
+        // If delete fails due to RLS, set status to declined and hide
+        const existingHidden = Array.isArray(debt.hidden_by) ? debt.hidden_by : [];
+        const nextHidden =
+          currentUserId && !existingHidden.includes(currentUserId)
+            ? [...existingHidden, currentUserId]
+            : existingHidden;
+
+        await supabase
+          .from('debts')
+          .update({
+            status: 'declined',
+            hidden_by: nextHidden,
+          })
+          .eq('id', debtId);
+      }
+
+      // Log in activity log
+      if (currentUserId) {
+        try {
+          await supabase.from('activity_log').insert({
+            user_id: currentUserId,
+            debt_id: debtId,
+            action: 'debt_cancelled_by_creator',
+            details: {
+              principal: debt.principal,
+              currency: debt.currency,
+              timestamp: new Date().toISOString(),
+            },
+          });
+        } catch (_) {}
+      }
+    }
+
+    invalidateCooldownCache();
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('debtsync:refresh'));
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    console.error('Error cancelling pending debt:', err);
+    throw err;
+  }
+}
