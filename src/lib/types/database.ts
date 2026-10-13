@@ -17,6 +17,8 @@ export type Profile = {
   isolation_reason?: string | null;
   is_verified?: boolean;
   needs_reverification?: boolean;
+  is_purged?: boolean;
+  purged_at?: string | null;
   claimed_at: string | null;
   secondary_emails?: string[];
   recent_custom_avatars?: string[];
@@ -86,7 +88,9 @@ export type Debt = {
   interest_type: 'none' | 'simple' | 'compound';
   interest_rate: number | null;
   compound_freq: 'daily' | 'weekly' | 'monthly' | 'yearly' | null;
-  status: 'pending' | 'active' | 'settled' | 'disputed' | 'declined';
+  status: 'pending' | 'active' | 'settled' | 'disputed' | 'declined' | 'purged';
+  purged_by_admin?: boolean;
+  purged_at?: string | null;
   notes: string | null;
   counterparty_notes?: string | null;
   hidden_by?: string[];

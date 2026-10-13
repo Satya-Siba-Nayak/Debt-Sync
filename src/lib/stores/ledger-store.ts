@@ -22,7 +22,7 @@ export function computeDashboardStats(allDebts: Debt[], allPayments: Payment[], 
   let borrowerInterestSum = 0;
 
   for (const d of allDebts) {
-    if (d.status === 'settled' || d.status === 'declined') continue;
+    if (d.status === 'settled' || d.status === 'declined' || d.status === 'purged') continue;
 
     const debtPayments = allPayments.filter((p) => p.debt_id === d.id);
     const calc = calculateDebtBalance(d, debtPayments);

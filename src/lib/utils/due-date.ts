@@ -2,7 +2,7 @@
  * Computes overdue status, remaining days, and styling for a debt's due date.
  */
 export function getDueDateInfo(dueDate?: string | null, status?: string) {
-  if (!dueDate || status === 'settled' || status === 'declined') return null;
+  if (!dueDate || status === 'settled' || status === 'declined' || status === 'purged') return null;
 
   const now = new Date();
   const due = new Date(dueDate);

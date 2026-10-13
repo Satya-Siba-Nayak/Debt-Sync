@@ -175,7 +175,11 @@ export function DebtDetailModal({
   const myPerson = isLender ? debt.lender : debt.borrower;
   const myName = myPerson?.full_name || myPerson?.email || 'Participant';
   const otherPerson = isLender ? debt.borrower : debt.lender;
-  const otherName = otherPerson?.full_name || otherPerson?.email || 'Counterparty';
+  const isPurged =
+    debt.status === 'purged' ||
+    (typeof debt.notes === 'string' && debt.notes.includes('[TRANSACTION PURGED BY ADMIN')) ||
+    Boolean((otherPerson as any)?.is_purged);
+  const otherName = otherPerson?.full_name || otherPerson?.email || (isPurged ? 'Purged Account' : 'Counterparty');
   const calc = calculateDebtBalance(debt, payments);
   const dueDateInfo = getDueDateInfo(debt.due_date, debt.status);
   const debtCurrency = debt.currency || currency;
@@ -569,9 +573,11 @@ export function DebtDetailModal({
                     {otherName}
                   </span>
                   <Chip
-                    label={debt.status}
+                    label={isPurged ? 'purged' : debt.status}
                     variant={
-                      debt.status === 'active'
+                      isPurged
+                        ? 'purged'
+                        : debt.status === 'active'
                         ? 'active'
                         : debt.status === 'settled'
                         ? 'settled'
@@ -581,8 +587,9 @@ export function DebtDetailModal({
                         ? 'declined'
                         : 'default'
                     }
+                    icon={isPurged ? 'admin_panel_settings' : undefined}
                   />
-                  {dueDateInfo && debt.status !== 'declined' && (
+                  {dueDateInfo && debt.status !== 'declined' && !isPurged && (
                     <span
                       className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-semibold border ${dueDateInfo.className} flex items-center gap-1`}
                     >
@@ -612,7 +619,9 @@ export function DebtDetailModal({
                   {isLender ? 'You Lent (Receivable)' : 'You Borrowed (Payable)'}
                 </span>
                 <div className="font-mono text-xl font-bold text-[var(--on-surface)] mt-0.5">
-                  {debt.status === 'declined' ? (
+                  {isPurged ? (
+                    <span className="text-red-500 line-through text-sm">Purged by Admin</span>
+                  ) : debt.status === 'declined' ? (
                     <span className="text-red-500 line-through text-sm">Void</span>
                   ) : (
                     formatCurrency(calc.currentBalance, debtCurrency, { showDecimals: true })
@@ -867,8 +876,46 @@ export function DebtDetailModal({
             </div>
           )}
 
+          {/* Administrative Purge Notification Banner */}
+          {isPurged && (
+            <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in duration-200">
+              <div className="flex items-start gap-2.5">
+                <span className="material-symbols-outlined text-red-500 text-[22px] mt-0.5 shrink-0">
+                  admin_panel_settings
+                </span>
+                <div>
+                  <div className="font-heading font-bold text-sm text-red-700 dark:text-red-400 flex items-center gap-2">
+                    <span>(Transaction purged by admin)</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/20 text-red-700 dark:text-red-300 font-mono font-bold">
+                      Purged
+                    </span>
+                  </div>
+                  <p className="text-xs text-red-600/90 dark:text-red-300/90 mt-1 leading-relaxed">
+                    This transaction was purged by a DebtSync administrator due to counterparty account termination.
+                    If you have any problems or disputes regarding this record, please contact support at{' '}
+                    <a
+                      href={`mailto:support@satya-nayak.dev?subject=Support%20Inquiry%20-%20Purged%20Transaction%20${debt.id}`}
+                      className="font-bold underline text-red-800 dark:text-red-200 hover:opacity-80"
+                    >
+                      support@satya-nayak.dev
+                    </a>.
+                  </p>
+                </div>
+              </div>
+              <div className="shrink-0 self-end sm:self-center">
+                <a
+                  href={`mailto:support@satya-nayak.dev?subject=Support%20Inquiry%20-%20Purged%20Transaction%20${debt.id}&body=Hi%20DebtSync%20Support,%0A%0AMy%20transaction%20(${debt.id})%20with%20counterparty%20${encodeURIComponent(otherName)}%20was%20purged%20by%20admin.%0APrincipal:%20${debt.principal}%20${debt.currency}%0A%0AProblem%20description:%0A`}
+                  className="py-1.5 px-3 rounded-lg bg-red-600 hover:bg-red-700 text-white font-mono text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                >
+                  <span className="material-symbols-outlined text-[15px]">mail</span>
+                  <span>Contact Support</span>
+                </a>
+              </div>
+            </div>
+          )}
+
           {/* Pending / Disputed Repayment Warning Banners */}
-          {(calc.pendingVerificationPaid || 0) > 0 && (
+          {(calc.pendingVerificationPaid || 0) > 0 && !isPurged && (
             <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-800 dark:text-amber-200 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <span className="material-symbols-outlined text-[18px] text-amber-500">
@@ -1321,7 +1368,17 @@ export function DebtDetailModal({
           {/* Modal Footer Actions */}
           <div className="pt-4 border-t border-[var(--outline-variant)]/20 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2 flex-wrap">
-              {debt.status === 'active' && calc.currentBalance > 0 && (
+              {isPurged && (
+                <a
+                  href={`mailto:support@satya-nayak.dev?subject=Support%20Inquiry%20-%20Purged%20Transaction%20${debt.id}&body=Hi%20DebtSync%20Support,%0A%0AMy%20transaction%20(${debt.id})%20with%20counterparty%20${encodeURIComponent(otherName)}%20was%20purged%20by%20admin.%0APrincipal:%20${debt.principal}%20${debt.currency}%0A%0AProblem%20description:%0A`}
+                  className="py-2 px-3.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-mono text-xs font-bold flex items-center gap-1.5 cursor-pointer min-h-[40px] shadow-xs transition-colors"
+                >
+                  <span className="material-symbols-outlined text-[15px]">mail</span>
+                  <span>Contact Support (support@satya-nayak.dev)</span>
+                </a>
+              )}
+
+              {!isPurged && debt.status === 'active' && calc.currentBalance > 0 && (
                 <button
                   type="button"
                   onClick={() => setIsPaymentModalOpen(true)}

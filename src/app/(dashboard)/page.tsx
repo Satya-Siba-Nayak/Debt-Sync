@@ -392,7 +392,11 @@ export default function GlobalDashboardPage() {
               {sortedDebts.slice(0, 8).map((d) => {
                 const isLender = d.lender_id === currentUserId;
                 const otherPerson = isLender ? d.borrower : d.lender;
-                const name = otherPerson?.full_name || otherPerson?.email || 'Unknown';
+                const isPurged =
+                  d.status === 'purged' ||
+                  (typeof d.notes === 'string' && d.notes.includes('[TRANSACTION PURGED BY ADMIN')) ||
+                  Boolean((otherPerson as any)?.is_purged);
+                const name = otherPerson?.full_name || otherPerson?.email || (isPurged ? 'Purged Account' : 'Unknown');
                 const debtPayments = payments.filter((p) => p.debt_id === d.id);
                 const calc = calculateDebtBalance(d, debtPayments);
                 const dueDateInfo = getDueDateInfo(d.due_date, d.status);
@@ -405,7 +409,9 @@ export default function GlobalDashboardPage() {
                     key={d.id}
                     onClick={() => setSelectedDebtForDetail(d)}
                     className={`block p-4 rounded-xl border transition-all shadow-xs cursor-pointer ${
-                      d.status === 'declined'
+                      isPurged
+                        ? 'bg-red-500/5 border-red-500/30 hover:bg-red-500/10'
+                        : d.status === 'declined'
                         ? 'bg-[var(--surface-container-low)]/40 border-red-500/20 opacity-85'
                         : 'bg-[var(--surface-container-low)]/70 hover:bg-[var(--surface-container-high)]/70 border-[var(--outline-variant)]/20'
                     }`}
@@ -424,6 +430,21 @@ export default function GlobalDashboardPage() {
                         <div className="min-w-0">
                           <div className="font-semibold text-sm text-[var(--on-surface)] group-hover:text-[var(--primary)] group-hover:underline truncate flex items-center gap-1.5 flex-wrap">
                             <span className="truncate">{name}</span>
+                            {isPurged && (
+                              <span
+                                className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30 flex items-center gap-0.5 shrink-0"
+                                title="Transaction purged by administrator"
+                              >
+                                <span className="material-symbols-outlined text-[10px]">admin_panel_settings</span>
+                                <span>(Transaction purged by admin)</span>
+                              </span>
+                            )}
+                            {split && (
+                              <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/20 flex items-center gap-0.5 shrink-0">
+                                <span className="material-symbols-outlined text-[10px]">call_split</span>
+                                <span>{split.title}</span>
+                              </span>
+                            )}
                             {shareMeta?.globalEnabled && (
                               <span
                                 className="px-1.5 py-0.5 rounded text-[9px] font-mono text-[var(--on-surface-variant)] bg-[var(--surface-container-high)]/70 border border-[var(--outline-variant)]/25 flex items-center gap-0.5 shrink-0"
@@ -441,9 +462,11 @@ export default function GlobalDashboardPage() {
                       </Link>
                       <div className="flex flex-col items-end gap-1">
                         <Chip
-                          label={d.status}
+                          label={isPurged ? 'purged' : d.status}
                           variant={
-                            d.status === 'active'
+                            isPurged
+                              ? 'purged'
+                              : d.status === 'active'
                               ? 'active'
                               : d.status === 'settled'
                               ? 'settled'
@@ -453,8 +476,9 @@ export default function GlobalDashboardPage() {
                               ? 'declined'
                               : 'default'
                           }
+                          icon={isPurged ? 'admin_panel_settings' : undefined}
                         />
-                        {dueDateInfo && d.status !== 'declined' && (
+                        {dueDateInfo && d.status !== 'declined' && !isPurged && (
                           <span className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-semibold border ${dueDateInfo.className} flex items-center gap-1`}>
                             <span className="material-symbols-outlined text-[11px]">
                               {dueDateInfo.isOverdue ? 'warning' : 'event'}
@@ -467,7 +491,12 @@ export default function GlobalDashboardPage() {
 
                     <div className="mt-3 pt-3 border-t border-[var(--outline-variant)]/15 flex items-center justify-between">
                       <div>
-                        {d.status === 'declined' ? (
+                        {isPurged ? (
+                          <span className="font-mono text-xs font-bold inline-flex items-center gap-1 text-red-600 dark:text-red-400">
+                            <span className="material-symbols-outlined text-[14px]">admin_panel_settings</span>
+                            (Transaction purged by admin)
+                          </span>
+                        ) : d.status === 'declined' ? (
                           <span className="font-mono text-xs font-bold inline-flex items-center gap-1 text-red-500 dark:text-red-400">
                             <span className="material-symbols-outlined text-[14px]">block</span>
                             Declined
@@ -492,7 +521,7 @@ export default function GlobalDashboardPage() {
                             </span>
                           )}
                           <span>
-                            {d.status === 'declined' ? (
+                            {d.status === 'declined' || isPurged ? (
                               <span className="line-through">{formatCurrency(d.principal, d.currency || currency)}</span>
                             ) : (
                               formatCurrency(d.principal, d.currency || currency)
@@ -507,7 +536,11 @@ export default function GlobalDashboardPage() {
                           Remaining
                         </span>
                         <span className="font-mono font-bold text-base text-[var(--on-surface)]">
-                          {d.status === 'declined' ? (
+                          {isPurged ? (
+                            <span className="text-red-500/80 dark:text-red-400/80 line-through text-xs font-mono">
+                              Purged
+                            </span>
+                          ) : d.status === 'declined' ? (
                             <span className="text-red-500/80 dark:text-red-400/80 line-through text-xs font-mono">
                               Void
                             </span>
@@ -517,6 +550,25 @@ export default function GlobalDashboardPage() {
                         </span>
                       </div>
                     </div>
+
+                    {isPurged && (
+                      <div
+                        className="mt-3 pt-2.5 border-t border-red-500/20 flex items-center justify-between gap-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <span className="text-[11px] font-mono text-red-500 flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[13px]">help</span>
+                          <span>Purged balance inquiry</span>
+                        </span>
+                        <a
+                          href={`mailto:support@satya-nayak.dev?subject=Support%20Inquiry%20-%20Purged%20Transaction%20${d.id}`}
+                          className="px-3 py-1 rounded-lg border border-red-500/40 bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 font-mono text-xs font-bold flex items-center gap-1 transition-colors"
+                        >
+                          <span className="material-symbols-outlined text-[13px]">mail</span>
+                          <span>Support</span>
+                        </a>
+                      </div>
+                    )}
 
                     {d.status === 'pending' && d.created_by !== currentUserId && (
                       <div
@@ -578,7 +630,11 @@ export default function GlobalDashboardPage() {
                   {sortedDebts.slice(0, 8).map((d) => {
                     const isLender = d.lender_id === currentUserId;
                     const otherPerson = isLender ? d.borrower : d.lender;
-                    const name = otherPerson?.full_name || otherPerson?.email || 'Unknown';
+                    const isPurged =
+                      d.status === 'purged' ||
+                      (typeof d.notes === 'string' && d.notes.includes('[TRANSACTION PURGED BY ADMIN')) ||
+                      Boolean((otherPerson as any)?.is_purged);
+                    const name = otherPerson?.full_name || otherPerson?.email || (isPurged ? 'Purged Account' : 'Unknown');
                     const debtPayments = payments.filter((p) => p.debt_id === d.id);
                     const calc = calculateDebtBalance(d, debtPayments);
                     const dueDateInfo = getDueDateInfo(d.due_date, d.status);
@@ -591,7 +647,9 @@ export default function GlobalDashboardPage() {
                         key={d.id}
                         onClick={() => setSelectedDebtForDetail(d)}
                         className={`transition-colors cursor-pointer ${
-                          d.status === 'declined'
+                          isPurged
+                            ? 'bg-red-500/5 hover:bg-red-500/10'
+                            : d.status === 'declined'
                             ? 'bg-red-500/5 hover:bg-red-500/10 opacity-80'
                             : 'hover:bg-[var(--surface-container-low)]/50'
                         }`}
@@ -611,6 +669,15 @@ export default function GlobalDashboardPage() {
                             <div>
                               <div className="font-semibold text-[var(--on-surface)] group-hover:text-[var(--primary)] group-hover:underline transition-colors flex items-center gap-1.5 flex-wrap">
                                 <span>{name}</span>
+                                {isPurged && (
+                                  <span
+                                    className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30 flex items-center gap-0.5"
+                                    title="Transaction purged by administrator"
+                                  >
+                                    <span className="material-symbols-outlined text-[10px]">admin_panel_settings</span>
+                                    <span>(Transaction purged by admin)</span>
+                                  </span>
+                                )}
                                 {split && (
                                   <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/20 flex items-center gap-1">
                                     <span className="material-symbols-outlined text-[11px]">call_split</span>
@@ -635,7 +702,12 @@ export default function GlobalDashboardPage() {
                         </td>
 
                         <td className="py-4">
-                          {d.status === 'declined' ? (
+                          {isPurged ? (
+                            <span className="font-mono text-xs font-bold inline-flex items-center gap-1 text-red-600 dark:text-red-400">
+                              <span className="material-symbols-outlined text-[14px]">admin_panel_settings</span>
+                              Purged
+                            </span>
+                          ) : d.status === 'declined' ? (
                             <span className="font-mono text-xs font-bold inline-flex items-center gap-1 text-red-500 dark:text-red-400">
                               <span className="material-symbols-outlined text-[14px]">block</span>
                               Declined
@@ -655,7 +727,7 @@ export default function GlobalDashboardPage() {
                         </td>
 
                         <td className="py-4 font-mono text-xs text-[var(--on-surface-variant)]">
-                          {d.status === 'declined' ? (
+                          {isPurged || d.status === 'declined' ? (
                             <span className="line-through">
                               {d.interest_type === 'none' ? '0% (Interest-Free)' : `${d.interest_rate}% ${d.interest_type}`}
                             </span>
@@ -669,7 +741,11 @@ export default function GlobalDashboardPage() {
                         </td>
 
                         <td className="py-4 font-mono font-bold text-sm text-[var(--on-surface)]">
-                          {d.status === 'declined' ? (
+                          {isPurged ? (
+                            <span className="text-red-500/80 dark:text-red-400/80 line-through text-xs font-mono">
+                              Purged
+                            </span>
+                          ) : d.status === 'declined' ? (
                             <span className="text-red-500/80 dark:text-red-400/80 line-through text-xs font-mono">
                               Void
                             </span>
@@ -681,9 +757,11 @@ export default function GlobalDashboardPage() {
                         <td className="py-4">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <Chip
-                              label={d.status}
+                              label={isPurged ? 'purged' : d.status}
                               variant={
-                                d.status === 'active'
+                                isPurged
+                                  ? 'purged'
+                                  : d.status === 'active'
                                   ? 'active'
                                   : d.status === 'settled'
                                   ? 'settled'
@@ -693,8 +771,9 @@ export default function GlobalDashboardPage() {
                                   ? 'declined'
                                   : 'default'
                               }
+                              icon={isPurged ? 'admin_panel_settings' : undefined}
                             />
-                            {dueDateInfo && d.status !== 'declined' && (
+                            {dueDateInfo && d.status !== 'declined' && !isPurged && (
                               <span className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-semibold border ${dueDateInfo.className} flex items-center gap-1`}>
                                 <span className="material-symbols-outlined text-[11px]">
                                   {dueDateInfo.isOverdue ? 'warning' : 'event'}
@@ -707,6 +786,16 @@ export default function GlobalDashboardPage() {
 
                         <td className="py-4 text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-end gap-2">
+                            {isPurged && (
+                              <a
+                                href={`mailto:support@satya-nayak.dev?subject=Support%20Inquiry%20-%20Purged%20Transaction%20${d.id}`}
+                                className="px-2.5 py-1 rounded-lg border border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 font-mono text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                                title="Contact support at support@satya-nayak.dev"
+                              >
+                                <span className="material-symbols-outlined text-[13px]">mail</span>
+                                <span>Support</span>
+                              </a>
+                            )}
                             {d.status === 'pending' && d.created_by !== currentUserId ? (
                               <button
                                 onClick={() => handleAcceptDebt(d.id, 'active')}

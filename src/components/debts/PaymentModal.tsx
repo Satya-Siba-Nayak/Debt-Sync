@@ -371,6 +371,10 @@ export function PaymentModal({
         throw new Error('Your account is quarantined in security isolation. Submitting payments is disabled.');
       }
 
+      if (debt.status === 'purged' || (typeof debt.notes === 'string' && debt.notes.includes('[TRANSACTION PURGED BY ADMIN'))) {
+        throw new Error('This transaction was purged by an administrator due to account termination. Repayments cannot be submitted. If you have questions, please contact support at support@satya-nayak.dev');
+      }
+
       const rawNum = Number(amount);
       if (isNaN(rawNum) || rawNum <= 0) throw new Error('Payment amount must be greater than 0');
       const paymentAmount = round2(rawNum);
@@ -519,6 +523,9 @@ export function PaymentModal({
   };
 
   const paymentMethodsList = PRIMARY_PAYMENT_METHODS;
+  const isDebtPurged =
+    debt.status === 'purged' ||
+    (typeof debt.notes === 'string' && debt.notes.includes('[TRANSACTION PURGED BY ADMIN'));
 
   return (
     <Modal
@@ -556,6 +563,28 @@ export function PaymentModal({
           <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 font-mono text-xs flex items-center gap-2">
             <span className="material-symbols-outlined text-[18px]">security</span>
             <span>Your account is currently quarantined in security isolation. Submitting payments is disabled.</span>
+          </div>
+        )}
+
+        {(debt.status === 'purged' || (typeof debt.notes === 'string' && debt.notes.includes('[TRANSACTION PURGED BY ADMIN'))) && (
+          <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-xs font-mono space-y-2">
+            <div className="flex items-center gap-2 text-red-700 dark:text-red-400 font-bold text-sm">
+              <span className="material-symbols-outlined text-[18px]">admin_panel_settings</span>
+              <span>(Transaction purged by admin)</span>
+            </div>
+            <p className="text-red-600/90 dark:text-red-300/90 leading-relaxed">
+              This transaction was purged by a DebtSync administrator due to counterparty account termination. Repayments cannot be submitted through the app.
+              If you have any problems or disputes regarding this transaction, please contact support:
+            </p>
+            <div>
+              <a
+                href={`mailto:support@satya-nayak.dev?subject=Support%20Inquiry%20-%20Purged%20Transaction%20${debt.id}`}
+                className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold transition-colors"
+              >
+                <span className="material-symbols-outlined text-[14px]">mail</span>
+                <span>Contact support@satya-nayak.dev</span>
+              </a>
+            </div>
           </div>
         )}
 
@@ -1359,13 +1388,15 @@ export function PaymentModal({
           </button>
           <button
             type="submit"
-            disabled={loading || checkingLimits || isBlockedByPending || isCurrentUserIsolated}
+            disabled={loading || checkingLimits || isBlockedByPending || isCurrentUserIsolated || isDebtPurged}
             className="flex-1 py-2.5 px-4 rounded-xl bg-[var(--secondary)] text-[var(--on-secondary)] font-mono text-xs font-bold hover:opacity-95 disabled:opacity-50"
           >
             {loading
               ? 'Submitting...'
               : checkingLimits
               ? 'Checking...'
+              : isDebtPurged
+              ? 'Transaction Purged'
               : isCurrentUserIsolated
               ? 'Account Quarantined'
               : isLender

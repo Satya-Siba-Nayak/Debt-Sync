@@ -42,7 +42,7 @@ export function generateCashflowData(
 
       // Loans created in this week
       for (const d of debts) {
-        if (d.status === 'declined') continue;
+        if (d.status === 'declined' || d.status === 'purged') continue;
         const dDate = new Date(d.created_at);
         if (dDate >= weekStart && dDate < weekEnd) {
           if (d.lender_id === currentUserId) {
@@ -81,7 +81,7 @@ export function generateCashflowData(
       let moneyOut = 0;
 
       for (const d of debts) {
-        if (d.status === 'declined') continue;
+        if (d.status === 'declined' || d.status === 'purged') continue;
         const dDate = new Date(d.created_at);
         if (dDate >= targetDate && dDate < nextMonth) {
           if (d.lender_id === currentUserId) {
@@ -118,7 +118,7 @@ export function generateCashflowData(
     let moneyOut = 0;
 
     for (const d of debts) {
-      if (d.status === 'declined') continue;
+      if (d.status === 'declined' || d.status === 'purged') continue;
       const dDate = new Date(d.created_at);
       if (dDate >= targetDate && dDate < nextMonth) {
         if (d.lender_id === currentUserId) {
@@ -201,7 +201,7 @@ export function generatePortfolioGrowthData(
     let totalOwedAtT = 0;
 
     for (const d of debts) {
-      if (d.status === 'declined') continue;
+      if (d.status === 'declined' || d.status === 'purged') continue;
       const dCreatedMs = new Date(d.created_at).getTime();
       if (t < dCreatedMs) continue;
 
@@ -292,7 +292,7 @@ export function generatePersonGrowthData(
     let paidUpToT = 0;
 
     for (const d of personDebts) {
-      if (d.status === 'declined') continue;
+      if (d.status === 'declined' || d.status === 'purged') continue;
       const dCreatedMs = new Date(d.created_at).getTime();
       if (t < dCreatedMs) continue;
 

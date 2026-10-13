@@ -697,15 +697,38 @@ export default function AdminDashboardPage() {
       } catch (e) {}
 
       if (!rpcSuccess) {
-        // Fallback: cascade cleanup dependent payments and debts before deleting profile to prevent FK violation
-        const userDebtIds = userDebts.map((d) => d.id);
-        if (userDebtIds.length > 0) {
-          await supabase.from('payments').delete().in('debt_id', userDebtIds);
-          await supabase
-            .from('debts')
-            .delete()
-            .or(`lender_id.eq.${targetUser.id},borrower_id.eq.${targetUser.id},created_by.eq.${targetUser.id}`);
+        // Fallback: preserve counterparty debts with status='purged' and support notice; delete self-referential debts
+        const purgedSystemUserId = '00000000-0000-0000-0000-000000000001';
+        try {
+          await supabase.from('profiles').upsert({
+            id: purgedSystemUserId,
+            email: 'purged-account@debtsync.local',
+            full_name: 'Purged Account',
+            is_purged: true,
+            purged_at: new Date().toISOString(),
+          });
+        } catch (_) {}
+
+        const purgeNotice = `[TRANSACTION PURGED BY ADMIN: Counterparty account (${targetUser.email || targetUser.full_name || targetUser.id}) was purged by an administrator. For inquiries or disputes, contact support@satya-nayak.dev]`;
+
+        for (const d of userDebts) {
+          if (d.lender_id === targetUser.id && d.borrower_id === targetUser.id) {
+            await supabase.from('payments').delete().eq('debt_id', d.id);
+            await supabase.from('debts').delete().eq('id', d.id);
+          } else {
+            const newNotes = d.notes ? `${purgeNotice}\n\n${d.notes}` : purgeNotice;
+            const updatePayload: Record<string, any> = {
+              status: 'purged',
+              notes: newNotes,
+            };
+            if (d.lender_id === targetUser.id) updatePayload.lender_id = purgedSystemUserId;
+            if (d.borrower_id === targetUser.id) updatePayload.borrower_id = purgedSystemUserId;
+            if (d.created_by === targetUser.id) updatePayload.created_by = purgedSystemUserId;
+
+            await supabase.from('debts').update(updatePayload).eq('id', d.id);
+          }
         }
+
         await supabase.from('user_settings').delete().eq('user_id', targetUser.id);
         await supabase.from('contacts').delete().or(`owner_id.eq.${targetUser.id},contact_id.eq.${targetUser.id}`);
         await supabase.from('contact_requests').delete().or(`sender_id.eq.${targetUser.id},receiver_id.eq.${targetUser.id}`);
@@ -1810,7 +1833,7 @@ export default function AdminDashboardPage() {
                   </div>
                   <p className="text-[11px] text-[var(--on-surface)] leading-relaxed">
                     This account currently has <strong>{activeDebts.length} active/pending transaction(s)</strong> (and {settledDebts.length} settled).
-                    Standard purge cannot proceed while transactions are live because it impacts counterparties and ledger integrity.
+                    When purged with Force Cascade, counterparty ledgers will NOT lose these records: transactions will be safely closed and marked as <strong>(Transaction purged by admin)</strong> with support contact info (<strong>support@satya-nayak.dev</strong>) for any disputes.
                   </p>
                   <label className="flex items-start gap-2 pt-2 border-t border-amber-500/20 cursor-pointer">
                     <input
@@ -1820,7 +1843,7 @@ export default function AdminDashboardPage() {
                       className="mt-0.5 rounded accent-red-600 cursor-pointer"
                     />
                     <span className="text-[11px] font-semibold text-red-600 dark:text-red-400">
-                      Force cascade: Permanently purge all {targetDebts.length} associated debts &amp; payments before deleting account
+                      Force cascade: Preserve counterparty audit trail with <em>(Transaction purged by admin)</em> and support contact (support@satya-nayak.dev) before deleting this user profile
                     </span>
                   </label>
                 </div>

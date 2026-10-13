@@ -50,8 +50,8 @@ export function calculateDebtBalance(
   const pendingVerificationPaid = round2(pendingPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0));
   const disputedPaid = round2(disputedPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0));
 
-  // Declined agreements are void: balance is 0 and no interest accrues
-  if (debt.status === 'declined') {
+  // Declined or purged agreements are void: balance is 0 and no interest accrues
+  if (debt.status === 'declined' || debt.status === 'purged') {
     return {
       principal,
       totalAccruedInterest: 0,
@@ -256,7 +256,7 @@ export function allocateBulkPayment(
  * Helper to check if an active debt is overdue.
  */
 export function isDebtOverdue(dueDate?: string | null, status?: string): boolean {
-  if (!dueDate || status === 'settled' || status === 'declined') return false;
+  if (!dueDate || status === 'settled' || status === 'declined' || status === 'purged') return false;
   const now = new Date();
   const due = new Date(dueDate);
   const nowDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();

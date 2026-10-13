@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type ChipVariant = 'active' | 'pending' | 'overdue' | 'settled' | 'declined' | 'default';
+export type ChipVariant = 'active' | 'pending' | 'overdue' | 'settled' | 'declined' | 'purged' | 'default';
 
 interface ChipProps {
   label: string;
@@ -22,16 +22,19 @@ export function Chip({ label, variant = 'default', size = 'sm', icon }: ChipProp
     colorClasses = 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20';
   } else if (variant === 'declined') {
     colorClasses = 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/30';
+  } else if (variant === 'purged') {
+    colorClasses = 'bg-red-500/15 text-red-700 dark:text-red-400 border border-red-500/40 font-bold';
   }
 
   const sizeClasses = size === 'sm' ? 'px-2.5 py-0.5 text-xs' : 'px-3 py-1 text-sm';
+  const displayLabel = label === 'purged' ? '(Transaction purged by admin)' : label;
 
   return (
     <span
       className={`inline-flex items-center gap-1 rounded-full font-mono font-medium tracking-wide uppercase ${sizeClasses} ${colorClasses}`}
     >
       {icon && <span className="material-symbols-outlined text-[13px]">{icon}</span>}
-      {label}
+      {displayLabel}
     </span>
   );
 }

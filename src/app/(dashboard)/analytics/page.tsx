@@ -111,7 +111,7 @@ export default function AnalyticsPage() {
 
   for (const d of debts) {
     if (d.status === 'settled') settledDebtsCount++;
-    if (d.status === 'declined') continue;
+    if (d.status === 'declined' || d.status === 'purged') continue;
 
     const debtPayments = payments.filter((p) => p.debt_id === d.id);
     const calc = calculateDebtBalance(d, debtPayments);
@@ -207,7 +207,7 @@ export default function AnalyticsPage() {
   const ageBuckets = { '0-30d': 0, '31-60d': 0, '61-90d': 0, '91-120d': 0, '>120d': 0 };
   const now = Date.now();
   for (const d of debts) {
-    if (d.status === 'declined' || d.status === 'settled') continue;
+    if (d.status === 'declined' || d.status === 'settled' || d.status === 'purged') continue;
     const days = Math.floor((now - new Date(d.created_at).getTime()) / (1000 * 60 * 60 * 24));
     if (days <= 30) ageBuckets['0-30d'] += Number(d.principal);
     else if (days <= 60) ageBuckets['31-60d'] += Number(d.principal);

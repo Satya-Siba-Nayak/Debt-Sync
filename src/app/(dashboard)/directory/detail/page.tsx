@@ -551,6 +551,44 @@ function PersonDebtDetailContent() {
         </div>
       </div>
 
+      {/* Purged Account Alert Banner */}
+      {(person?.is_purged || person?.email?.includes('@purged.debtsync') || person?.id === '00000000-0000-0000-0000-000000000001') && (
+        <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <span className="material-symbols-outlined text-red-500 text-[26px] mt-0.5 shrink-0">
+              admin_panel_settings
+            </span>
+            <div>
+              <div className="font-heading font-bold text-sm text-red-700 dark:text-red-400 flex items-center gap-2">
+                <span>(Account Purged by Administrator)</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/20 text-red-700 dark:text-red-300 font-mono font-bold">
+                  Purged
+                </span>
+              </div>
+              <p className="font-mono text-xs text-red-600/90 dark:text-red-300/90 mt-1 leading-relaxed">
+                This counterparty account was permanently purged by an administrator. Live transactions have been halted for audit record integrity.
+                If you have any questions or disputes, please contact support at{' '}
+                <a
+                  href={`mailto:support@satya-nayak.dev?subject=Support%20Inquiry%20-%20Purged%20Account%20${person?.id}`}
+                  className="font-bold underline text-red-800 dark:text-red-200 hover:opacity-80"
+                >
+                  support@satya-nayak.dev
+                </a>.
+              </p>
+            </div>
+          </div>
+          <div className="shrink-0 self-end sm:self-center">
+            <a
+              href={`mailto:support@satya-nayak.dev?subject=Support%20Inquiry%20-%20Purged%20Account%20${person?.id}&body=Hi%20DebtSync%20Support,%0A%0AMy%20ledger%20with%20counterparty%20${encodeURIComponent(person?.full_name || person?.email || '')}%20(${person?.id})%20shows%20the%20account%20was%20purged.%0A%0AProblem/Dispute%20details:%0A`}
+              className="py-2 px-3.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-mono text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+            >
+              <span className="material-symbols-outlined text-[15px]">mail</span>
+              <span>Contact Support</span>
+            </a>
+          </div>
+        </div>
+      )}
+
       {/* Main Details Grid */}
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-8 bg-surface-container-lowest rounded-2xl p-6 md:p-8 border border-outline-variant/30 shadow-sm flex flex-col justify-between">
@@ -820,13 +858,19 @@ function PersonDebtDetailContent() {
               const split = parseSplitDetails(d);
               const shareMeta = parseShareMetadata(d.notes);
               const cleanNotes = getCleanDebtNotes(d.notes);
+              const isPurged =
+                d.status === 'purged' ||
+                (typeof d.notes === 'string' && d.notes.includes('[TRANSACTION PURGED BY ADMIN')) ||
+                Boolean(person?.is_purged);
 
               return (
                 <div
                   key={d.id}
                   onClick={() => setSelectedDebtForDetail(d)}
                   className={`p-4 rounded-xl border transition-colors cursor-pointer ${
-                    isIncomingPending
+                    isPurged
+                      ? 'border-red-500/30 bg-red-500/5 hover:bg-red-500/10'
+                      : isIncomingPending
                       ? 'border-amber-500/40 bg-amber-500/5 hover:bg-amber-500/10'
                       : d.status === 'declined'
                       ? 'border-red-500/20 bg-surface-container-low/40 opacity-85'
@@ -835,7 +879,12 @@ function PersonDebtDetailContent() {
                 >
                   <div className="flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      {d.status === 'declined' ? (
+                      {isPurged ? (
+                        <span className="font-mono text-xs font-bold inline-flex items-center gap-1 text-red-600 dark:text-red-400">
+                          <span className="material-symbols-outlined text-[14px]">admin_panel_settings</span>
+                          (Transaction purged by admin)
+                        </span>
+                      ) : d.status === 'declined' ? (
                         <span className="font-mono text-xs font-bold inline-flex items-center gap-1 text-red-500 dark:text-red-400">
                           <span className="material-symbols-outlined text-[14px]">block</span>
                           Declined
@@ -846,9 +895,11 @@ function PersonDebtDetailContent() {
                         </span>
                       )}
                       <Chip
-                        label={d.status}
+                        label={isPurged ? 'purged' : d.status}
                         variant={
-                          d.status === 'active'
+                          isPurged
+                            ? 'purged'
+                            : d.status === 'active'
                             ? 'active'
                             : d.status === 'settled'
                             ? 'settled'
@@ -858,6 +909,7 @@ function PersonDebtDetailContent() {
                             ? 'declined'
                             : 'default'
                         }
+                        icon={isPurged ? 'admin_panel_settings' : undefined}
                       />
                       {split && (
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-primary/15 text-primary border border-primary/25 flex items-center gap-1">
@@ -874,7 +926,7 @@ function PersonDebtDetailContent() {
                           <span>Public</span>
                         </span>
                       )}
-                      {dueDateInfo && d.status !== 'declined' && (
+                      {dueDateInfo && d.status !== 'declined' && !isPurged && (
                         <span className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-semibold border ${dueDateInfo.className} flex items-center gap-1`}>
                           <span className="material-symbols-outlined text-[12px]">
                             {dueDateInfo.isOverdue ? 'warning' : 'event'}
@@ -890,7 +942,11 @@ function PersonDebtDetailContent() {
                     </div>
 
                     <div className="font-mono text-sm font-bold text-on-surface mt-1">
-                      {d.status === 'declined' ? (
+                      {isPurged ? (
+                        <span className="text-red-500/80 dark:text-red-400/80 line-through text-xs font-mono">
+                          Purged
+                        </span>
+                      ) : d.status === 'declined' ? (
                         <span className="text-red-500/80 dark:text-red-400/80 line-through text-xs font-mono">
                           Void
                         </span>
@@ -898,7 +954,7 @@ function PersonDebtDetailContent() {
                         formatCurrency(calc.currentBalance, d.currency || currency, { showDecimals: true })
                       )}
                       <span className="text-xs font-normal text-on-surface-variant ml-2">
-                        (Orig: {d.status === 'declined' ? (
+                        (Orig: {d.status === 'declined' || isPurged ? (
                           <span className="line-through">{formatCurrency(d.principal, d.currency || currency)}</span>
                         ) : (
                           formatCurrency(d.principal, d.currency || currency)
@@ -944,6 +1000,18 @@ function PersonDebtDetailContent() {
                     className="flex items-center gap-2 self-end sm:self-auto flex-wrap"
                     onClick={(e) => e.stopPropagation()}
                   >
+                    {/* Support Button for Purged Transactions */}
+                    {isPurged && (
+                      <a
+                        href={`mailto:support@satya-nayak.dev?subject=Support%20Inquiry%20-%20Purged%20Transaction%20${d.id}`}
+                        className="py-1.5 px-2.5 rounded-lg border border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 font-mono text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                        title="Contact support at support@satya-nayak.dev"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">mail</span>
+                        <span>Support</span>
+                      </a>
+                    )}
+
                     {/* Details Button */}
                     <button
                       type="button"

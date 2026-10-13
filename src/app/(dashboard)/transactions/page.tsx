@@ -31,7 +31,7 @@ function TransactionsPageContent() {
   const [payments, setPayments] = useState<Payment[]>(initialCache?.payments || []);
   const [currentUserId, setCurrentUserId] = useState<string | null>(initialCache?.userId || null);
   const [currency, setCurrency] = useState(initialCache?.currency || 'inr');
-  const [filter, setFilter] = useState<'all' | 'pending' | 'lent' | 'borrowed' | 'settled' | 'declined'>('all');
+  const [filter, setFilter] = useState<'all' | 'pending' | 'lent' | 'borrowed' | 'settled' | 'declined' | 'purged'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDebtForNote, setSelectedDebtForNote] = useState<Debt | null>(null);
   const [selectedDebtForDetail, setSelectedDebtForDetail] = useState<Debt | null>(null);
@@ -175,11 +175,13 @@ function TransactionsPageContent() {
     visibleDebts
       .filter((d) => {
         const isLender = d.lender_id === currentUserId;
+        const isPurged = d.status === 'purged' || (typeof d.notes === 'string' && d.notes.includes('[TRANSACTION PURGED BY ADMIN'));
         if (filter === 'pending') return d.status === 'pending';
-        if (filter === 'lent') return isLender && d.status !== 'declined';
-        if (filter === 'borrowed') return !isLender && d.status !== 'declined';
+        if (filter === 'lent') return isLender && d.status !== 'declined' && !isPurged;
+        if (filter === 'borrowed') return !isLender && d.status !== 'declined' && !isPurged;
         if (filter === 'settled') return d.status === 'settled';
         if (filter === 'declined') return d.status === 'declined';
+        if (filter === 'purged') return isPurged;
         return true;
       })
       .filter((d) => {
@@ -236,9 +238,11 @@ function TransactionsPageContent() {
           </div>
 
           <div className="flex bg-[var(--surface-container)] p-1 rounded-xl border border-[var(--outline-variant)]/20 self-start flex-wrap gap-0.5">
-            {(['all', 'pending', 'lent', 'borrowed', 'settled', 'declined'] as const).map((tab) => {
+            {(['all', 'pending', 'lent', 'borrowed', 'settled', 'declined', 'purged'] as const).map((tab) => {
               const count = tab === 'pending'
                 ? visibleDebts.filter((d) => d.status === 'pending').length
+                : tab === 'purged'
+                ? visibleDebts.filter((d) => d.status === 'purged' || (typeof d.notes === 'string' && d.notes.includes('[TRANSACTION PURGED BY ADMIN'))).length
                 : 0;
               return (
                 <button
@@ -277,7 +281,11 @@ function TransactionsPageContent() {
               {filteredDebts.map((d) => {
                 const isLender = d.lender_id === currentUserId;
                 const otherPerson = isLender ? d.borrower : d.lender;
-                const name = otherPerson?.full_name || otherPerson?.email || 'Unknown';
+                const isPurged =
+                  d.status === 'purged' ||
+                  (typeof d.notes === 'string' && d.notes.includes('[TRANSACTION PURGED BY ADMIN')) ||
+                  Boolean((otherPerson as any)?.is_purged);
+                const name = otherPerson?.full_name || otherPerson?.email || (isPurged ? 'Purged Account' : 'Unknown');
                 const debtPayments = payments.filter((p) => p.debt_id === d.id);
                 const calc = calculateDebtBalance(d, debtPayments);
                 const dueDateInfo = getDueDateInfo(d.due_date, d.status);
@@ -290,7 +298,9 @@ function TransactionsPageContent() {
                     key={d.id}
                     onClick={() => setSelectedDebtForDetail(d)}
                     className={`block p-4 rounded-xl border transition-all shadow-xs cursor-pointer ${
-                      d.status === 'declined'
+                      isPurged
+                        ? 'bg-red-500/5 border-red-500/30 hover:bg-red-500/10'
+                        : d.status === 'declined'
                         ? 'bg-[var(--surface-container-low)]/40 border-red-500/20 opacity-85'
                         : 'bg-[var(--surface-container-low)]/70 hover:bg-[var(--surface-container-high)]/70 border-[var(--outline-variant)]/20'
                     }`}
@@ -333,9 +343,11 @@ function TransactionsPageContent() {
                       </Link>
                       <div className="flex flex-col items-end gap-1">
                         <Chip
-                          label={d.status}
+                          label={isPurged ? 'purged' : d.status}
                           variant={
-                            d.status === 'active'
+                            isPurged
+                              ? 'purged'
+                              : d.status === 'active'
                               ? 'active'
                               : d.status === 'settled'
                               ? 'settled'
@@ -345,8 +357,9 @@ function TransactionsPageContent() {
                               ? 'declined'
                               : 'default'
                           }
+                          icon={isPurged ? 'admin_panel_settings' : undefined}
                         />
-                        {dueDateInfo && d.status !== 'declined' && (
+                        {dueDateInfo && d.status !== 'declined' && !isPurged && (
                           <span className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-semibold border ${dueDateInfo.className} flex items-center gap-1`}>
                             <span className="material-symbols-outlined text-[11px]">
                               {dueDateInfo.isOverdue ? 'warning' : 'event'}
@@ -359,7 +372,12 @@ function TransactionsPageContent() {
 
                     <div className="mt-3 pt-3 border-t border-[var(--outline-variant)]/15 flex items-center justify-between">
                       <div>
-                        {d.status === 'declined' ? (
+                        {isPurged ? (
+                          <span className="font-mono text-xs font-bold inline-flex items-center gap-1 text-red-600 dark:text-red-400">
+                            <span className="material-symbols-outlined text-[14px]">admin_panel_settings</span>
+                            (Transaction purged by admin)
+                          </span>
+                        ) : d.status === 'declined' ? (
                           <span className="font-mono text-xs font-bold inline-flex items-center gap-1 text-red-500 dark:text-red-400">
                             <span className="material-symbols-outlined text-[14px]">block</span>
                             Declined
@@ -377,7 +395,7 @@ function TransactionsPageContent() {
                           </span>
                         )}
                         <div className="font-mono text-[11px] text-[var(--on-surface-variant)] mt-0.5">
-                          Principal: {d.status === 'declined' ? (
+                          Principal: {d.status === 'declined' || isPurged ? (
                             <span className="line-through">{formatCurrency(d.principal, d.currency || currency)}</span>
                           ) : (
                             formatCurrency(d.principal, d.currency || currency)
@@ -390,7 +408,11 @@ function TransactionsPageContent() {
                           Remaining
                         </span>
                         <span className="font-mono font-bold text-base text-[var(--on-surface)]">
-                          {d.status === 'declined' ? (
+                          {isPurged ? (
+                            <span className="text-red-500/80 dark:text-red-400/80 line-through text-xs font-mono">
+                              Purged
+                            </span>
+                          ) : d.status === 'declined' ? (
                             <span className="text-red-500/80 dark:text-red-400/80 line-through text-xs font-mono">
                               Void
                             </span>
@@ -449,6 +471,18 @@ function TransactionsPageContent() {
                         <span>Details</span>
                         <span className="material-symbols-outlined text-[14px]">chevron_right</span>
                       </span>
+
+                      {isPurged && (
+                        <a
+                          href={`mailto:support@satya-nayak.dev?subject=Support%20Inquiry%20-%20Purged%20Transaction%20${d.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="py-1 px-2.5 rounded-lg border border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400 font-mono text-xs font-bold flex items-center gap-1 hover:bg-red-500/20 transition-colors"
+                          title="Contact support at support@satya-nayak.dev"
+                        >
+                          <span className="material-symbols-outlined text-[13px]">mail</span>
+                          <span>Support</span>
+                        </a>
+                      )}
 
                       {d.status === 'declined' && (
                         <button
@@ -555,7 +589,11 @@ function TransactionsPageContent() {
                   {filteredDebts.map((d) => {
                     const isLender = d.lender_id === currentUserId;
                     const otherPerson = isLender ? d.borrower : d.lender;
-                    const name = otherPerson?.full_name || otherPerson?.email || 'Unknown';
+                    const isPurged =
+                      d.status === 'purged' ||
+                      (typeof d.notes === 'string' && d.notes.includes('[TRANSACTION PURGED BY ADMIN')) ||
+                      Boolean((otherPerson as any)?.is_purged);
+                    const name = otherPerson?.full_name || otherPerson?.email || (isPurged ? 'Purged Account' : 'Unknown');
                     const debtPayments = payments.filter((p) => p.debt_id === d.id);
                     const calc = calculateDebtBalance(d, debtPayments);
                     const dueDateInfo = getDueDateInfo(d.due_date, d.status);
@@ -568,7 +606,9 @@ function TransactionsPageContent() {
                         key={d.id}
                         onClick={() => setSelectedDebtForDetail(d)}
                         className={`transition-colors cursor-pointer ${
-                          d.status === 'declined'
+                          isPurged
+                            ? 'bg-red-500/5 hover:bg-red-500/10'
+                            : d.status === 'declined'
                             ? 'bg-red-500/5 hover:bg-red-500/10 opacity-80'
                             : 'hover:bg-[var(--surface-container-low)]/80'
                         }`}
@@ -592,6 +632,15 @@ function TransactionsPageContent() {
                             <div>
                               <div className="font-semibold text-[var(--on-surface)] group-hover:text-[var(--primary)] group-hover:underline transition-colors flex items-center gap-1.5 flex-wrap">
                                 <span>{name}</span>
+                                {isPurged && (
+                                  <span
+                                    className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30 flex items-center gap-0.5"
+                                    title="Transaction purged by administrator"
+                                  >
+                                    <span className="material-symbols-outlined text-[10px]">admin_panel_settings</span>
+                                    <span>(Transaction purged by admin)</span>
+                                  </span>
+                                )}
                                 {split && (
                                   <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/20 flex items-center gap-1">
                                     <span className="material-symbols-outlined text-[11px]">call_split</span>
@@ -632,7 +681,12 @@ function TransactionsPageContent() {
                         </td>
 
                         <td className="py-4">
-                          {d.status === 'declined' ? (
+                          {isPurged ? (
+                            <span className="font-mono text-xs font-bold inline-flex items-center gap-1 text-red-600 dark:text-red-400">
+                              <span className="material-symbols-outlined text-[14px]">admin_panel_settings</span>
+                              Purged
+                            </span>
+                          ) : d.status === 'declined' ? (
                             <span className="font-mono text-xs font-bold inline-flex items-center gap-1 text-red-500 dark:text-red-400">
                               <span className="material-symbols-outlined text-[14px]">block</span>
                               Declined
@@ -652,7 +706,7 @@ function TransactionsPageContent() {
                         </td>
 
                         <td className="py-4 font-mono font-medium text-xs text-[var(--on-surface)]">
-                          {d.status === 'declined' ? (
+                          {d.status === 'declined' || isPurged ? (
                             <span className="line-through text-on-surface-variant">
                               {formatCurrency(d.principal, d.currency || currency)}
                             </span>
@@ -666,7 +720,11 @@ function TransactionsPageContent() {
                         </td>
 
                         <td className="py-4 font-mono font-bold text-sm text-[var(--on-surface)]">
-                          {d.status === 'declined' ? (
+                          {isPurged ? (
+                            <span className="text-red-500/80 dark:text-red-400/80 line-through text-xs font-mono">
+                              Purged
+                            </span>
+                          ) : d.status === 'declined' ? (
                             <span className="text-red-500/80 dark:text-red-400/80 line-through text-xs font-mono">
                               Void
                             </span>
@@ -678,9 +736,11 @@ function TransactionsPageContent() {
                         <td className="py-4">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <Chip
-                              label={d.status}
+                              label={isPurged ? 'purged' : d.status}
                               variant={
-                                d.status === 'active'
+                                isPurged
+                                  ? 'purged'
+                                  : d.status === 'active'
                                   ? 'active'
                                   : d.status === 'settled'
                                   ? 'settled'
@@ -690,8 +750,9 @@ function TransactionsPageContent() {
                                   ? 'declined'
                                   : 'default'
                               }
+                              icon={isPurged ? 'admin_panel_settings' : undefined}
                             />
-                            {dueDateInfo && d.status !== 'declined' && (
+                            {dueDateInfo && d.status !== 'declined' && !isPurged && (
                               <span className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-semibold border ${dueDateInfo.className} flex items-center gap-1`}>
                                 <span className="material-symbols-outlined text-[11px]">
                                   {dueDateInfo.isOverdue ? 'warning' : 'event'}
@@ -704,6 +765,18 @@ function TransactionsPageContent() {
 
                         <td className="py-4 text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-end gap-1.5">
+                            {/* Support Button for Purged Transactions */}
+                            {isPurged && (
+                              <a
+                                href={`mailto:support@satya-nayak.dev?subject=Support%20Inquiry%20-%20Purged%20Transaction%20${d.id}`}
+                                className="px-2.5 py-1.5 rounded-lg border border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 font-mono text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                                title="Contact support at support@satya-nayak.dev"
+                              >
+                                <span className="material-symbols-outlined text-[14px]">mail</span>
+                                <span>Support</span>
+                              </a>
+                            )}
+
                             {/* View Details Button */}
                             <button
                               type="button"
