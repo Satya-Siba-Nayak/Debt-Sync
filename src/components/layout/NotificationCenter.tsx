@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { Avatar } from '../ui/Avatar';
 import { formatCurrency } from '@/lib/utils/currency';
+import { calculateDebtBalance } from '@/lib/utils/interest';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import {
   getNotificationPermission,
@@ -14,6 +15,7 @@ import {
 import { formatPaymentMethodDisplay } from '@/lib/utils/upi-link';
 import { respondToDebtAgreement } from '@/lib/utils/debt-acceptance';
 import { invalidateCooldownCache } from '@/lib/utils/debt-cooldown';
+import { invalidateLedgerCache } from '@/lib/stores/ledger-store';
 import {
   parseSplitDetails,
   parseShareMetadata,
@@ -84,21 +86,47 @@ interface GlobalShareAlert {
   };
 }
 
+interface SharedNotificationState {
+  debtRequests: IncomingDebtRequest[];
+  contactRequests: IncomingContactRequest[];
+  pendingRepayments: PendingRepayment[];
+  globalShareAlerts: GlobalShareAlert[];
+  lastFetchedAt: number;
+}
+
+// Module-level singleton state & in-flight deduplication so mobile + desktop TopBar mounts
+// share 1 fetch and 1 Realtime WebSocket channel instead of duplicating traffic.
+let sharedState: SharedNotificationState = {
+  debtRequests: [],
+  contactRequests: [],
+  pendingRepayments: [],
+  globalShareAlerts: [],
+  lastFetchedAt: 0,
+};
+let inFlightPromise: Promise<SharedNotificationState | null> | null = null;
+const stateSubscribers = new Set<(state: SharedNotificationState) => void>();
+let activeRealtimeRefCount = 0;
+let sharedRealtimeChannel: any = null;
+let cachedRealtimeUserId: string | null = null;
+
+function broadcastSharedState(next: SharedNotificationState) {
+  sharedState = next;
+  stateSubscribers.forEach((cb) => cb(next));
+}
+
 export function NotificationCenter() {
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'debts' | 'contacts' | 'repayments'>('all');
-  const [debtRequests, setDebtRequests] = useState<IncomingDebtRequest[]>([]);
-  const [contactRequests, setContactRequests] = useState<IncomingContactRequest[]>([]);
-  const [pendingRepayments, setPendingRepayments] = useState<PendingRepayment[]>([]);
-  const [globalShareAlerts, setGlobalShareAlerts] = useState<GlobalShareAlert[]>([]);
+  const [debtRequests, setDebtRequests] = useState<IncomingDebtRequest[]>(() => sharedState.debtRequests);
+  const [contactRequests, setContactRequests] = useState<IncomingContactRequest[]>(() => sharedState.contactRequests);
+  const [pendingRepayments, setPendingRepayments] = useState<PendingRepayment[]>(() => sharedState.pendingRepayments);
+  const [globalShareAlerts, setGlobalShareAlerts] = useState<GlobalShareAlert[]>(() => sharedState.globalShareAlerts);
   const [loading, setLoading] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [webPermission, setWebPermission] = useState<'default' | 'granted' | 'denied' | 'unsupported'>('default');
 
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const isFetchingRef = useRef(false);
-  const channelNameRef = useRef(`notification-center-${Math.random().toString(36).substring(2, 8)}`);
   const supabase = createClient();
 
   useEffect(() => {
@@ -115,28 +143,83 @@ export function NotificationCenter() {
     }
   };
 
-  const fetchNotifications = useCallback(async () => {
+  const fetchNotifications = useCallback(async (force = false) => {
+    // If another instance fetched < 1.5s ago and not forced, reuse cached state
+    if (!force && Date.now() - sharedState.lastFetchedAt < 1500) {
+      setDebtRequests(sharedState.debtRequests);
+      setContactRequests(sharedState.contactRequests);
+      setPendingRepayments(sharedState.pendingRepayments);
+      setGlobalShareAlerts(sharedState.globalShareAlerts);
+      return;
+    }
+
+    if (inFlightPromise) {
+      setLoading(true);
+      try {
+        await inFlightPromise;
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     setLoading(true);
-    try {
-      const user = await getCurrentUserFast(supabase);
-      if (!user) return;
+    inFlightPromise = (async () => {
+      try {
+        const user = await getCurrentUserFast(supabase);
+        if (!user) return null;
+        cachedRealtimeUserId = user.id;
 
-      // 1. Fetch incoming debt agreements awaiting approval
-      const { data: debts } = await supabase
-        .from('debts')
-        .select(`
-          id, principal, currency, interest_type, interest_rate, notes, created_at,
-          lender_id, borrower_id, created_by,
-          lender:profiles!debts_lender_id_fkey(id, full_name, email, avatar_url),
-          borrower:profiles!debts_borrower_id_fkey(id, full_name, email, avatar_url)
-        `)
-        .eq('status', 'pending')
-        .neq('created_by', user.id)
-        .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`)
-        .order('created_at', { ascending: false });
+        // Run all 4 notification queries concurrently in parallel
+        const [debtsRes, contactReqsRes, myLentDebtsRes, sharedDebtsRes] = await Promise.all([
+          // 1. Incoming debt agreements awaiting approval
+          supabase
+            .from('debts')
+            .select(`
+              id, principal, currency, interest_type, interest_rate, notes, created_at,
+              lender_id, borrower_id, created_by,
+              lender:profiles!debts_lender_id_fkey(id, full_name, email, avatar_url),
+              borrower:profiles!debts_borrower_id_fkey(id, full_name, email, avatar_url)
+            `)
+            .eq('status', 'pending')
+            .neq('created_by', user.id)
+            .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`)
+            .order('created_at', { ascending: false }),
 
-      if (debts) {
-        const formattedDebts: IncomingDebtRequest[] = debts.map((d: any) => {
+          // 2. Incoming contact connection requests
+          supabase
+            .from('contact_requests')
+            .select(`
+              id, created_at,
+              sender:profiles!contact_requests_sender_id_fkey(id, full_name, email, avatar_url)
+            `)
+            .eq('receiver_id', user.id)
+            .eq('status', 'pending')
+            .order('created_at', { ascending: false })
+            .then((res: any) => res, () => ({ data: null })),
+
+          // 3. Active lent debts to check for unverified repayments
+          supabase
+            .from('debts')
+            .select('id')
+            .eq('lender_id', user.id)
+            .eq('status', 'active'),
+
+          // 4. Transactions where counterparty enabled Global Public Link sharing
+          supabase
+            .from('debts')
+            .select(`
+              id, principal, currency, notes, lender_id, borrower_id, status,
+              lender:profiles!debts_lender_id_fkey(id, full_name, email, avatar_url),
+              borrower:profiles!debts_borrower_id_fkey(id, full_name, email, avatar_url)
+            `)
+            .neq('status', 'declined')
+            .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`)
+            .like('notes', '%[SHARE:%'),
+        ]);
+
+        // Process 1: Debt requests
+        const formattedDebts: IncomingDebtRequest[] = (debtsRes.data || []).map((d: any) => {
           const isLender = d.lender_id === user.id;
           const other = isLender ? d.borrower : d.lender;
           return {
@@ -158,48 +241,22 @@ export function NotificationCenter() {
             direction: isLender ? 'lent' : 'borrowed',
           };
         });
-        setDebtRequests(formattedDebts);
-      }
 
-      // 2. Fetch incoming contact connection requests
-      try {
-        const { data: contactReqs } = await supabase
-          .from('contact_requests')
-          .select(`
-            id, created_at,
-            sender:profiles!contact_requests_sender_id_fkey(id, full_name, email, avatar_url)
-          `)
-          .eq('receiver_id', user.id)
-          .eq('status', 'pending')
-          .order('created_at', { ascending: false });
+        // Process 2: Contact requests
+        const formattedContacts: IncomingContactRequest[] = (contactReqsRes?.data || []).map((c: any) => ({
+          id: c.id,
+          created_at: c.created_at,
+          sender: {
+            id: c.sender?.id || '',
+            full_name: c.sender?.full_name || c.sender?.email || 'Someone on DebtSync',
+            email: c.sender?.email || '',
+            avatar_url: c.sender?.avatar_url || null,
+          },
+        }));
 
-        if (contactReqs) {
-          const formattedContacts: IncomingContactRequest[] = contactReqs.map((c: any) => ({
-            id: c.id,
-            created_at: c.created_at,
-            sender: {
-              id: c.sender?.id || '',
-              full_name: c.sender?.full_name || c.sender?.email || 'Someone on DebtSync',
-              email: c.sender?.email || '',
-              avatar_url: c.sender?.avatar_url || null,
-            },
-          }));
-          setContactRequests(formattedContacts);
-        }
-      } catch (_) {
-        // Table may be migrating
-      }
-
-      // 3. Fetch repayments awaiting lender verification (active debts only)
-      try {
-        const { data: myLentDebts } = await supabase
-          .from('debts')
-          .select('id')
-          .eq('lender_id', user.id)
-          .eq('status', 'active');
-
-        const debtIds = ((myLentDebts as any[]) || []).map((d: any) => d.id);
-
+        // Process 3: Unverified repayments
+        let formattedPayments: PendingRepayment[] = [];
+        const debtIds = ((myLentDebtsRes.data as any[]) || []).map((d: any) => d.id);
         if (debtIds.length > 0) {
           const { data: unverifiedPayments } = await supabase
             .from('payments')
@@ -212,7 +269,7 @@ export function NotificationCenter() {
             .order('created_at', { ascending: false });
 
           if (unverifiedPayments) {
-            const formattedPayments: PendingRepayment[] = unverifiedPayments
+            formattedPayments = unverifiedPayments
               .filter((p: any) => {
                 const isDisputed =
                   p.status === 'disputed' ||
@@ -236,123 +293,144 @@ export function NotificationCenter() {
                   avatar_url: p.payer?.avatar_url || null,
                 },
               }));
-            setPendingRepayments(formattedPayments);
           }
-        } else {
-          setPendingRepayments([]);
         }
-      } catch (_) {}
 
-      // 4. Fetch transactions where counterparty enabled Global Public Link sharing
-      try {
-        const { data: sharedDebts } = await supabase
-          .from('debts')
-          .select(`
-            id, principal, currency, notes, lender_id, borrower_id, status,
-            lender:profiles!debts_lender_id_fkey(id, full_name, email, avatar_url),
-            borrower:profiles!debts_borrower_id_fkey(id, full_name, email, avatar_url)
-          `)
-          .neq('status', 'declined')
-          .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`)
-          .like('notes', '%[SHARE:%');
-
-        if (sharedDebts) {
-          const alerts: GlobalShareAlert[] = [];
-          for (const d of sharedDebts as any[]) {
-            const shareMeta = parseShareMetadata(d.notes);
-            if (
-              shareMeta &&
-              shareMeta.globalEnabled &&
-              shareMeta.enabledBy &&
-              shareMeta.enabledBy !== user.id &&
-              !(shareMeta.dismissedAlertBy || []).includes(user.id)
-            ) {
-              const isLender = d.lender_id === user.id;
-              const other = isLender ? d.borrower : d.lender;
-              alerts.push({
-                debtId: d.id,
-                principal: Number(d.principal) || 0,
-                currency: d.currency || 'inr',
-                notes: d.notes,
-                enabledBy: shareMeta.enabledBy,
-                enabledByName:
-                  shareMeta.enabledByName ||
-                  other?.full_name ||
-                  other?.email ||
-                  'Counterparty',
-                enabledAt: shareMeta.enabledAt || new Date().toISOString(),
-                counterparty: {
-                  id: other?.id || '',
-                  full_name: other?.full_name || other?.email || 'Counterparty',
-                  email: other?.email || '',
-                  avatar_url: other?.avatar_url || null,
-                },
-              });
-            }
-          }
-          setGlobalShareAlerts(alerts);
-        } else {
-          setGlobalShareAlerts([]);
-        }
-      } catch (_) {}
-    } catch (err) {
-      console.error('Error loading notifications:', err);
-    } finally {
-      isFetchingRef.current = false;
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchNotifications();
-
-    const handleRefresh = () => fetchNotifications();
-    window.addEventListener('debtsync:refresh', handleRefresh);
-
-    const channel = supabase
-      .channel(channelNameRef.current)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'debts' }, (payload: any) => {
-        fetchNotifications();
-        if (payload.eventType === 'INSERT') {
-          sendWebNotification('New Debt Request', {
-            body: 'A counterparty has logged a debt request awaiting your review.',
-            tag: `debt-${payload.new?.id}`,
-          });
-        } else if (payload.eventType === 'UPDATE' && payload.new?.notes) {
-          const newShare = parseShareMetadata(payload.new.notes);
-          const oldShare = parseShareMetadata(payload.old?.notes);
-          if (newShare?.globalEnabled && !oldShare?.globalEnabled) {
-            sendWebNotification('Global Link Enabled on Transaction', {
-              body: `${newShare.enabledByName || 'A counterparty'} enabled public global sharing on a transaction. You can turn it off anytime.`,
-              tag: `share-${payload.new?.id}`,
+        // Process 4: Global share alerts
+        const alerts: GlobalShareAlert[] = [];
+        for (const d of (sharedDebtsRes.data as any[]) || []) {
+          const shareMeta = parseShareMetadata(d.notes);
+          if (
+            shareMeta &&
+            shareMeta.globalEnabled &&
+            shareMeta.enabledBy &&
+            shareMeta.enabledBy !== user.id &&
+            !(shareMeta.dismissedAlertBy || []).includes(user.id)
+          ) {
+            const isLender = d.lender_id === user.id;
+            const other = isLender ? d.borrower : d.lender;
+            alerts.push({
+              debtId: d.id,
+              principal: Number(d.principal) || 0,
+              currency: d.currency || 'inr',
+              notes: d.notes,
+              enabledBy: shareMeta.enabledBy,
+              enabledByName:
+                shareMeta.enabledByName ||
+                other?.full_name ||
+                other?.email ||
+                'Counterparty',
+              enabledAt: shareMeta.enabledAt || new Date().toISOString(),
+              counterparty: {
+                id: other?.id || '',
+                full_name: other?.full_name || other?.email || 'Counterparty',
+                email: other?.email || '',
+                avatar_url: other?.avatar_url || null,
+              },
             });
           }
         }
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, (payload: any) => {
-        fetchNotifications();
-        if (payload.eventType === 'INSERT') {
-          sendWebNotification('Repayment Reported', {
-            body: 'A borrower reported a repayment awaiting your verification.',
-            tag: `payment-${payload.new?.id}`,
-          });
-        }
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'contact_requests' }, (payload: any) => {
-        fetchNotifications();
-        if (payload.eventType === 'INSERT') {
-          sendWebNotification('New Contact Request', {
-            body: 'You received a new contact connection request.',
-            tag: `contact-${payload.new?.id}`,
-          });
-        }
-      })
-      .subscribe();
+
+        const nextState: SharedNotificationState = {
+          debtRequests: formattedDebts,
+          contactRequests: formattedContacts,
+          pendingRepayments: formattedPayments,
+          globalShareAlerts: alerts,
+          lastFetchedAt: Date.now(),
+        };
+        broadcastSharedState(nextState);
+        return nextState;
+      } catch (err) {
+        console.error('Error loading notifications:', err);
+        return null;
+      } finally {
+        inFlightPromise = null;
+      }
+    })();
+
+    try {
+      await inFlightPromise;
+    } finally {
+      setLoading(false);
+    }
+  }, [supabase]);
+
+  useEffect(() => {
+    const syncState = (next: SharedNotificationState) => {
+      setDebtRequests(next.debtRequests);
+      setContactRequests(next.contactRequests);
+      setPendingRepayments(next.pendingRepayments);
+      setGlobalShareAlerts(next.globalShareAlerts);
+    };
+    stateSubscribers.add(syncState);
+
+    fetchNotifications(false);
+
+    const handleRefresh = () => fetchNotifications(true);
+    window.addEventListener('debtsync:refresh', handleRefresh);
+
+    // Maintain a single shared Realtime channel across mobile & desktop TopBar instances
+    activeRealtimeRefCount += 1;
+    if (!sharedRealtimeChannel) {
+      sharedRealtimeChannel = supabase
+        .channel('notification-center-singleton')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'debts' }, (payload: any) => {
+          fetchNotifications(true);
+          const myId = cachedRealtimeUserId;
+          if (
+            payload.eventType === 'INSERT' &&
+            myId &&
+            payload.new?.created_by !== myId &&
+            (payload.new?.lender_id === myId || payload.new?.borrower_id === myId)
+          ) {
+            sendWebNotification('New Debt Request', {
+              body: 'A counterparty has logged a debt request awaiting your review.',
+              tag: `debt-${payload.new?.id}`,
+            });
+          } else if (payload.eventType === 'UPDATE' && payload.new?.notes) {
+            const newShare = parseShareMetadata(payload.new.notes);
+            const oldShare = parseShareMetadata(payload.old?.notes);
+            if (newShare?.globalEnabled && !oldShare?.globalEnabled && (!myId || newShare.enabledBy !== myId)) {
+              sendWebNotification('Global Link Enabled on Transaction', {
+                body: `${newShare.enabledByName || 'A counterparty'} enabled public global sharing on a transaction. You can turn it off anytime.`,
+                tag: `share-${payload.new?.id}`,
+              });
+            }
+          }
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, (payload: any) => {
+          fetchNotifications(true);
+          const myId = cachedRealtimeUserId;
+          if (payload.eventType === 'INSERT' && (!myId || payload.new?.paid_by !== myId)) {
+            sendWebNotification('Repayment Reported', {
+              body: 'A borrower reported a repayment awaiting your verification.',
+              tag: `payment-${payload.new?.id}`,
+            });
+          }
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'contact_requests' }, (payload: any) => {
+          fetchNotifications(true);
+          const myId = cachedRealtimeUserId;
+          if (payload.eventType === 'INSERT' && (!myId || payload.new?.sender_id !== myId)) {
+            sendWebNotification('New Contact Request', {
+              body: 'You received a new contact connection request.',
+              tag: `contact-${payload.new?.id}`,
+            });
+          }
+        })
+        .subscribe();
+    }
 
     return () => {
+      stateSubscribers.delete(syncState);
       window.removeEventListener('debtsync:refresh', handleRefresh);
-      supabase.removeChannel(channel);
+      activeRealtimeRefCount = Math.max(0, activeRealtimeRefCount - 1);
+      if (activeRealtimeRefCount === 0 && sharedRealtimeChannel) {
+        supabase.removeChannel(sharedRealtimeChannel);
+        sharedRealtimeChannel = null;
+      }
     };
-  }, [fetchNotifications]);
+  }, [fetchNotifications, supabase]);
 
   // Click outside listener
   useEffect(() => {
@@ -375,7 +453,7 @@ export function NotificationCenter() {
     setActionLoadingId(debtId);
     try {
       await respondToDebtAgreement(supabase, debtId, decision);
-      await fetchNotifications();
+      await fetchNotifications(true);
     } catch (err) {
       console.error('Error responding to debt:', err);
     } finally {
@@ -419,8 +497,9 @@ export function NotificationCenter() {
       }
 
       invalidateCooldownCache();
+      invalidateLedgerCache();
       window.dispatchEvent(new CustomEvent('debtsync:refresh'));
-      await fetchNotifications();
+      await fetchNotifications(true);
     } catch (err) {
       console.error('Error responding to contact request:', err);
     } finally {
@@ -452,15 +531,26 @@ export function NotificationCenter() {
             })
             .eq('id', paymentId);
 
-          // Check if debt balance is cleared
+          // Check if debt balance (including accrued interest) is cleared
           if (pRec?.debt_id) {
-            const { data: allP } = await supabase.from('payments').select('amount').eq('debt_id', pRec.debt_id).eq('is_verified', true);
-            const { data: dRec } = await supabase.from('debts').select('principal').eq('id', pRec.debt_id).single();
-            const totalPaid = (allP || []).reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
-            if (dRec && totalPaid >= Number(dRec.principal) - 0.01) {
-              await supabase.from('debts').update({ status: 'settled', settled_at: new Date().toISOString() }).eq('id', pRec.debt_id);
-              // Auto-purge other lingering unverified payments for this settled debt
-              await supabase.from('payments').delete().eq('debt_id', pRec.debt_id).eq('is_verified', false);
+            const [{ data: allP }, { data: dRec }] = await Promise.all([
+              supabase.from('payments').select('*').eq('debt_id', pRec.debt_id),
+              supabase.from('debts').select('*').eq('id', pRec.debt_id).single(),
+            ]);
+            if (dRec) {
+              const calc = calculateDebtBalance(dRec, allP || []);
+              if (calc.currentBalance <= 0.01) {
+                await supabase
+                  .from('debts')
+                  .update({ status: 'settled', settled_at: new Date().toISOString() })
+                  .eq('id', pRec.debt_id);
+                // Auto-purge other lingering unverified payments for this settled debt
+                await supabase
+                  .from('payments')
+                  .delete()
+                  .eq('debt_id', pRec.debt_id)
+                  .eq('is_verified', false);
+              }
             }
           }
         } else {
@@ -495,8 +585,9 @@ export function NotificationCenter() {
         }
       }
 
+      invalidateLedgerCache();
       window.dispatchEvent(new CustomEvent('debtsync:refresh'));
-      await fetchNotifications();
+      await fetchNotifications(true);
     } catch (err) {
       console.error('Error verifying repayment:', err);
     } finally {

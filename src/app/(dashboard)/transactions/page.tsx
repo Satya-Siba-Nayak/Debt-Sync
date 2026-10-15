@@ -52,9 +52,8 @@ function TransactionsPageContent() {
       if (!user) return;
       setCurrentUserId(user.id);
 
-      await claimUserProfile(user);
-
-      const [settingsRes, debtRowsRes] = await Promise.all([
+      const [, settingsRes, debtRowsRes] = await Promise.all([
+        claimUserProfile(user),
         supabase
           .from('user_settings')
           .select('default_currency')

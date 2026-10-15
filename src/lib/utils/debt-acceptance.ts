@@ -1,5 +1,6 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { invalidateCooldownCache } from './debt-cooldown';
+import { invalidateLedgerCache } from '../stores/ledger-store';
 
 export interface DebtResponseResult {
   success: boolean;
@@ -76,13 +77,15 @@ export async function respondToDebtAgreement(
           ], { onConflict: 'owner_id,contact_id' });
 
           // Auto-accept any pending contact request between them
-          await supabase
-            .from('contact_requests')
-            .update({ status: 'accepted', responded_at: new Date().toISOString() })
-            .or(
-              `and(sender_id.eq.${debt.lender_id},receiver_id.eq.${debt.borrower_id}),and(sender_id.eq.${debt.borrower_id},receiver_id.eq.${debt.lender_id})`
-            )
-            .eq('status', 'pending');
+          try {
+            await supabase
+              .from('contact_requests')
+              .update({ status: 'accepted', responded_at: new Date().toISOString() })
+              .or(
+                `and(sender_id.eq.${debt.lender_id},recipient_id.eq.${debt.borrower_id}),and(sender_id.eq.${debt.borrower_id},recipient_id.eq.${debt.lender_id})`
+              )
+              .eq('status', 'pending');
+          } catch (_) {}
         } else {
           // Check if other active/settled debts exist
           const { data: existingActive } = await supabase
@@ -107,8 +110,9 @@ export async function respondToDebtAgreement(
       }
     }
 
-    // Invalidate permission cache
+    // Invalidate permission & ledger caches
     invalidateCooldownCache();
+    invalidateLedgerCache();
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('debtsync:refresh'));
@@ -183,16 +187,19 @@ export async function cancelPendingDebt(
           .eq('id', debtId);
       }
 
-      // Log in activity log
+      // Log in activity log (pass debt_id: null if debt row was deleted to avoid FK 23503 error)
       if (currentUserId) {
         try {
           await supabase.from('activity_log').insert({
             user_id: currentUserId,
-            debt_id: debtId,
+            debt_id: delErr ? debtId : null,
             action: 'debt_cancelled_by_creator',
             details: {
+              debt_id: debtId,
               principal: debt.principal,
               currency: debt.currency,
+              lender_id: debt.lender_id,
+              borrower_id: debt.borrower_id,
               timestamp: new Date().toISOString(),
             },
           });
@@ -201,6 +208,7 @@ export async function cancelPendingDebt(
     }
 
     invalidateCooldownCache();
+    invalidateLedgerCache();
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('debtsync:refresh'));

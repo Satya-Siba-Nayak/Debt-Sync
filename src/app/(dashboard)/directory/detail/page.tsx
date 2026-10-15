@@ -20,7 +20,7 @@ import { PersonAnalyticsChart } from '@/components/directory/PersonAnalyticsChar
 import { SkeletonBalanceCards, SkeletonTableRows } from '@/components/ui/Skeleton';
 import { calculateTrustScore } from '@/lib/utils/trust-score';
 import { detectUPIApp, formatPaymentMethodDisplay } from '@/lib/utils/upi-link';
-import { getLedgerCache } from '@/lib/stores/ledger-store';
+import { getLedgerCache, invalidateLedgerCache } from '@/lib/stores/ledger-store';
 import { parseSplitDetails, parseShareMetadata, getCleanDebtNotes } from '@/lib/utils/split-bills';
 import { EditPendingDebtModal } from '@/components/debts/EditPendingDebtModal';
 import { respondToDebtAgreement, cancelPendingDebt } from '@/lib/utils/debt-acceptance';
@@ -93,19 +93,29 @@ function PersonDebtDetailContent() {
       if (!user) return;
       setCurrentUserId(user.id);
 
-      // Claim any pending debts associated with user (cached)
-      await claimUserProfile(user);
-
-      // Currency setting & counterparty profile
+      // Fetch settings, counterparty profile, and debts concurrently in a single parallel batch
       let resolvedPersonId = personId;
-      const [settingsRes, profileRes] = await Promise.all([
+      const [, settingsRes, profileRes, initialDebtRowsRes] = await Promise.all([
+        claimUserProfile(user),
         supabase.from('user_settings').select('default_currency').eq('user_id', user.id).single(),
         supabase.from('profiles').select('*').eq('id', personId).maybeSingle(),
+        supabase
+          .from('debts')
+          .select(`
+            *,
+            lender:profiles!debts_lender_id_fkey(id, email, full_name, avatar_url),
+            borrower:profiles!debts_borrower_id_fkey(id, email, full_name, avatar_url)
+          `)
+          .or(
+            `and(lender_id.eq.${user.id},borrower_id.eq.${personId}),and(lender_id.eq.${personId},borrower_id.eq.${user.id})`
+          )
+          .order('created_at', { ascending: false }),
       ]);
 
       if (settingsRes.data?.default_currency) setCurrency(settingsRes.data.default_currency);
 
       let targetProfile = profileRes.data;
+      let debtRows = initialDebtRowsRes.data;
 
       if (!targetProfile) {
         // Fallback: check if personId is actually a debt ID
@@ -123,36 +133,26 @@ function PersonDebtDetailContent() {
           const isLender = debtRec.lender_id === user.id;
           targetProfile = (isLender ? debtRec.borrower : debtRec.lender) as any;
           resolvedPersonId = targetProfile?.id || (isLender ? debtRec.borrower_id : debtRec.lender_id);
+
+          const { data: fallbackDebtRows } = await supabase
+            .from('debts')
+            .select(`
+              *,
+              lender:profiles!debts_lender_id_fkey(id, email, full_name, avatar_url),
+              borrower:profiles!debts_borrower_id_fkey(id, email, full_name, avatar_url)
+            `)
+            .or(
+              `and(lender_id.eq.${user.id},borrower_id.eq.${resolvedPersonId}),and(lender_id.eq.${resolvedPersonId},borrower_id.eq.${user.id})`
+            )
+            .order('created_at', { ascending: false });
+          debtRows = fallbackDebtRows;
         }
       }
 
       setPerson(targetProfile);
 
-      // Fetch all debts between user and this person
-      const { data: debtRows } = await supabase
-        .from('debts')
-        .select(`
-          *,
-          lender:profiles!debts_lender_id_fkey(id, email, full_name, avatar_url),
-          borrower:profiles!debts_borrower_id_fkey(id, email, full_name, avatar_url)
-        `)
-        .or(
-          `and(lender_id.eq.${user.id},borrower_id.eq.${resolvedPersonId}),and(lender_id.eq.${resolvedPersonId},borrower_id.eq.${user.id})`
-        )
-        .order('created_at', { ascending: false });
-
       const allDebts: Debt[] = (debtRows as any) || [];
       setDebts(allDebts);
-
-      // Auto-purge any historical unverified payments for settled debts
-      const settledDebtIds = allDebts.filter((d) => d.status === 'settled').map((d) => d.id);
-      if (settledDebtIds.length > 0) {
-        await supabase
-          .from('payments')
-          .delete()
-          .in('debt_id', settledDebtIds)
-          .eq('is_verified', false);
-      }
 
       const debtIds = allDebts.map((d) => d.id);
 
@@ -161,8 +161,23 @@ function PersonDebtDetailContent() {
           supabase.from('payments').select('*').in('debt_id', debtIds).order('created_at', { ascending: false }),
           supabase.from('activity_log').select('*').in('debt_id', debtIds).order('created_at', { ascending: false }),
         ]);
-        setPayments(paymentRes.data || []);
+        const loadedPayments: Payment[] = (paymentRes.data as any) || [];
+        setPayments(loadedPayments);
         setActivityLogs(logRes.data || []);
+
+        // Only purge unverified payments on settled debts if any actually exist (non-blocking)
+        const settledDebtIdSet = new Set(allDebts.filter((d) => d.status === 'settled').map((d) => d.id));
+        const hasOrphanedUnverified = loadedPayments.some(
+          (p) => !p.is_verified && settledDebtIdSet.has(p.debt_id)
+        );
+        if (hasOrphanedUnverified) {
+          supabase
+            .from('payments')
+            .delete()
+            .in('debt_id', Array.from(settledDebtIdSet))
+            .eq('is_verified', false)
+            .then(() => {});
+        }
       } else {
         setPayments([]);
         setActivityLogs([]);
@@ -204,19 +219,30 @@ function PersonDebtDetailContent() {
   const handleVerifyRepayment = async (paymentId: string, decision: 'verified' | 'disputed') => {
     setVerifyingPaymentId(paymentId);
     try {
+      const paymentItem = payments.find((p) => p.id === paymentId);
+      const targetDebt = paymentItem ? debts.find((d) => d.id === paymentItem.debt_id) : undefined;
+      let shouldSettle: boolean | null = null;
+      if (decision === 'verified' && targetDebt) {
+        const updatedPayments = payments.map((p) =>
+          p.id === paymentId ? { ...p, is_verified: true } : p
+        );
+        const targetDebtPayments = updatedPayments.filter((p) => p.debt_id === targetDebt.id);
+        const calc = calculateDebtBalance(targetDebt, targetDebtPayments);
+        shouldSettle = calc.currentBalance <= 0.01;
+      }
+
       const rpcDecision = decision === 'verified' ? 'accepted' : 'declined';
       let handled = false;
       try {
         const { data, error } = await supabase.rpc('verify_repayment', {
           p_payment_id: paymentId,
           p_decision: rpcDecision,
+          p_should_settle: shouldSettle,
         });
         if (!error && data?.success) handled = true;
       } catch (_) {}
 
       if (!handled) {
-        const paymentItem = payments.find((p) => p.id === paymentId);
-
         if (decision === 'verified') {
           await supabase
             .from('payments')
@@ -227,31 +253,21 @@ function PersonDebtDetailContent() {
             })
             .eq('id', paymentId);
 
-          if (paymentItem) {
-            const targetDebt = debts.find((d) => d.id === paymentItem.debt_id);
-            if (targetDebt) {
-              const updatedPayments = payments.map((p) =>
-                p.id === paymentId ? { ...p, is_verified: true } : p
-              );
-              const targetDebtPayments = updatedPayments.filter((p) => p.debt_id === targetDebt.id);
-              const calc = calculateDebtBalance(targetDebt, targetDebtPayments);
-              if (calc.currentBalance <= 0.01) {
-                await supabase
-                  .from('debts')
-                  .update({
-                    status: 'settled',
-                    settled_at: new Date().toISOString(),
-                  })
-                  .eq('id', targetDebt.id);
+          if (targetDebt && shouldSettle) {
+            await supabase
+              .from('debts')
+              .update({
+                status: 'settled',
+                settled_at: new Date().toISOString(),
+              })
+              .eq('id', targetDebt.id);
 
-                // Auto-purge any remaining unverified payments for this now-settled debt
-                await supabase
-                  .from('payments')
-                  .delete()
-                  .eq('debt_id', targetDebt.id)
-                  .eq('is_verified', false);
-              }
-            }
+            // Auto-purge any remaining unverified payments for this now-settled debt
+            await supabase
+              .from('payments')
+              .delete()
+              .eq('debt_id', targetDebt.id)
+              .eq('is_verified', false);
           }
         } else {
           // Lender disputes repayment
@@ -285,6 +301,7 @@ function PersonDebtDetailContent() {
         }
       }
 
+      invalidateLedgerCache();
       window.dispatchEvent(new CustomEvent('debtsync:refresh'));
       await fetchDetails();
     } catch (err: any) {
@@ -305,6 +322,7 @@ function PersonDebtDetailContent() {
         .eq('id', debtId);
       if (error) throw error;
 
+      invalidateLedgerCache();
       window.dispatchEvent(new CustomEvent('debtsync:refresh'));
       fetchDetails();
     } catch (err: any) {

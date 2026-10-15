@@ -25,6 +25,7 @@ import {
   setLocalRecentAvatars,
 } from '@/lib/utils/avatar-storage';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
+import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { triggerPWAInstallPrompt } from '@/components/ui/PWAInstallPrompt';
 import { isValidUPIId, detectUPIApp, isValidIFSC, isValidBankAccount, normalizeIFSC } from '@/lib/utils/upi-link';
 
@@ -352,16 +353,28 @@ export default function SettingsPage() {
         setUserId(user.id);
         setEmail(user.email || '');
 
-        // Load profile
-        let profile: any = null;
-        const { data: pData, error: pErr } = await supabase
-          .from('profiles')
-          .select('full_name, phone, secondary_emails, avatar_url, recent_custom_avatars, upi_id, is_admin, preferred_repayment_method, bank_name, bank_account_number, bank_ifsc, bank_account_holder_name')
-          .eq('id', user.id)
-          .single();
+        // Fetch profile, user_settings, and user debts concurrently in parallel
+        const [profileRes, settingsRes, debtsRes] = await Promise.all([
+          supabase
+            .from('profiles')
+            .select('full_name, phone, secondary_emails, avatar_url, recent_custom_avatars, upi_id, is_admin, preferred_repayment_method, bank_name, bank_account_number, bank_ifsc, bank_account_holder_name')
+            .eq('id', user.id)
+            .single(),
+          supabase
+            .from('user_settings')
+            .select('default_currency, default_country_code, theme_preference, default_interest_type, default_interest_rate, default_compound_freq')
+            .eq('user_id', user.id)
+            .single()
+            .then((r: any) => r, () => ({ data: null, error: true })),
+          supabase
+            .from('debts')
+            .select('*')
+            .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`),
+        ]);
 
-        if (!pErr && pData) {
-          profile = pData;
+        let profile: any = null;
+        if (!profileRes.error && profileRes.data) {
+          profile = profileRes.data;
         } else {
           // Graceful fallback if columns are not yet migrated
           const { data: fallbackData } = await supabase
@@ -407,21 +420,16 @@ export default function SettingsPage() {
         const localCode = typeof window !== 'undefined' ? localStorage.getItem('debtsync_default_country_code') : null;
 
         // Load settings
-        let userSettings: any = null;
-        try {
-          const { data: sData } = await supabase
-            .from('user_settings')
-            .select('default_currency, default_country_code, theme_preference, default_interest_type, default_interest_rate, default_compound_freq')
-            .eq('user_id', user.id)
-            .single();
-          userSettings = sData;
-        } catch (_) {
-          const { data: fallbackSData } = await supabase
-            .from('user_settings')
-            .select('default_currency, default_country_code, theme_preference')
-            .eq('user_id', user.id)
-            .single();
-          userSettings = fallbackSData;
+        let userSettings: any = settingsRes?.data || null;
+        if (!userSettings && settingsRes?.error) {
+          try {
+            const { data: fallbackSData } = await supabase
+              .from('user_settings')
+              .select('default_currency, default_country_code, theme_preference')
+              .eq('user_id', user.id)
+              .single();
+            userSettings = fallbackSData;
+          } catch (_) {}
         }
 
         if (userSettings?.default_currency) {
@@ -448,13 +456,9 @@ export default function SettingsPage() {
         setDefaultInterestRateStr(isNaN(resolvedRate) ? '0' : String(resolvedRate));
         setDefaultCompoundFreq(resolvedFreq);
 
-        // Load user debts to evaluate account deletion eligibility
-        const { data: userDebts } = await supabase
-          .from('debts')
-          .select('*')
-          .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`);
-
-        const debtIds = (userDebts || []).map((d: any) => d.id);
+        // Evaluate account deletion eligibility from loaded debts
+        const userDebts = debtsRes.data || [];
+        const debtIds = userDebts.map((d: any) => d.id);
         let userPayments: any[] = [];
         if (debtIds.length > 0) {
           const { data: pData } = await supabase
@@ -584,9 +588,9 @@ export default function SettingsPage() {
         throw new Error('Primary phone number is compulsory. Please enter your phone number.');
       }
 
-      // Check phone uniqueness before saving
+      // Check phone uniqueness before saving (if conflict is an unclaimed ghost account, merge it instead of blocking!)
       const phoneConflict = await checkIdentifierConflict(undefined, cleanPhone, user.id);
-      if (phoneConflict.hasConflict) {
+      if (phoneConflict.hasConflict && !phoneConflict.isGhost) {
         throw new Error(phoneConflict.message || 'This phone number is already registered to another account.');
       }
 
@@ -606,6 +610,18 @@ export default function SettingsPage() {
 
       if (preferredRepaymentMethod === 'bank_transfer' && !cleanBankAcc) {
         throw new Error('You selected Bank Account as your preferred receiving method. Please enter your Bank Account Number.');
+      }
+
+      // If phone belonged to an unclaimed ghost account, merge that ghost profile first
+      if (phoneConflict.hasConflict && phoneConflict.isGhost && phoneConflict.conflictProfileId) {
+        await claimUserProfile(
+          { ...user, phone: cleanPhone, user_metadata: { ...user.user_metadata, phone: cleanPhone } },
+          {
+            ghostIdToMerge: phoneConflict.conflictProfileId,
+            resolutionMode: 'secondary_keep',
+            ghostEmail: phoneConflict.conflictEmail,
+          }
+        );
       }
 
       // Update profile
@@ -656,24 +672,11 @@ export default function SettingsPage() {
         );
       }
 
-      // Merge any shadow profiles that match these secondary emails
-      for (const secEmail of secondaryEmails) {
-        const { data: shadowList } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('email', secEmail.toLowerCase())
-          .eq('is_shadow', true);
-
-        if (shadowList && shadowList.length > 0) {
-          for (const shadow of shadowList) {
-            // Re-point debts from shadow to real user
-            await supabase.from('debts').update({ lender_id: user.id }).eq('lender_id', shadow.id);
-            await supabase.from('debts').update({ borrower_id: user.id }).eq('borrower_id', shadow.id);
-            // Delete shadow profile
-            await supabase.from('profiles').delete().eq('id', shadow.id);
-          }
-        }
-      }
+      // Merge any shadow profiles that match the user's phone or secondary emails safely via claimUserProfile
+      await claimUserProfile(
+        { ...user, phone: cleanPhone, user_metadata: { ...user.user_metadata, phone: cleanPhone } },
+        { resolutionMode: 'secondary_keep' }
+      );
 
       if (typeof window !== 'undefined') {
         localStorage.setItem('debtsync_default_country_code', defaultCountryCode);

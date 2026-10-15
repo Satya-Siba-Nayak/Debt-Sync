@@ -18,7 +18,7 @@ import { SkeletonBalanceCards, SkeletonTableRows } from '@/components/ui/Skeleto
 import { parseSplitDetails, parseShareMetadata, getCleanDebtNotes } from '@/lib/utils/split-bills';
 import { EditPendingDebtModal } from '@/components/debts/EditPendingDebtModal';
 import { DebtDetailModal } from '@/components/debts/DebtDetailModal';
-import { respondToDebtAgreement } from '@/lib/utils/debt-acceptance';
+import { respondToDebtAgreement, cancelPendingDebt } from '@/lib/utils/debt-acceptance';
 import Link from 'next/link';
 
 export default function GlobalDashboardPage() {
@@ -56,11 +56,9 @@ export default function GlobalDashboardPage() {
       if (!user) return;
       setCurrentUserId(user.id);
 
-      // Claim any pending debts associated with user's email (cached)
-      await claimUserProfile(user);
-
-      // Fetch user settings and debts in parallel
-      const [settingsRes, debtRecordsRes] = await Promise.all([
+      // Run profile claim, user settings, and debts fetch concurrently
+      const [, settingsRes, debtRecordsRes] = await Promise.all([
+        claimUserProfile(user),
         supabase
           .from('user_settings')
           .select('default_currency')
@@ -93,10 +91,18 @@ export default function GlobalDashboardPage() {
           .in('debt_id', debtIds);
         allPayments = (paymentRecords as any) || [];
 
-        // Auto-purge any historical unverified payments on settled debts
-        const settledDebtIds = allDebts.filter((d) => d.status === 'settled').map((d) => d.id);
-        if (settledDebtIds.length > 0) {
-          supabase.from('payments').delete().in('debt_id', settledDebtIds).eq('is_verified', false);
+        // Only purge unverified payments on settled debts if any actually exist
+        const settledDebtIdSet = new Set(allDebts.filter((d) => d.status === 'settled').map((d) => d.id));
+        const hasOrphanedUnverified = allPayments.some(
+          (p) => !p.is_verified && settledDebtIdSet.has(p.debt_id)
+        );
+        if (hasOrphanedUnverified) {
+          supabase
+            .from('payments')
+            .delete()
+            .in('debt_id', Array.from(settledDebtIdSet))
+            .eq('is_verified', false)
+            .then(() => {});
         }
       }
 
@@ -145,7 +151,7 @@ export default function GlobalDashboardPage() {
       setLoading(false);
       isFetchingDashboardRef.current = false;
     }
-  }, []);
+  }, [supabase]);
 
   const handleAcceptDebt = async (debtId: string, decision: 'active' | 'declined') => {
     try {
@@ -154,6 +160,23 @@ export default function GlobalDashboardPage() {
     } catch (err: any) {
       console.error('Error updating debt:', err);
       alert(err.message || 'Failed to update debt agreement');
+    }
+  };
+
+  const handleTakeBackPendingDebt = async (debtId: string) => {
+    if (
+      !confirm(
+        'Are you sure you want to take back this pending agreement? This will cancel the transaction request before counterparty acceptance.'
+      )
+    ) {
+      return;
+    }
+    try {
+      await cancelPendingDebt(supabase, debtId);
+      fetchDashboardData();
+    } catch (err: any) {
+      console.error('Error taking back pending debt:', err);
+      alert(err.message || 'Failed to take back pending agreement');
     }
   };
 
@@ -179,13 +202,18 @@ export default function GlobalDashboardPage() {
       window.removeEventListener('debtsync:refresh', handleRefresh);
       supabase.removeChannel(channel);
     };
-  }, [fetchDashboardData]);
+  }, [fetchDashboardData, supabase]);
 
-  const incomingPendingDebts = debts.filter(
+  const visibleDebts = React.useMemo(
+    () => debts.filter((d) => !d.hidden_by?.includes(currentUserId || '')),
+    [debts, currentUserId]
+  );
+
+  const incomingPendingDebts = visibleDebts.filter(
     (d) => d.status === 'pending' && d.created_by !== currentUserId
   );
 
-  const sortedDebts = React.useMemo(() => sortDebtsActiveFirst(debts), [debts]);
+  const sortedDebts = React.useMemo(() => sortDebtsActiveFirst(visibleDebts), [visibleDebts]);
 
   return (
     <div className="page-enter flex flex-col gap-6 md:gap-8">
@@ -599,13 +627,23 @@ export default function GlobalDashboardPage() {
                           <span className="material-symbols-outlined text-[13px]">schedule</span>
                           <span>Awaiting acceptance</span>
                         </span>
-                        <button
-                          onClick={() => setSelectedDebtForEdit(d)}
-                          className="px-3 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 border border-amber-500/30 font-mono text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
-                        >
-                          <span className="material-symbols-outlined text-[13px]">edit</span>
-                          <span>Edit</span>
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => handleTakeBackPendingDebt(d.id)}
+                            className="px-2.5 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/25 font-mono text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                            title="Take back and cancel this pending transaction"
+                          >
+                            <span className="material-symbols-outlined text-[13px]">undo</span>
+                            <span>Take Back</span>
+                          </button>
+                          <button
+                            onClick={() => setSelectedDebtForEdit(d)}
+                            className="px-3 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 border border-amber-500/30 font-mono text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                          >
+                            <span className="material-symbols-outlined text-[13px]">edit</span>
+                            <span>Edit</span>
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -804,13 +842,23 @@ export default function GlobalDashboardPage() {
                                 Accept
                               </button>
                             ) : d.status === 'pending' && d.created_by === currentUserId ? (
-                              <button
-                                onClick={() => setSelectedDebtForEdit(d)}
-                                className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 border border-amber-500/30 font-mono text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 whitespace-nowrap"
-                              >
-                                <span className="material-symbols-outlined text-[13px]">edit</span>
-                                <span>Edit</span>
-                              </button>
+                              <>
+                                <button
+                                  onClick={() => handleTakeBackPendingDebt(d.id)}
+                                  className="px-2.5 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/25 font-mono text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 whitespace-nowrap"
+                                  title="Take back and cancel this pending transaction"
+                                >
+                                  <span className="material-symbols-outlined text-[13px]">undo</span>
+                                  <span>Take Back</span>
+                                </button>
+                                <button
+                                  onClick={() => setSelectedDebtForEdit(d)}
+                                  className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 border border-amber-500/30 font-mono text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 whitespace-nowrap"
+                                >
+                                  <span className="material-symbols-outlined text-[13px]">edit</span>
+                                  <span>Edit</span>
+                                </button>
+                              </>
                             ) : null}
                             <button
                               type="button"
