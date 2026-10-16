@@ -224,6 +224,15 @@ function buildMessage(
         tag: `debt-${tagBase}-share`,
         cta: 'View Transaction',
       };
+    case 'debt_pending_reminder':
+      return {
+        title: `Reminder: Pending agreement from ${actorName}`,
+        body: `${actorName} sent a friendly reminder to review and respond to the pending ${debtAmount} agreement on your shared ledger.`,
+        amountLine: debtAmount,
+        url: debtUrl,
+        tag: `debt-${tagBase}-reminder`,
+        cta: 'Review Agreement',
+      };
     default:
       return {
         title: `Ledger update from ${actorName}`,

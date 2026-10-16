@@ -62,6 +62,8 @@ export function DebtDetailModal({
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isNoteModalOpen, setIsNoteModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [reminderLoading, setReminderLoading] = useState(false);
+  const [reminderFeedback, setReminderFeedback] = useState<string | null>(null);
 
   const prevDebtIdRef = useRef<string | null>(null);
 
@@ -522,6 +524,129 @@ export function DebtDetailModal({
       alert(e.message || 'Failed to take back pending agreement.');
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  // Pending Debt Reminder Logic (1 day after posting, max 2 reminders, 1/day)
+  const reminderLogs = activityLogs.filter((l) => l.action === 'debt_pending_reminder');
+  const reminderCount = Math.max(debt?.reminder_count || 0, reminderLogs.length);
+  const lastReminderAt = debt?.last_reminder_at || (reminderLogs[0]?.created_at ?? null);
+  const createdAtMs = debt ? new Date(debt.created_at).getTime() : 0;
+  const nowMs = Date.now();
+  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+  const timeSinceCreated = nowMs - createdAtMs;
+  const isCreatedAtLeast1Day = timeSinceCreated >= ONE_DAY_MS;
+  const timeSinceLastReminder = lastReminderAt ? nowMs - new Date(lastReminderAt).getTime() : Infinity;
+  const isLastReminderAtLeast1Day = timeSinceLastReminder >= ONE_DAY_MS;
+
+  let canSendReminder = false;
+  let reminderLabel = 'Send Reminder (1/2)';
+  let reminderTooltip = 'Send a reminder email to counterparty (1/day, max 2)';
+
+  if (reminderCount >= 2) {
+    canSendReminder = false;
+    reminderLabel = 'Max Reminders Sent (2/2)';
+    reminderTooltip = 'Maximum reminder limit of 2 reached for this transaction.';
+  } else if (reminderCount === 0) {
+    if (!isCreatedAtLeast1Day) {
+      const hoursRemaining = Math.max(1, Math.ceil((ONE_DAY_MS - timeSinceCreated) / (3600 * 1000)));
+      canSendReminder = false;
+      reminderLabel = `Reminder in ${hoursRemaining}h`;
+      reminderTooltip = `First reminder can be sent 24 hours after posting (${hoursRemaining}h remaining).`;
+    } else {
+      canSendReminder = true;
+      reminderLabel = 'Send Reminder (1/2)';
+      reminderTooltip = `Send a reminder email and notification to ${otherName}.`;
+    }
+  } else if (reminderCount === 1) {
+    if (!isLastReminderAtLeast1Day) {
+      const hoursRemaining = Math.max(1, Math.ceil((ONE_DAY_MS - timeSinceLastReminder) / (3600 * 1000)));
+      canSendReminder = false;
+      reminderLabel = `Reminder in ${hoursRemaining}h (1/2 sent)`;
+      reminderTooltip = `1 reminder already sent. Second reminder available in ${hoursRemaining}h (1/day limit).`;
+    } else {
+      canSendReminder = true;
+      reminderLabel = 'Send Another Reminder (2/2)';
+      reminderTooltip = `Send second and final reminder email and notification to ${otherName}.`;
+    }
+  }
+
+  const handleSendReminder = async () => {
+    if (!debt || !canSendReminder || reminderLoading) return;
+    setReminderLoading(true);
+    setReminderFeedback(null);
+    try {
+      let rpcSuccess = false;
+      try {
+        const { data, error } = await supabase.rpc('send_debt_pending_reminder', {
+          p_debt_id: debt.id,
+        });
+        if (!error && data?.success) {
+          rpcSuccess = true;
+          setInternalDebt((prev) => prev ? {
+            ...prev,
+            reminder_count: data.reminder_count,
+            last_reminder_at: data.last_reminder_at,
+          } : null);
+        } else if (error || (data && !data.success)) {
+          throw new Error(data?.error || error?.message || 'Could not send reminder');
+        }
+      } catch (rpcErr: any) {
+        if (rpcErr.message && !rpcErr.message.includes('function') && !rpcErr.message.includes('does not exist')) {
+          throw rpcErr;
+        }
+      }
+
+      if (!rpcSuccess) {
+        const newCount = reminderCount + 1;
+        const nowIso = new Date().toISOString();
+        await supabase.from('debts').update({
+          reminder_count: newCount,
+          last_reminder_at: nowIso,
+        }).eq('id', debt.id);
+
+        await supabase.from('activity_log').insert({
+          user_id: currentUserId,
+          debt_id: debt.id,
+          action: 'debt_pending_reminder',
+          details: { reminder_number: newCount, borrower_id: debt.borrower_id },
+        });
+
+        // Trigger Edge Function directly
+        try {
+          const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+          const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+          await fetch(`${supabaseUrl}/functions/v1/notify`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${supabaseAnonKey}`,
+              'apikey': supabaseAnonKey,
+            },
+            body: JSON.stringify({
+              event: 'debt_pending_reminder',
+              debt_id: debt.id,
+              actor_id: currentUserId,
+              details: { reminder_number: newCount },
+            }),
+          });
+        } catch (_) {}
+
+        setInternalDebt((prev) => prev ? {
+          ...prev,
+          reminder_count: newCount,
+          last_reminder_at: nowIso,
+        } : null);
+      }
+
+      setReminderFeedback(`Reminder successfully sent to ${otherName}!`);
+      setTimeout(() => setReminderFeedback(null), 5000);
+      await fetchDebtDetails();
+      onDebtUpdated?.();
+    } catch (err: any) {
+      alert(err.message || 'Failed to send reminder.');
+    } finally {
+      setReminderLoading(false);
     }
   };
 
@@ -1047,9 +1172,33 @@ export function DebtDetailModal({
                   <p className="text-xs text-amber-800/90 dark:text-amber-300/90 mt-0.5">
                     Waiting for {otherName} to review &amp; accept this agreement. You can edit details or take back the request before they accept.
                   </p>
+                  {reminderFeedback && (
+                    <div className="text-[11px] font-mono font-bold text-emerald-600 dark:text-emerald-400 mt-1.5 flex items-center gap-1">
+                      <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                      <span>{reminderFeedback}</span>
+                    </div>
+                  )}
                 </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {/* Pending Reminder Button (1 day after posting, 2 max, 1/day) */}
+                <button
+                  type="button"
+                  disabled={!canSendReminder || reminderLoading}
+                  onClick={handleSendReminder}
+                  className={`py-1.5 px-3 rounded-lg font-mono text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-xs ${
+                    canSendReminder
+                      ? 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
+                      : 'bg-[var(--surface-container-high)] text-[var(--outline)] border border-[var(--outline-variant)]/30 cursor-not-allowed opacity-75'
+                  }`}
+                  title={reminderTooltip}
+                >
+                  <span className="material-symbols-outlined text-[15px]">
+                    {reminderLoading ? 'sync' : 'forward_to_inbox'}
+                  </span>
+                  <span>{reminderLoading ? 'Sending...' : reminderLabel}</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => setIsEditModalOpen(true)}

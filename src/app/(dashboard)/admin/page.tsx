@@ -17,6 +17,7 @@ import {
 import { Avatar } from '@/components/ui/Avatar';
 import { Modal } from '@/components/ui/Modal';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
+import { AdminAnalyticsView } from '@/components/admin/AdminAnalyticsView';
 
 export type AdminTab = 'overview' | 'users' | 'transactions' | 'analytics';
 
@@ -33,6 +34,162 @@ export interface TelemetryEvent {
   payload: any;
 }
 
+function formatTelemetryLog(
+  l: ActivityLogEntry,
+  profileMap: Map<string, Profile>,
+  debtMap: Map<string, Debt>
+): TelemetryEvent {
+  const actor = profileMap.get(l.user_id);
+  const actorName =
+    (l.details as any)?.by_name ||
+    (l.details as any)?.actorName ||
+    actor?.full_name ||
+    actor?.email?.split('@')[0] ||
+    'User';
+
+  const debt = l.debt_id ? debtMap.get(l.debt_id) : null;
+  const lender = debt ? profileMap.get(debt.lender_id) || debt.lender : null;
+  const borrower = debt ? profileMap.get(debt.borrower_id) || debt.borrower : null;
+
+  const counterparty = l.user_id === debt?.lender_id ? borrower : lender;
+  const counterpartyName =
+    (l.details as any)?.target_name ||
+    (l.details as any)?.counterparty_name ||
+    counterparty?.full_name ||
+    counterparty?.email?.split('@')[0] ||
+    (debt ? (l.user_id === debt.lender_id ? 'Borrower' : 'Lender') : '');
+
+  const amount = (l.details as any)?.amount ?? debt?.principal;
+  const currency = (l.details as any)?.currency ?? debt?.currency ?? 'INR';
+  const formattedAmt = amount != null ? formatCurrency(Number(amount), currency) : '';
+  const note = (l.details as any)?.note || debt?.notes;
+
+  const isAdmin = l.action.startsWith('ADMIN_');
+  let title = '';
+  let description = '';
+  let badgeClass = 'bg-indigo-500/15 text-indigo-500 border-indigo-500/20';
+  let icon = 'security';
+
+  switch (l.action) {
+    case 'ADMIN_ISOLATE_USER':
+      title = 'Admin Quarantined Account';
+      description = `${actorName} isolated ${(l.details as any)?.target_email || 'user'}${
+        (l.details as any)?.reason ? ` (Reason: ${(l.details as any).reason})` : ''
+      }`;
+      badgeClass = 'bg-red-500/15 text-red-500 border-red-500/20';
+      icon = 'gpp_bad';
+      break;
+
+    case 'ADMIN_LIFT_ISOLATION':
+      title = 'Admin Lifted Quarantine';
+      description = `${actorName} unfreezed ${(l.details as any)?.target_email || 'user'}`;
+      badgeClass = 'bg-emerald-500/15 text-emerald-500 border-emerald-500/20';
+      icon = 'verified_user';
+      break;
+
+    case 'ADMIN_PURGE_USER':
+      title = 'Admin Purged Account';
+      description = `${actorName} purged ${(l.details as any)?.target_email || 'user'}`;
+      badgeClass = 'bg-red-500/15 text-red-500 border-red-500/20';
+      icon = 'person_remove';
+      break;
+
+    case 'ADMIN_FORCE_REVERIFY':
+      title = 'Admin Re-verification Required';
+      description = `${actorName} forced verification reset for ${(l.details as any)?.target_email || 'user'}`;
+      badgeClass = 'bg-amber-500/15 text-amber-500 border-amber-500/20';
+      icon = 'history_edu';
+      break;
+
+    case 'debt_pending_reminder': {
+      const remCount = (l.details as any)?.reminder_count || 1;
+      title = `Pending Reminder (${remCount}/2) Sent`;
+      description = `${actorName} reminded ${counterpartyName || 'borrower'}${formattedAmt ? ` for ${formattedAmt}` : ''}`;
+      badgeClass = 'bg-amber-500/15 text-amber-500 border-amber-500/20';
+      icon = 'notification_important';
+      break;
+    }
+
+    case 'payment_made':
+    case 'payment_created':
+      title = `Payment Submitted: ${formattedAmt}`;
+      description = `${actorName} paid ${counterpartyName || 'lender'}${note ? ` • "${note}"` : ''}`;
+      badgeClass = 'bg-emerald-500/15 text-emerald-500 border-emerald-500/20';
+      icon = 'payments';
+      break;
+
+    case 'payment_verified':
+      title = `Payment Verified: ${formattedAmt}`;
+      description = `${actorName} verified repayment from ${counterpartyName || 'borrower'}`;
+      badgeClass = 'bg-teal-500/15 text-teal-500 border-teal-500/20';
+      icon = 'task_alt';
+      break;
+
+    case 'payment_disputed':
+      title = 'Payment Disputed / Flagged';
+      description = `${actorName} contested repayment with ${counterpartyName || 'counterparty'}`;
+      badgeClass = 'bg-red-500/15 text-red-500 border-red-500/20';
+      icon = 'report_problem';
+      break;
+
+    case 'debt_created':
+      title = `Agreement Created: ${formattedAmt}`;
+      description = `${actorName} created debt with ${counterpartyName || 'borrower'}${note ? ` • "${note}"` : ''}`;
+      badgeClass = 'bg-indigo-500/15 text-indigo-500 border-indigo-500/20';
+      icon = 'receipt_long';
+      break;
+
+    case 'debt_accepted':
+      title = 'Agreement Accepted';
+      description = `${actorName} accepted terms from ${counterpartyName || 'lender'}`;
+      badgeClass = 'bg-emerald-500/15 text-emerald-500 border-emerald-500/20';
+      icon = 'check_circle';
+      break;
+
+    case 'debt_settled':
+      title = `Debt Fully Settled: ${formattedAmt}`;
+      description = `All balances cleared between ${lender?.full_name || 'Lender'} and ${borrower?.full_name || 'Borrower'}`;
+      badgeClass = 'bg-emerald-500/15 text-emerald-500 border-emerald-500/20';
+      icon = 'verified';
+      break;
+
+    case 'debt_declined':
+      title = 'Agreement Declined';
+      description = `${actorName} declined agreement from ${counterpartyName || 'counterparty'}`;
+      badgeClass = 'bg-neutral-500/15 text-neutral-400 border-neutral-500/20';
+      icon = 'cancel';
+      break;
+
+    default:
+      if (isAdmin) {
+        title = `Admin: ${l.action.replace('ADMIN_', '').replace(/_/g, ' ')}`;
+        description = `${actorName}: ${(l.details as any)?.target_email || (l.details as any)?.note || 'System moderation operation'}`;
+        badgeClass = 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30';
+        icon = 'admin_panel_settings';
+      } else {
+        title = `Action: ${l.action.replace(/_/g, ' ')}`;
+        description = `${actorName}${counterpartyName ? ` with ${counterpartyName}` : ''}${formattedAmt ? ` • ${formattedAmt}` : ''}`;
+        badgeClass = 'bg-indigo-500/15 text-indigo-500 border-indigo-500/20';
+        icon = 'security';
+      }
+      break;
+  }
+
+  const logDate = new Date(l.created_at);
+  return {
+    id: `hist_${l.id}`,
+    timestamp: logDate.toISOString(),
+    relativeTime: logDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    table: 'activity_log' as const,
+    eventType: 'INSERT' as const,
+    title,
+    description,
+    badgeClass,
+    icon,
+    payload: l,
+  };
+}
+
 export default function AdminDashboardPage() {
   const supabase = createClient();
 
@@ -46,6 +203,11 @@ export default function AdminDashboardPage() {
   const [allDebts, setAllDebts] = useState<Debt[]>([]);
   const [allPayments, setAllPayments] = useState<Payment[]>([]);
   const [allLogs, setAllLogs] = useState<ActivityLogEntry[]>([]);
+
+  const allProfilesRef = useRef<Profile[]>([]);
+  allProfilesRef.current = allProfiles;
+  const allDebtsRef = useRef<Debt[]>([]);
+  allDebtsRef.current = allDebts;
 
   // Live Stream / Telemetry state
   const [liveEvents, setLiveEvents] = useState<TelemetryEvent[]>([]);
@@ -203,37 +365,29 @@ export default function AdminDashboardPage() {
           .limit(100),
       ]);
 
-      if (profilesRes.data) setAllProfiles(profilesRes.data as Profile[]);
-      if (debtsRes.data) setAllDebts(debtsRes.data as Debt[]);
+      if (profilesRes.data) {
+        const pList = profilesRes.data as Profile[];
+        setAllProfiles(pList);
+        allProfilesRef.current = pList;
+      }
+      if (debtsRes.data) {
+        const dList = debtsRes.data as Debt[];
+        setAllDebts(dList);
+        allDebtsRef.current = dList;
+      }
       if (paymentsRes.data) setAllPayments(paymentsRes.data as Payment[]);
       if (logsRes.data) {
         const fetchedLogs = logsRes.data as ActivityLogEntry[];
         setAllLogs(fetchedLogs);
+        const pMap = new Map<string, Profile>(
+          ((profilesRes.data as Profile[]) || []).map((p) => [p.id, p])
+        );
+        const dMap = new Map<string, Debt>(
+          ((debtsRes.data as Debt[]) || []).map((d) => [d.id, d])
+        );
         setLiveEvents((prev) => {
           if (prev.length > 0) return prev;
-          return fetchedLogs.slice(0, 30).map((l) => {
-            const isAdmin = l.action.startsWith('ADMIN_');
-            const actorName = (l.details as any)?.by_name || (l.details as any)?.actorName || 'User';
-            const logDate = new Date(l.created_at);
-            return {
-              id: `hist_${l.id}`,
-              timestamp: logDate.toISOString(),
-              relativeTime: logDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-              table: 'activity_log' as const,
-              eventType: 'INSERT' as const,
-              title: isAdmin
-                ? `Admin: ${l.action.replace('ADMIN_', '').replace(/_/g, ' ')}`
-                : `Action: ${l.action.replace(/_/g, ' ')}`,
-              description: (l.details as any)?.target_email
-                ? `Target: ${(l.details as any).target_email}`
-                : (l.details as any)?.note || `Logged by ${actorName}`,
-              badgeClass: isAdmin
-                ? 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30'
-                : 'bg-indigo-500/15 text-indigo-500 border-indigo-500/20',
-              icon: isAdmin ? 'admin_panel_settings' : 'security',
-              payload: l,
-            };
-          });
+          return fetchedLogs.slice(0, 30).map((l) => formatTelemetryLog(l, pMap, dMap));
         });
       }
     } catch (err) {
@@ -258,11 +412,18 @@ export default function AdminDashboardPage() {
         (payload: any) => {
           const rec: any = payload.new || payload.old || {};
           const isInsert = payload.eventType === 'INSERT';
+          const payer = allProfilesRef.current.find((p) => p.id === rec.paid_by);
+          const debt = allDebtsRef.current.find((d) => d.id === rec.debt_id);
+          const lender = debt ? allProfilesRef.current.find((p) => p.id === debt.lender_id) : null;
+          const payerName = payer?.full_name || payer?.email?.split('@')[0] || 'Borrower';
+          const lenderName = lender?.full_name || lender?.email?.split('@')[0] || 'Lender';
+          const amtStr = formatCurrency(rec.amount || 0, rec.currency || 'INR');
+
           addTelemetryEvent({
             table: 'payments',
             eventType: payload.eventType as any,
-            title: isInsert ? `Payment Submitted: ${formatCurrency(rec.amount || 0, rec.currency || 'INR')}` : `Payment ${payload.eventType}`,
-            description: `Payment ${rec.id?.substring(0, 8)}... via ${rec.payment_method || 'UPI'} ${rec.is_verified ? '(Verified)' : '(Pending)'}`,
+            title: isInsert ? `Payment Submitted: ${amtStr}` : `Payment ${payload.eventType}: ${amtStr}`,
+            description: `${payerName} → ${lenderName} via ${rec.payment_method || 'UPI'} ${rec.is_verified ? '(Verified)' : '(Pending)'}`,
             badgeClass: isInsert ? 'bg-emerald-500/15 text-emerald-500 border-emerald-500/20' : 'bg-blue-500/15 text-blue-500 border-blue-500/20',
             icon: 'payments',
             payload,
@@ -276,11 +437,17 @@ export default function AdminDashboardPage() {
         (payload: any) => {
           const rec: any = payload.new || payload.old || {};
           const isInsert = payload.eventType === 'INSERT';
+          const lender = allProfilesRef.current.find((p) => p.id === rec.lender_id);
+          const borrower = allProfilesRef.current.find((p) => p.id === rec.borrower_id);
+          const lenderName = lender?.full_name || lender?.email?.split('@')[0] || 'Lender';
+          const borrowerName = borrower?.full_name || borrower?.email?.split('@')[0] || 'Borrower';
+          const principalStr = formatCurrency(rec.principal || 0, rec.currency || 'INR');
+
           addTelemetryEvent({
             table: 'debts',
             eventType: payload.eventType as any,
-            title: isInsert ? `New Debt Contract: ${formatCurrency(rec.principal || 0, rec.currency || 'INR')}` : `Debt ${payload.eventType} (${rec.status})`,
-            description: `Status: ${rec.status || 'pending'} • APR: ${rec.interest_rate || 0}% (${rec.interest_type || 'none'})`,
+            title: isInsert ? `New Contract: ${principalStr}` : `Debt ${payload.eventType}: ${principalStr} (${rec.status})`,
+            description: `${lenderName} → ${borrowerName} • Status: ${rec.status || 'pending'}${rec.notes ? ` • "${rec.notes}"` : ''}`,
             badgeClass: rec.status === 'settled' ? 'bg-emerald-500/15 text-emerald-500 border-emerald-500/20' : rec.status === 'disputed' ? 'bg-red-500/15 text-red-500 border-red-500/20' : 'bg-indigo-500/15 text-indigo-500 border-indigo-500/20',
             icon: 'receipt_long',
             payload,
@@ -311,13 +478,16 @@ export default function AdminDashboardPage() {
         { event: 'INSERT', schema: 'public', table: 'activity_log' },
         (payload: any) => {
           const rec: any = payload.new || {};
+          const pMap = new Map<string, Profile>(allProfilesRef.current.map((p) => [p.id, p]));
+          const dMap = new Map<string, Debt>(allDebtsRef.current.map((d) => [d.id, d]));
+          const evt = formatTelemetryLog(rec, pMap, dMap);
           addTelemetryEvent({
             table: 'activity_log',
             eventType: 'INSERT',
-            title: `System Action: ${rec.action || 'AUDIT'}`,
-            description: `Triggered by ${rec.user_id?.substring(0, 8)}...`,
-            badgeClass: 'bg-purple-500/15 text-purple-500 border-purple-500/20',
-            icon: 'security',
+            title: evt.title,
+            description: evt.description,
+            badgeClass: evt.badgeClass,
+            icon: evt.icon,
             payload,
           });
         }
@@ -331,11 +501,38 @@ export default function AdminDashboardPage() {
     };
   }, [supabase, addTelemetryEvent, fetchAdminData]);
 
-  // --- Aggregate Platform Metrics ---
-  const metrics = useMemo(() => {
-    const regularProfiles = allProfiles.filter(
+  // --- Active & Valid Scoped Sets ---
+  // Excludes system tombstone (00000000-0000-0000-0000-000000000001) and purged accounts
+  const regularProfiles = useMemo(() => {
+    return allProfiles.filter(
       (p) => p.id !== '00000000-0000-0000-0000-000000000001' && !p.is_purged
     );
+  }, [allProfiles]);
+
+  const existingUserIds = useMemo(() => {
+    return new Set(regularProfiles.map((p) => p.id));
+  }, [regularProfiles]);
+
+  const validDebts = useMemo(() => {
+    return allDebts.filter(
+      (d) =>
+        existingUserIds.has(d.lender_id) &&
+        existingUserIds.has(d.borrower_id) &&
+        !d.purged_by_admin &&
+        d.status !== 'purged'
+    );
+  }, [allDebts, existingUserIds]);
+
+  const validDebtIds = useMemo(() => new Set(validDebts.map((d) => d.id)), [validDebts]);
+
+  const validPayments = useMemo(() => {
+    return allPayments.filter(
+      (p) => validDebtIds.has(p.debt_id) && existingUserIds.has(p.paid_by)
+    );
+  }, [allPayments, validDebtIds, existingUserIds]);
+
+  // --- Aggregate Platform Metrics ---
+  const metrics = useMemo(() => {
     const totalUsers = regularProfiles.length;
     const registeredUsers = regularProfiles.filter((p) => !p.is_shadow).length;
     const ghostUsers = regularProfiles.filter((p) => p.is_shadow).length;
@@ -348,7 +545,7 @@ export default function AdminDashboardPage() {
     let pendingDebtsCount = 0;
     let disputedCount = 0;
 
-    for (const d of allDebts) {
+    for (const d of validDebts) {
       totalPrincipalVolume += Number(d.principal) || 0;
       if (d.status === 'settled') settledDebtsCount++;
       else if (d.status === 'active') activeDebtsCount++;
@@ -356,24 +553,24 @@ export default function AdminDashboardPage() {
       else if (d.status === 'disputed') disputedCount++;
 
       if (d.status !== 'settled' && d.status !== 'declined') {
-        const debtPayments = allPayments.filter((p) => p.debt_id === d.id);
+        const debtPayments = validPayments.filter((p) => p.debt_id === d.id);
         const calc = calculateDebtBalance(d, debtPayments);
         totalOutstandingVolume += calc.currentBalance;
       }
     }
 
-    const verifiedPayments = allPayments.filter((p) => p.is_verified);
+    const verifiedPayments = validPayments.filter((p) => p.is_verified);
     const totalRepaymentsVolume = verifiedPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
-    const pendingPaymentsCount = allPayments.filter((p) => !p.is_verified).length;
+    const pendingPaymentsCount = validPayments.filter((p) => !p.is_verified).length;
 
-    const disputedPaymentsCount = allPayments.filter(
+    const disputedPaymentsCount = validPayments.filter(
       (p) => typeof p.note === 'string' && p.note.includes('[DISPUTED]')
     ).length;
 
     // Average trust score across platform using enhanced algorithm (filtering unscored users)
-    const userScores = allProfiles.map((p) => {
-      const uDebts = allDebts.filter((d) => d.lender_id === p.id || d.borrower_id === p.id);
-      const uPayments = allPayments.filter((pm) => pm.paid_by === p.id);
+    const userScores = regularProfiles.map((p) => {
+      const uDebts = validDebts.filter((d) => d.lender_id === p.id || d.borrower_id === p.id);
+      const uPayments = validPayments.filter((pm) => pm.paid_by === p.id);
       return calculateTrustScore(uDebts, uPayments, p.id, {
         isIsolated: p.is_isolated,
         isVerified: p.is_verified,
@@ -391,7 +588,7 @@ export default function AdminDashboardPage() {
       totalPrincipalVolume: round2(totalPrincipalVolume),
       totalOutstandingVolume: round2(totalOutstandingVolume),
       totalRepaymentsVolume: round2(totalRepaymentsVolume),
-      totalDebts: allDebts.length,
+      totalDebts: validDebts.length,
       settledDebtsCount,
       activeDebtsCount,
       pendingDebtsCount,
@@ -399,27 +596,27 @@ export default function AdminDashboardPage() {
       pendingPaymentsCount,
       avgTrustScore,
     };
-  }, [allProfiles, allDebts, allPayments]);
+  }, [regularProfiles, validDebts, validPayments]);
 
   // --- Users list with computed metrics & enhanced trust breakdown ---
   const usersWithMetrics = useMemo(() => {
     return allProfiles.map((profile) => {
-      const userDebts = allDebts.filter((d) => d.lender_id === profile.id || d.borrower_id === profile.id);
-      const userLentDebts = allDebts.filter((d) => d.lender_id === profile.id && d.status !== 'declined');
-      const userBorrowDebts = allDebts.filter((d) => d.borrower_id === profile.id && d.status !== 'declined');
-      const userPayments = allPayments.filter((p) => p.paid_by === profile.id);
+      const userDebts = validDebts.filter((d) => d.lender_id === profile.id || d.borrower_id === profile.id);
+      const userLentDebts = validDebts.filter((d) => d.lender_id === profile.id && d.status !== 'declined');
+      const userBorrowDebts = validDebts.filter((d) => d.borrower_id === profile.id && d.status !== 'declined');
+      const userPayments = validPayments.filter((p) => p.paid_by === profile.id);
 
       let totalLentBalance = 0;
       for (const d of userLentDebts) {
         if (d.status === 'settled') continue;
-        const dPayments = allPayments.filter((p) => p.debt_id === d.id);
+        const dPayments = validPayments.filter((p) => p.debt_id === d.id);
         totalLentBalance += calculateDebtBalance(d, dPayments).currentBalance;
       }
 
       let totalOwedBalance = 0;
       for (const d of userBorrowDebts) {
         if (d.status === 'settled') continue;
-        const dPayments = allPayments.filter((p) => p.debt_id === d.id);
+        const dPayments = validPayments.filter((p) => p.debt_id === d.id);
         totalOwedBalance += calculateDebtBalance(d, dPayments).currentBalance;
       }
 
@@ -440,7 +637,7 @@ export default function AdminDashboardPage() {
         trustBreakdown: trust,
       };
     });
-  }, [allProfiles, allDebts, allPayments]);
+  }, [allProfiles, validDebts, validPayments]);
 
   // Filtered users
   const filteredUsers = useMemo(() => {
@@ -476,15 +673,15 @@ export default function AdminDashboardPage() {
     return liveEvents;
   }, [liveEvents, liveFilter]);
 
-  // Filtered transactions
+  // Filtered transactions (only active accounts, excluding purged/tombstone)
   const filteredDebts = useMemo(() => {
-    return allDebts.filter((d) => {
+    return validDebts.filter((d) => {
       if (txnStatusFilter !== 'all') {
         if (d.status !== txnStatusFilter) return false;
       }
 
       if (txnMethodFilter !== 'all') {
-        const hasPaymentMethod = allPayments.some((p) => {
+        const hasPaymentMethod = validPayments.some((p) => {
           if (p.debt_id !== d.id) return false;
           if (txnMethodFilter === 'upi') {
             return isUPIMethod(p.payment_method);
@@ -501,7 +698,7 @@ export default function AdminDashboardPage() {
       const notes = d.notes?.toLowerCase() || '';
       const debtId = d.id.toLowerCase();
 
-      const matchesUtr = allPayments.some(
+      const matchesUtr = validPayments.some(
         (p) => p.debt_id === d.id && p.transaction_ref?.toLowerCase().includes(q)
       );
 
@@ -513,7 +710,7 @@ export default function AdminDashboardPage() {
         matchesUtr
       );
     });
-  }, [allDebts, allPayments, txnSearch, txnStatusFilter, txnMethodFilter]);
+  }, [validDebts, validPayments, txnSearch, txnStatusFilter, txnMethodFilter]);
 
   // --- Admin Moderation & User Control Actions ---
   const handleToggleIsolation = async (targetUser: Profile, isolate: boolean, reason?: string) => {
@@ -1716,39 +1913,12 @@ export default function AdminDashboardPage() {
 
       {/* TAB 5: SYSTEM ANALYTICS */}
       {activeTab === 'analytics' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-5 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 space-y-2">
-              <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider block">
-                Total Debt Principal
-              </span>
-              <div className="font-heading text-2xl font-bold text-[var(--on-surface)]">
-                {formatCurrency(metrics.totalPrincipalVolume, currency)}
-              </div>
-              <p className="text-[11px] text-[var(--outline)]">Total volume committed across all agreements</p>
-            </div>
-
-            <div className="p-5 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 space-y-2">
-              <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider block">
-                Verified Repayments
-              </span>
-              <div className="font-heading text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-                {formatCurrency(metrics.totalRepaymentsVolume, currency)}
-              </div>
-              <p className="text-[11px] text-[var(--outline)]">Direct settlements confirmed on-ledger</p>
-            </div>
-
-            <div className="p-5 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 space-y-2">
-              <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider block">
-                Disputed Cases
-              </span>
-              <div className="font-heading text-2xl font-bold text-red-500">
-                {metrics.disputedCount}
-              </div>
-              <p className="text-[11px] text-[var(--outline)]">Contested debts or flagged payment receipts</p>
-            </div>
-          </div>
-        </div>
+        <AdminAnalyticsView
+          debts={validDebts}
+          payments={validPayments}
+          profiles={regularProfiles}
+          currency={currency}
+        />
       )}
 
       {/* USER CONTROL MODAL */}

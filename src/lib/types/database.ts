@@ -99,6 +99,8 @@ export type Debt = {
   created_at: string;
   settled_at: string | null;
   due_date?: string | null;
+  reminder_count?: number;
+  last_reminder_at?: string | null;
   split_group_id?: string | null;
   split_details?: SplitBillDetails | null;
   lender?: Profile;
