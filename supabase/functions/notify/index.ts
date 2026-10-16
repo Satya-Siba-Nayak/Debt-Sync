@@ -242,42 +242,103 @@ function buildEmailHtml(
   unsubUrl: string
 ): string {
   return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:24px 10px;background:#f8f9ff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#131c28;">
-  <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:16px;border:1px solid #dae3f4;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.04);">
-    <div style="background:linear-gradient(135deg,#004349 0%,#0d5c63 100%);padding:22px;text-align:center;color:#ffffff;">
-      <div style="font-size:20px;font-weight:700;letter-spacing:.5px;">DebtSync</div>
-      <div style="margin-top:4px;font-size:11px;opacity:.85;text-transform:uppercase;letter-spacing:1px;">Trust &amp; Precision Peer Ledgers</div>
-    </div>
-    <div style="padding:26px;">
-      <h2 style="margin:0 0 12px;font-size:18px;color:#004349;">${escapeHtml(msg.title)}</h2>
-      <p style="margin:0 0 14px;font-size:14px;line-height:1.6;">Hi ${escapeHtml(name)},</p>
-      <p style="margin:0 0 14px;font-size:14px;line-height:1.6;">${escapeHtml(msg.body)}</p>
-      ${
-        msg.amountLine
-          ? `<div style="background:#eff4ff;border:1px solid #dae3f4;border-radius:12px;padding:16px;margin:18px 0;">
-        <div style="font-size:11px;text-transform:uppercase;color:#6f797a;font-weight:700;">Amount</div>
-        <div style="font-size:24px;font-weight:700;color:#004349;margin-top:2px;">${escapeHtml(msg.amountLine)}</div>
-      </div>`
-          : ''
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark only">
+  <meta name="supported-color-schemes" content="dark only">
+  <title>${escapeHtml(msg.title)}</title>
+  <style>
+    :root {
+      color-scheme: dark only;
+      supported-color-schemes: dark only;
+    }
+    body, table, td, p, a, li, blockquote {
+      -webkit-text-size-adjust: 100%;
+      -ms-text-size-adjust: 100%;
+    }
+    body {
+      margin: 0 !important;
+      padding: 0 !important;
+      background-color: #080e18 !important;
+      color: #dae3f4 !important;
+    }
+    @media only screen and (max-width: 600px) {
+      .email-wrapper {
+        padding: 16px 8px !important;
       }
-      ${ghostNote ? `<p style="margin:0 0 14px;font-size:13px;line-height:1.6;color:#3f484a;">${escapeHtml(ghostNote)}</p>` : ''}
-      <div style="text-align:center;margin-top:20px;">
-        <a href="${escapeHtml(msg.url)}" style="display:inline-block;background:#004349;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 24px;border-radius:10px;">${escapeHtml(msg.cta)}</a>
-      </div>
-    </div>
-    <div style="padding:18px 24px;font-size:11px;color:#6f797a;text-align:center;border-top:1px solid #eff4ff;line-height:1.6;background:#fafbff;">
-      <p style="margin:0 0 8px;">
-        Automated transaction receipt from DebtSync. To save email limits, enable instant OS push notifications in Settings.
-      </p>
-      <p style="margin:0;">
-        <a href="${escapeHtml(unsubUrl)}" style="color:#ba1a1a;text-decoration:underline;font-weight:600;">Turn off email notifications</a>
-        &nbsp;&bull;&nbsp;
-        <a href="mailto:support@satya-nayak.dev" style="color:#004349;text-decoration:none;">Support</a>
-      </p>
-    </div>
-  </div>
-</body></html>`;
+      .email-container {
+        border-radius: 14px !important;
+      }
+      .email-content {
+        padding: 22px 18px !important;
+      }
+      .amount-headline {
+        font-size: 22px !important;
+      }
+    }
+  </style>
+</head>
+<body style="margin:0;padding:0;background-color:#080e18;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#dae3f4;-webkit-font-smoothing:antialiased;">
+  <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#080e18;" class="email-wrapper">
+    <tr>
+      <td align="center" style="padding:28px 10px;">
+        <div style="max-width:520px;width:100%;background-color:#111927;border-radius:18px;border:1px solid #1f2d42;overflow:hidden;box-shadow:0 12px 36px rgba(0,0,0,0.5);" class="email-container">
+          
+          <!-- Brand Header -->
+          <div style="background:linear-gradient(135deg,#002a2e 0%,#004349 55%,#006067 100%);background-color:#004349;padding:24px 20px;text-align:center;border-bottom:1px solid #005a63;">
+            <div style="font-size:22px;font-weight:800;letter-spacing:0.8px;color:#ffffff;text-shadow:0 2px 4px rgba(0,0,0,0.3);">DebtSync</div>
+            <div style="margin-top:5px;font-size:11px;color:#67e8f9;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;">Trust &amp; Precision Peer Ledgers</div>
+          </div>
+
+          <!-- Body Content -->
+          <div style="padding:28px 24px;text-align:left;" class="email-content">
+            <h2 style="margin:0 0 14px;font-size:19px;font-weight:700;color:#22d3ee;letter-spacing:-0.2px;line-height:1.35;">${escapeHtml(msg.title)}</h2>
+            <p style="margin:0 0 12px;font-size:14px;line-height:1.65;color:#f1f5f9;">Hi ${escapeHtml(name)},</p>
+            <p style="margin:0 0 16px;font-size:14px;line-height:1.65;color:#cbd5e1;">${escapeHtml(msg.body)}</p>
+
+            ${
+              msg.amountLine
+                ? `<div style="background-color:#162234;border:1px solid #253750;border-radius:14px;padding:18px 20px;margin:20px 0;">
+              <div style="font-size:11px;text-transform:uppercase;color:#94a3b8;font-weight:700;letter-spacing:1px;">Transaction Amount</div>
+              <div style="font-size:26px;font-weight:800;color:#22d3ee;margin-top:4px;letter-spacing:-0.5px;" class="amount-headline">${escapeHtml(msg.amountLine)}</div>
+            </div>`
+                : ''
+            }
+
+            ${
+              ghostNote
+                ? `<div style="background-color:#202018;border:1px solid #6b5314;border-radius:12px;padding:14px 16px;margin:18px 0;color:#fde047;font-size:13px;line-height:1.55;">
+              ${escapeHtml(ghostNote)}
+            </div>`
+                : ''
+            }
+
+            <!-- CTA Button -->
+            <div style="text-align:center;margin:26px 0 12px;">
+              <a href="${escapeHtml(msg.url)}" style="display:inline-block;background:linear-gradient(135deg,#00818d 0%,#009aa8 100%);background-color:#00818d;color:#ffffff !important;text-decoration:none;font-weight:700;font-size:14px;padding:13px 30px;border-radius:12px;box-shadow:0 4px 16px rgba(0,129,141,0.4);letter-spacing:0.3px;">${escapeHtml(msg.cta)} &rarr;</a>
+            </div>
+          </div>
+
+          <!-- Dark Footer -->
+          <div style="padding:20px 24px;font-size:11px;color:#7e8b9d;text-align:center;border-top:1px solid #1c283a;line-height:1.65;background-color:#0a101b;">
+            <p style="margin:0 0 10px;color:#7e8b9d;">
+              Automated transaction receipt from DebtSync. To save email limits, enable instant OS Background Push in Settings.
+            </p>
+            <p style="margin:0;">
+              <a href="${escapeHtml(unsubUrl)}" style="color:#f87171;text-decoration:underline;font-weight:600;">Turn off email notifications</a>
+              &nbsp;&bull;&nbsp;
+              <a href="mailto:support@satya-nayak.dev" style="color:#38bdf8;text-decoration:none;font-weight:500;">Support</a>
+            </p>
+          </div>
+
+        </div>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
 }
 
 async function checkEmailRateLimit(userId: string): Promise<{ allowed: boolean; reason?: string }> {
@@ -568,10 +629,14 @@ Deno.serve(async (req: Request) => {
         pushMessage = pushMessage ?? msg;
       }
 
-      try {
-        if (await sendEmail(recipient, msg, ghost, event)) emailsSent++;
-      } catch (err) {
-        console.warn('[notify] email failed', err);
+      // Stop sending emails when borrower accepts a debt to conserve Brevo email quota.
+      // Web push notification will still be dispatched if enabled.
+      if (event !== 'debt_accepted') {
+        try {
+          if (await sendEmail(recipient, msg, ghost, event)) emailsSent++;
+        } catch (err) {
+          console.warn('[notify] email failed', err);
+        }
       }
     }
 

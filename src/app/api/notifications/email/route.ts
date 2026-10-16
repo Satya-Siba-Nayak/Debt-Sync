@@ -107,42 +107,49 @@ export async function POST(request: NextRequest) {
 
     const htmlBody = `
       <!DOCTYPE html>
-      <html>
+      <html lang="en">
         <head>
           <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <meta name="color-scheme" content="dark only">
+          <meta name="supported-color-schemes" content="dark only">
           <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8f9ff; margin: 0; padding: 30px 10px; color: #131c28; }
-            .container { max-width: 540px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; border: 1px solid #dae3f4; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }
-            .header { background: linear-gradient(135deg, #004349 0%, #0d5c63 100%); padding: 24px; text-align: center; color: #ffffff; }
-            .content { padding: 28px; }
-            .card { background-color: #eff4ff; border-radius: 12px; padding: 18px; margin: 20px 0; border: 1px solid #bfc8c9; }
-            .btn { display: inline-block; background-color: #004349; color: #ffffff; text-decoration: none; font-weight: bold; font-size: 14px; padding: 12px 24px; border-radius: 10px; margin-top: 15px; }
-            .footer { padding: 16px 28px; font-size: 11px; color: #6f797a; text-align: center; border-top: 1px solid #eff4ff; }
+            :root {
+              color-scheme: dark only;
+              supported-color-schemes: dark only;
+            }
+            body { margin: 0; padding: 28px 10px; background-color: #080e18; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #dae3f4; -webkit-font-smoothing: antialiased; }
+            .container { max-width: 520px; margin: 0 auto; background-color: #111927; border-radius: 18px; border: 1px solid #1f2d42; overflow: hidden; box-shadow: 0 12px 36px rgba(0,0,0,0.5); }
+            .header { background: linear-gradient(135deg, #002a2e 0%, #004349 55%, #006067 100%); background-color: #004349; padding: 24px 20px; text-align: center; border-bottom: 1px solid #005a63; }
+            .content { padding: 28px 24px; text-align: left; }
+            .card { background-color: #162234; border: 1px solid #253750; border-radius: 14px; padding: 18px 20px; margin: 20px 0; }
+            .btn { display: inline-block; background: linear-gradient(135deg, #00818d 0%, #009aa8 100%); background-color: #00818d; color: #ffffff !important; text-decoration: none; font-weight: 700; font-size: 14px; padding: 13px 30px; border-radius: 12px; margin-top: 15px; box-shadow: 0 4px 16px rgba(0,129,141,0.4); }
+            .footer { padding: 20px 24px; font-size: 11px; color: #7e8b9d; text-align: center; border-top: 1px solid #1c283a; background-color: #0a101b; line-height: 1.65; }
           </style>
         </head>
-        <body>
-          <div class="container">
-            <div class="header">
-              <h2 style="margin:0; font-size: 20px; letter-spacing: 0.5px;">DebtSync</h2>
-              <p style="margin:4px 0 0; font-size: 11px; opacity: 0.85; text-transform: uppercase; letter-spacing: 1px;">Trust & Precision Peer Ledgers</p>
+        <body style="background-color:#080e18; margin:0; padding:28px 10px; color:#dae3f4;">
+          <div class="container" style="max-width:520px; margin:0 auto; background-color:#111927; border-radius:18px; border:1px solid #1f2d42; overflow:hidden;">
+            <div class="header" style="background:linear-gradient(135deg,#002a2e 0%,#004349 55%,#006067 100%); padding:24px 20px; text-align:center; border-bottom:1px solid #005a63;">
+              <h2 style="margin:0; font-size:22px; font-weight:800; letter-spacing:0.8px; color:#ffffff;">DebtSync</h2>
+              <p style="margin:5px 0 0; font-size:11px; color:#67e8f9; text-transform:uppercase; letter-spacing:1.5px; font-weight:700;">Trust &amp; Precision Peer Ledgers</p>
             </div>
-            <div class="content">
-              <h3 style="margin-top:0; color: #004349;">${headline}</h3>
-              <p style="font-size: 14px; line-height: 1.6;">Hello ${recipientName || 'there'},</p>
-              <p style="font-size: 14px; line-height: 1.6;">${description}</p>
+            <div class="content" style="padding:28px 24px;">
+              <h3 style="margin-top:0; font-size:19px; font-weight:700; color:#22d3ee; line-height:1.35;">${headline}</h3>
+              <p style="font-size:14px; line-height:1.65; color:#f1f5f9;">Hello ${recipientName || 'there'},</p>
+              <p style="font-size:14px; line-height:1.65; color:#cbd5e1;">${description}</p>
               
-              <div class="card">
-                <div style="font-size: 11px; text-transform: uppercase; color: #6f797a; font-weight: bold; margin-bottom: 4px;">Transaction Amount</div>
-                <div style="font-size: 24px; font-weight: bold; color: #004349;">${formattedAmount}</div>
-                ${notes ? `<div style="margin-top: 8px; font-size: 12px; color: #3f484a; font-style: italic;">"${notes}"</div>` : ''}
+              <div class="card" style="background-color:#162234; border:1px solid #253750; border-radius:14px; padding:18px 20px; margin:20px 0;">
+                <div style="font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:700; letter-spacing:1px; margin-bottom:4px;">Transaction Amount</div>
+                <div style="font-size:26px; font-weight:800; color:#22d3ee;">${formattedAmount}</div>
+                ${notes ? `<div style="margin-top:10px; font-size:12px; color:#94a3b8; font-style:italic;">"${notes}"</div>` : ''}
               </div>
 
-              <div style="text-align: center;">
-                <a href="${appUrl}" class="btn" style="color:#ffffff;">${ctaText}</a>
+              <div style="text-align: center; margin: 26px 0 10px;">
+                <a href="${appUrl}" class="btn" style="color:#ffffff !important;">${ctaText} &rarr;</a>
               </div>
             </div>
-            <div class="footer">
-              This automated notification was generated by DebtSync upon transaction activity. If this message landed in your Spam/Junk folder, please select &quot;Report Not Spam&quot; and add DebtSync to your trusted contacts to ensure uninterrupted ledger receipts.
+            <div class="footer" style="padding:20px 24px; font-size:11px; color:#7e8b9d; text-align:center; border-top:1px solid #1c283a; background-color:#0a101b;">
+              This automated notification was generated by DebtSync upon transaction activity. To conserve email quota, enable instant OS Background Push in Settings.
             </div>
           </div>
         </body>
