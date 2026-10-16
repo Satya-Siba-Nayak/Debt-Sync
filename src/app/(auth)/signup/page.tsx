@@ -28,6 +28,7 @@ function SignupContent() {
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [notifyEmail, setNotifyEmail] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -73,6 +74,7 @@ function SignupContent() {
         data: {
           full_name: fullName.trim(),
           phone: cleanPhone || null,
+          notify_email: notifyEmail,
           resolve_ghost_id: ghostOptions?.ghostIdToMerge || null,
           resolve_mode: ghostOptions?.resolutionMode || null,
           ghost_email: ghostOptions?.ghostEmail || null,
@@ -267,10 +269,38 @@ function SignupContent() {
               />
             </div>
 
+            {/* Email & Notification Preference for New Registrations */}
+            <div className="p-3.5 rounded-xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 space-y-2.5">
+              <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={notifyEmail}
+                  onChange={(e) => setNotifyEmail(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-outline-variant text-[var(--primary)] focus:ring-primary/20 accent-[var(--primary)] shrink-0 cursor-pointer"
+                />
+                <div className="text-xs leading-relaxed min-w-0">
+                  <span className="font-bold text-[var(--on-surface)] block">
+                    Receive Email Receipts
+                  </span>
+                  <span className="text-[11px] text-[var(--on-surface-variant)] block mt-0.5">
+                    Send email alerts when transactions or payments are recorded with you.
+                    (Off by default to conserve email limits).
+                  </span>
+                </div>
+              </label>
+
+              <div className="pt-2 border-t border-[var(--outline-variant)]/20 flex items-start gap-2 text-[11px] text-[var(--primary)] leading-tight font-medium">
+                <span className="material-symbols-outlined text-[16px] shrink-0 text-[var(--primary)]">notifications_active</span>
+                <span>
+                  💡 <strong>Tip:</strong> Free mobile &amp; desktop push alerts can be activated anytime in Settings—they work even when closed and don&apos;t consume email quotas!
+                </span>
+              </div>
+            </div>
+
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 px-4 bg-primary text-on-primary rounded-xl font-bold font-mono text-sm hover:opacity-90 active:scale-[0.99] transition-all disabled:opacity-50 shadow-md cursor-pointer mt-2"
+              className="w-full py-3 px-4 bg-primary text-on-primary rounded-xl font-bold font-mono text-sm hover:opacity-90 active:scale-[0.99] transition-all disabled:opacity-50 shadow-md cursor-pointer mt-2 min-h-[44px]"
             >
               {loading ? 'Creating account...' : 'Create Account'}
             </button>

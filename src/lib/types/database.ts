@@ -22,6 +22,7 @@ export type Profile = {
   claimed_at: string | null;
   secondary_emails?: string[];
   recent_custom_avatars?: string[];
+  notify_email?: boolean;
   created_at: string;
 };
 

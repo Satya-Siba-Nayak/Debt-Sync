@@ -1,24 +1,14 @@
 // Supabase Edge Function: notify
 // Sends email (Brevo) + background Web Push (VAPID) when DebtSync activity happens.
-// Invoked ONLY by Postgres triggers (see migration 023) with a shared secret header.
-//
-// Required secrets:
-//   WEBHOOK_SECRET        random string, must match notification_config.webhook_secret
-//   BREVO_API_KEY         Brevo -> SMTP & API -> API Keys
-//   EMAIL_FROM            a sender/domain verified in Brevo, e.g. noreply@satya-nayak.dev
-//   VAPID_PUBLIC_KEY      \
-//   VAPID_PRIVATE_KEY      } web-push VAPID pair
-// Optional:
-//   EMAIL_FROM_NAME (default "DebtSync"), VAPID_SUBJECT, APP_URL
-// Auto-provided by Supabase: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
-//
-// Deploy with JWT verification OFF (auth is the shared secret header):
-//   supabase functions deploy notify --no-verify-jwt
+// Enforces 5 emails/user/24h quota limit to conserve Brevo free tier (~300/day).
+// Supports RFC-compliant one-click unsubscribe.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import webpush from 'npm:web-push@3.6.7';
 
 const TOMBSTONE_ID = '00000000-0000-0000-0000-000000000001';
+const MAX_EMAILS_PER_USER_24H = 5;
+const MAX_GLOBAL_EMAILS_24H = 250; // Guard headroom for Brevo 300/day quota
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -80,6 +70,27 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+async function getUnsubscribeHmac(userId: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(WEBHOOK_SECRET || 'debtsync_notif_secret_2026_prod'),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(`unsub:${userId}`));
+  return Array.from(new Uint8Array(signature))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, 32);
+}
+
+async function createUnsubscribeUrl(userId: string): Promise<string> {
+  const sig = await getUnsubscribeHmac(userId);
+  return `${SUPABASE_URL}/functions/v1/notify?action=unsubscribe&uid=${encodeURIComponent(userId)}&sig=${sig}`;
+}
+
 interface Profile {
   id: string;
   email: string | null;
@@ -118,128 +129,122 @@ function buildMessage(
   switch (event) {
     case 'debt_inserted': {
       const splitMatch =
-        typeof debt?.notes === 'string' ? debt.notes.match(/\[SPLIT:\{[^]*?"title":"([^"]+)"/) : null;
-      const splitTitle = splitMatch?.[1];
-      const isPending = debt?.status === 'pending';
-      const title = splitTitle
-        ? `${actorName} split "${splitTitle}" with you`
-        : isPending
-        ? `New debt request from ${actorName}`
-        : `New ledger entry from ${actorName}`;
+        typeof debt?.notes === 'string' && debt.notes.includes('[SPLIT:');
+      if (splitMatch) {
+        return {
+          title: `${actorName} split an expense with you`,
+          body: `${actorName} added you to a shared expense split on DebtSync.`,
+          amountLine: debtAmount,
+          url: debtUrl,
+          tag: `debt-${tagBase}-created`,
+          cta: 'Review Split Share',
+        };
+      }
       return {
-        title,
-        body: `${actorName} recorded ${debtAmount} with you${isPending ? '. Tap to review and accept.' : '.'}`,
-        url: recipientIsGhost ? `${APP_URL}/signup` : debtUrl,
-        tag: `debt-${tagBase}`,
-        cta: recipientIsGhost ? 'Create account & review' : 'Review in DebtSync',
+        title: `${actorName} recorded a transaction with you`,
+        body: recipientIsGhost
+          ? `${actorName} recorded a ${debtAmount} transaction with your contact info.`
+          : `${actorName} recorded a ${debtAmount} agreement on your shared ledger.`,
         amountLine: debtAmount,
+        url: debtUrl,
+        tag: `debt-${tagBase}-created`,
+        cta: 'Review Agreement',
       };
     }
     case 'repayment_reported':
-      return {
-        title: `Repayment of ${eventAmount} reported`,
-        body: `${actorName} reported a payment of ${eventAmount}. Verify it to update the balance.`,
-        url: debtUrl,
-        tag: `payment-${tagBase}`,
-        cta: 'Verify repayment',
-        amountLine: eventAmount,
-      };
     case 'payment_made':
       return {
-        title: `${actorName} recorded a payment`,
-        body: `A payment of ${eventAmount} was recorded on your shared ledger.`,
-        url: debtUrl,
-        tag: `payment-${tagBase}`,
-        cta: 'View ledger',
+        title: `Repayment of ${eventAmount} reported`,
+        body: `${actorName} reported a repayment of ${eventAmount}. Please review and verify the receipt.`,
         amountLine: eventAmount,
+        url: debtUrl,
+        tag: `debt-${tagBase}-repayment`,
+        cta: 'Verify Repayment',
       };
     case 'payment_verified':
-      return details.debt_settled
-        ? {
-            title: 'Debt fully settled 🎉',
-            body: `${actorName} verified your payment of ${eventAmount}. This agreement is now settled.`,
-            url: debtUrl,
-            tag: `settled-${tagBase}`,
-            cta: 'View settled agreement',
-            amountLine: eventAmount,
-          }
-        : {
-            title: 'Payment verified',
-            body: `${actorName} verified your payment of ${eventAmount}.`,
-            url: debtUrl,
-            tag: `verified-${tagBase}`,
-            cta: 'View ledger',
-            amountLine: eventAmount,
-          };
+      return {
+        title: `Payment verified (${eventAmount})`,
+        body: `${actorName} verified your repayment of ${eventAmount}. Your ledger has been updated.`,
+        amountLine: eventAmount,
+        url: debtUrl,
+        tag: `debt-${tagBase}-verified`,
+        cta: 'View Updated Balance',
+      };
     case 'payment_disputed':
       return {
-        title: 'Repayment disputed',
-        body: `${actorName} disputed your reported payment of ${eventAmount}. Open the ledger to resolve it.`,
-        url: debtUrl,
-        tag: `disputed-${tagBase}`,
-        cta: 'Review dispute',
+        title: `Repayment disputed by ${actorName}`,
+        body: `${actorName} marked a reported payment of ${eventAmount} as disputed. Please check the transaction details.`,
         amountLine: eventAmount,
+        url: debtUrl,
+        tag: `debt-${tagBase}-disputed`,
+        cta: 'Review Disputed Payment',
       };
     case 'debt_accepted':
       return {
-        title: 'Agreement accepted',
-        body: `${actorName} accepted your debt agreement for ${debtAmount}.`,
-        url: debtUrl,
-        tag: `accepted-${tagBase}`,
-        cta: 'View agreement',
+        title: `Transaction agreement accepted`,
+        body: `${actorName} accepted the transaction agreement of ${debtAmount}.`,
         amountLine: debtAmount,
+        url: debtUrl,
+        tag: `debt-${tagBase}-accepted`,
+        cta: 'Open Shared Ledger',
       };
     case 'debt_declined':
       return {
-        title: 'Agreement declined',
-        body: `${actorName} declined your debt agreement for ${debtAmount}.`,
-        url: debtUrl,
-        tag: `declined-${tagBase}`,
-        cta: 'View details',
+        title: `Transaction agreement declined`,
+        body: `${actorName} declined the proposed transaction agreement of ${debtAmount}.`,
         amountLine: debtAmount,
+        url: debtUrl,
+        tag: `debt-${tagBase}-declined`,
+        cta: 'View Status',
       };
     case 'debt_pending_edited':
       return {
-        title: 'Pending agreement edited',
-        body: `${actorName} changed the terms of a pending agreement (${debtAmount}). Please review.`,
-        url: debtUrl,
-        tag: `edited-${tagBase}`,
-        cta: 'Review changes',
+        title: `Transaction terms updated`,
+        body: `${actorName} adjusted the pending terms for this transaction. Please review the updated balance and interest terms.`,
         amountLine: debtAmount,
+        url: debtUrl,
+        tag: `debt-${tagBase}-edited`,
+        cta: 'Review Updated Terms',
       };
     case 'debt_cancelled_by_creator':
       return {
-        title: 'Debt request withdrawn',
-        body: `${actorName} withdrew a pending request for ${debtAmount}.`,
-        url: `${APP_URL}/transactions`,
-        tag: `cancelled-${details.debt_id || tagBase}`,
-        cta: 'Open DebtSync',
+        title: `Pending request cancelled`,
+        body: `${actorName} cancelled the pending transaction request of ${debtAmount}.`,
         amountLine: debtAmount,
+        url: `${APP_URL}/transactions`,
+        tag: `debt-${tagBase}-cancelled`,
+        cta: 'View Transactions',
       };
     case 'global_share_enabled':
       return {
-        title: 'Public link enabled',
-        body: `${actorName} enabled a public read-only link on a shared transaction. You can turn it off anytime.`,
+        title: `Public share link enabled by ${actorName}`,
+        body: `${actorName} enabled public view link sharing for your transaction of ${debtAmount}.`,
+        amountLine: debtAmount,
         url: debtUrl,
-        tag: `share-${tagBase}`,
-        cta: 'Manage sharing',
+        tag: `debt-${tagBase}-share`,
+        cta: 'View Transaction',
       };
     default:
       return {
-        title: 'DebtSync update',
-        body: `${actorName} updated a shared transaction.`,
+        title: `Ledger update from ${actorName}`,
+        body: `New activity recorded on your shared ledger by ${actorName}.`,
         url: debtUrl,
-        tag: `update-${tagBase}`,
+        tag: `debt-${tagBase}-update`,
         cta: 'Open DebtSync',
       };
   }
 }
 
-function buildEmailHtml(name: string, msg: Message, ghostNote: string): string {
+function buildEmailHtml(
+  name: string,
+  msg: Message,
+  ghostNote: string,
+  unsubUrl: string
+): string {
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:28px 10px;background:#f8f9ff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#131c28;">
-  <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:16px;border:1px solid #dae3f4;overflow:hidden;">
+<body style="margin:0;padding:24px 10px;background:#f8f9ff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#131c28;">
+  <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:16px;border:1px solid #dae3f4;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.04);">
     <div style="background:linear-gradient(135deg,#004349 0%,#0d5c63 100%);padding:22px;text-align:center;color:#ffffff;">
       <div style="font-size:20px;font-weight:700;letter-spacing:.5px;">DebtSync</div>
       <div style="margin-top:4px;font-size:11px;opacity:.85;text-transform:uppercase;letter-spacing:1px;">Trust &amp; Precision Peer Ledgers</div>
@@ -261,22 +266,77 @@ function buildEmailHtml(name: string, msg: Message, ghostNote: string): string {
         <a href="${escapeHtml(msg.url)}" style="display:inline-block;background:#004349;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 24px;border-radius:10px;">${escapeHtml(msg.cta)}</a>
       </div>
     </div>
-    <div style="padding:14px 26px;font-size:11px;color:#6f797a;text-align:center;border-top:1px solid #eff4ff;line-height:1.6;">
-      Automated notification from DebtSync. Questions? Contact
-      <a href="mailto:support@satya-nayak.dev" style="color:#004349;">support@satya-nayak.dev</a>.
+    <div style="padding:18px 24px;font-size:11px;color:#6f797a;text-align:center;border-top:1px solid #eff4ff;line-height:1.6;background:#fafbff;">
+      <p style="margin:0 0 8px;">
+        Automated transaction receipt from DebtSync. To save email limits, enable instant OS push notifications in Settings.
+      </p>
+      <p style="margin:0;">
+        <a href="${escapeHtml(unsubUrl)}" style="color:#ba1a1a;text-decoration:underline;font-weight:600;">Turn off email notifications</a>
+        &nbsp;&bull;&nbsp;
+        <a href="mailto:support@satya-nayak.dev" style="color:#004349;text-decoration:none;">Support</a>
+      </p>
     </div>
   </div>
 </body></html>`;
 }
 
-async function sendEmail(to: Profile, msg: Message, ghost: boolean): Promise<boolean> {
+async function checkEmailRateLimit(userId: string): Promise<{ allowed: boolean; reason?: string }> {
+  try {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+    // Check user's 24h sent count (limit: 5/user/day)
+    const { count: userSentCount } = await supabase
+      .from('email_logs')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('status', 'sent')
+      .gt('created_at', since);
+
+    if (typeof userSentCount === 'number' && userSentCount >= MAX_EMAILS_PER_USER_24H) {
+      return { allowed: false, reason: `user_limit_reached (${userSentCount}/${MAX_EMAILS_PER_USER_24H} in 24h)` };
+    }
+
+    // Check platform 24h global safety cap (250/day)
+    const { count: globalSentCount } = await supabase
+      .from('email_logs')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'sent')
+      .gt('created_at', since);
+
+    if (typeof globalSentCount === 'number' && globalSentCount >= MAX_GLOBAL_EMAILS_24H) {
+      return { allowed: false, reason: `global_limit_reached (${globalSentCount}/${MAX_GLOBAL_EMAILS_24H} in 24h)` };
+    }
+
+    return { allowed: true };
+  } catch (_) {
+    // If table not migrated yet, allow send gracefully
+    return { allowed: true };
+  }
+}
+
+async function sendEmail(to: Profile, msg: Message, ghost: boolean, event: string): Promise<boolean> {
   if (!BREVO_API_KEY || !EMAIL_FROM) return false;
   if (!to.email || to.email.endsWith('@phone.debtsync.local')) return false;
   if (to.notify_email === false) return false;
 
+  // Rate limit check: max 5 emails per user per 24 hours
+  const rateLimit = await checkEmailRateLimit(to.id);
+  if (!rateLimit.allowed) {
+    console.warn(`[notify] Rate limit active for ${to.email}: ${rateLimit.reason}. Email skipped.`);
+    await supabase.from('email_logs').insert({
+      user_id: to.id,
+      recipient_email: to.email,
+      event,
+      status: 'rate_limited',
+    }).catch(() => {});
+    return false;
+  }
+
   const ghostNote = ghost
     ? `You don't have a DebtSync account yet. Sign up with ${to.email} and this record will appear in your ledger automatically.`
     : '';
+
+  const unsubUrl = await createUnsubscribeUrl(to.id);
 
   let cleanSenderEmail = EMAIL_FROM.trim();
   let cleanSenderName = EMAIL_FROM_NAME.trim() || 'DebtSync';
@@ -297,15 +357,34 @@ async function sendEmail(to: Profile, msg: Message, ghost: boolean): Promise<boo
       sender: { name: cleanSenderName, email: cleanSenderEmail },
       to: [{ email: to.email, name: displayName(to) }],
       subject: msg.title,
-      htmlContent: buildEmailHtml(displayName(to), msg, ghostNote),
+      htmlContent: buildEmailHtml(displayName(to), msg, ghostNote, unsubUrl),
+      headers: {
+        'List-Unsubscribe': `<${unsubUrl}>`,
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+      },
       tags: ['debtsync-notification'],
     }),
   });
 
   if (!res.ok) {
     console.warn('[notify] Brevo error', res.status, await res.text().catch(() => ''));
+    await supabase.from('email_logs').insert({
+      user_id: to.id,
+      recipient_email: to.email,
+      event,
+      status: 'failed',
+    }).catch(() => {});
     return false;
   }
+
+  // Record successful dispatch in email_logs
+  await supabase.from('email_logs').insert({
+    user_id: to.id,
+    recipient_email: to.email,
+    event,
+    status: 'sent',
+  }).catch(() => {});
+
   return true;
 }
 
@@ -354,9 +433,80 @@ async function sendPush(recipientIds: string[], msg: Message): Promise<number> {
   return sent;
 }
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-webhook-secret',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+};
+
 Deno.serve(async (req: Request) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
+
+  const url = new URL(req.url);
+
+  // 1. One-click GET/POST Unsubscribe handler (RFC 8058 compliant)
+  if (url.searchParams.get('action') === 'unsubscribe') {
+    const uid = url.searchParams.get('uid') || '';
+    const sig = url.searchParams.get('sig') || '';
+    if (!uid || !sig) {
+      return new Response('Invalid request parameters.', { status: 400, headers: corsHeaders });
+    }
+
+    const expectedSig = await getUnsubscribeHmac(uid);
+    if (!timingSafeEqual(sig, expectedSig)) {
+      return new Response('Invalid or expired unsubscribe link.', { status: 403, headers: corsHeaders });
+    }
+
+    // Turn off notify_email in database
+    await supabase.from('profiles').update({ notify_email: false }).eq('id', uid);
+
+    // Record in email_logs
+    await supabase.from('email_logs').insert({
+      user_id: uid,
+      recipient_email: 'unsubscribed',
+      event: 'user_unsubscribed',
+      status: 'unsubscribed',
+    }).catch(() => {});
+
+    if (req.method === 'POST') {
+      return Response.json({ ok: true, message: 'Unsubscribed from transactional emails.' }, { headers: corsHeaders });
+    }
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Email Notifications Turned Off - DebtSync</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0b131f; color: #dae3f4; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }
+    .card { max-width: 440px; background: #131c28; border: 1px solid rgba(255,255,255,0.1); border-radius: 20px; padding: 32px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.4); }
+    .icon { width: 56px; height: 56px; background: rgba(0, 166, 178, 0.15); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; font-size: 26px; }
+    h1 { font-size: 20px; margin: 0 0 8px; color: #ffffff; }
+    p { font-size: 14px; line-height: 1.5; color: #8a93a0; margin: 0 0 24px; }
+    .btn { display: inline-block; background: #00818d; color: #ffffff; text-decoration: none; font-weight: bold; font-size: 14px; padding: 12px 24px; border-radius: 12px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">🔕</div>
+    <h1>Email Receipts Disabled</h1>
+    <p>You have successfully turned off transactional email receipts. Your shared ledgers and balances remain active, and you can re-enable emails anytime in Settings.</p>
+    <a href="${APP_URL}/settings" class="btn">Open DebtSync Settings</a>
+  </div>
+</body>
+</html>`;
+
+    return new Response(html, {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'text/html; charset=utf-8' },
+    });
+  }
+
   if (req.method !== 'POST') {
-    return new Response('Method not allowed', { status: 405 });
+    return new Response('Method not allowed', { status: 405, headers: corsHeaders });
   }
 
   const provided = req.headers.get('x-webhook-secret') || '';
@@ -384,8 +534,7 @@ Deno.serve(async (req: Request) => {
     const lenderId = debt?.lender_id ?? details.lender_id ?? null;
     const borrowerId = debt?.borrower_id ?? details.borrower_id ?? null;
 
-    // The counterparty of whoever acted (for split shares where the creator is
-    // neither party, both parties are notified).
+    // The counterparty of whoever acted
     const recipientIds = Array.from(
       new Set([lenderId, borrowerId].filter((id): id is string => Boolean(id)))
     ).filter((id) => id !== actorId && id !== TOMBSTONE_ID);
@@ -420,7 +569,7 @@ Deno.serve(async (req: Request) => {
       }
 
       try {
-        if (await sendEmail(recipient, msg, ghost)) emailsSent++;
+        if (await sendEmail(recipient, msg, ghost, event)) emailsSent++;
       } catch (err) {
         console.warn('[notify] email failed', err);
       }

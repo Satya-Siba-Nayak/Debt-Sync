@@ -185,7 +185,7 @@ export async function claimUserProfile(user: any, options?: ClaimProfileOptions)
       }
 
       // Insert new claimed profile
-      await supabase.from('profiles').upsert({
+      const newProfilePayload: any = {
         id: user.id,
         email: primaryEmailToStore,
         full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
@@ -193,7 +193,12 @@ export async function claimUserProfile(user: any, options?: ClaimProfileOptions)
         secondary_emails: secondariesToStore.length > 0 ? secondariesToStore : undefined,
         is_shadow: false,
         claimed_at: new Date().toISOString(),
-      });
+      };
+      if (user.user_metadata?.notify_email !== undefined) {
+        newProfilePayload.notify_email = Boolean(user.user_metadata.notify_email);
+      }
+
+      await supabase.from('profiles').upsert(newProfilePayload);
 
       await supabase.from('user_settings').upsert({
         user_id: user.id,

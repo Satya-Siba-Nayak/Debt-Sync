@@ -1765,7 +1765,7 @@ export default function SettingsPage() {
                   </span>
                 </div>
                 <p className="text-xs text-[var(--on-surface-variant)] mt-1 leading-relaxed">
-                  Receive email receipts via Brevo when someone records a debt with you, reports a repayment, or verifies a transaction.
+                  Receive transactional email receipts via Brevo when someone records a debt with you, reports a repayment, or settles a ledger (capped at 5/day to preserve quota). For instant, unlimited alerts on your lockscreen, enable Background Push below!
                 </p>
               </div>
 

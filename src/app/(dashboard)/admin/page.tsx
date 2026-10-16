@@ -58,8 +58,9 @@ export default function AdminDashboardPage() {
 
   // Filtering states for Users tab
   const [userSearch, setUserSearch] = useState('');
-  const [userFilter, setUserFilter] = useState<'all' | 'registered' | 'ghost' | 'isolated' | 'active_debts'>('all');
+  const [userFilter, setUserFilter] = useState<'all' | 'registered' | 'ghost' | 'isolated' | 'active_debts' | 'email_on' | 'email_off'>('all');
   const [selectedUser, setSelectedUser] = useState<Profile | null>(null);
+  const [selectedUserEmailStats, setSelectedUserEmailStats] = useState<{ count24h: number; loading: boolean } | null>(null);
 
   const [isolationTarget, setIsolationTarget] = useState<Profile | null>(null);
   const [isolationReasonInput, setIsolationReasonInput] = useState('');
@@ -96,6 +97,45 @@ export default function AdminDashboardPage() {
       return () => window.removeEventListener('debtsync:admin_tab_changed', handleTabEvent);
     }
   }, []);
+
+  // Fetch 24-hour email dispatch stats when selectedUser is opened
+  useEffect(() => {
+    if (!selectedUser || selectedUser.is_shadow) {
+      setSelectedUserEmailStats(null);
+      return;
+    }
+
+    let isCancelled = false;
+    setSelectedUserEmailStats({ count24h: 0, loading: true });
+
+    async function fetchEmailStats() {
+      try {
+        const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const { count, error } = await supabase
+          .from('email_logs')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', selectedUser!.id)
+          .eq('status', 'sent')
+          .gte('created_at', since);
+
+        if (!isCancelled) {
+          setSelectedUserEmailStats({
+            count24h: error ? 0 : (count || 0),
+            loading: false,
+          });
+        }
+      } catch {
+        if (!isCancelled) {
+          setSelectedUserEmailStats({ count24h: 0, loading: false });
+        }
+      }
+    }
+
+    fetchEmailStats();
+    return () => {
+      isCancelled = true;
+    };
+  }, [selectedUser?.id]);
 
   const handleSelectTab = (tab: AdminTab) => {
     setActiveTab(tab);
@@ -410,6 +450,8 @@ export default function AdminDashboardPage() {
       if (userFilter === 'ghost' && (!u.is_shadow || isTombstone)) return false;
       if (userFilter === 'isolated' && (!u.is_isolated || isTombstone)) return false;
       if (userFilter === 'active_debts' && (u.debtsCount === 0 || isTombstone)) return false;
+      if (userFilter === 'email_on' && (!u.notify_email || isTombstone || u.is_shadow)) return false;
+      if (userFilter === 'email_off' && (u.notify_email || isTombstone || u.is_shadow)) return false;
       if (userFilter === 'all' && isTombstone && !userSearch.trim()) return false;
 
       if (!userSearch.trim()) return true;
@@ -675,6 +717,133 @@ export default function AdminDashboardPage() {
       setActionFeedback({ type: 'success', text: 'Account flagged: Reverification will be required.' });
     } catch (err: any) {
       setActionFeedback({ type: 'error', text: err.message || 'Action failed' });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleToggleUserEmailNotif = async (targetUser: Profile, enabled: boolean) => {
+    setActionLoading(true);
+    setActionFeedback(null);
+    try {
+      let rpcSuccess = false;
+      try {
+        const { data, error } = await supabase.rpc('admin_toggle_user_email_notif', {
+          p_target_user_id: targetUser.id,
+          p_enabled: enabled,
+        });
+        if (!error && data?.success) rpcSuccess = true;
+      } catch (e) {}
+
+      if (!rpcSuccess) {
+        await supabase
+          .from('profiles')
+          .update({ notify_email: enabled })
+          .eq('id', targetUser.id);
+      }
+
+      setAllProfiles((prev) =>
+        prev.map((p) => (p.id === targetUser.id ? { ...p, notify_email: enabled } : p))
+      );
+
+      if (selectedUser?.id === targetUser.id) {
+        setSelectedUser((prev) => (prev ? { ...prev, notify_email: enabled } : null));
+      }
+
+      addTelemetryEvent({
+        table: 'profiles',
+        eventType: 'UPDATE',
+        title: enabled ? 'User Email Alerts Enabled' : 'User Email Alerts Muted',
+        description: `${targetUser.full_name || targetUser.email} email dispatch ${
+          enabled ? 'enabled by admin' : 'muted to conserve Brevo daily quota'
+        }`,
+        badgeClass: enabled
+          ? 'bg-blue-500/15 text-blue-500 border-blue-500/20'
+          : 'bg-neutral-500/15 text-neutral-500 border-neutral-500/20',
+        icon: enabled ? 'mail' : 'mail_lock',
+        payload: { userId: targetUser.id, notify_email: enabled },
+      });
+
+      // Persist in activity_log
+      try {
+        await supabase.from('activity_log').insert({
+          user_id: currentUserId,
+          action: enabled ? 'ADMIN_USER_EMAIL_ENABLED' : 'ADMIN_USER_EMAIL_MUTED',
+          details: {
+            target_user_id: targetUser.id,
+            target_email: targetUser.email,
+            notify_email: enabled,
+            admin_id: currentUserId,
+            timestamp: new Date().toISOString(),
+          },
+        });
+      } catch (_) {}
+
+      setActionFeedback({
+        type: 'success',
+        text: enabled
+          ? `Email notifications enabled for ${targetUser.full_name || targetUser.email}.`
+          : `Email notifications muted for ${targetUser.full_name || targetUser.email}.`,
+      });
+    } catch (err: any) {
+      setActionFeedback({ type: 'error', text: err.message || 'Failed to update email setting' });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleResetUserEmailLimit = async (targetUser: Profile) => {
+    setActionLoading(true);
+    setActionFeedback(null);
+    try {
+      let rpcSuccess = false;
+      try {
+        const { data, error } = await supabase.rpc('admin_reset_user_email_limit', {
+          p_target_user_id: targetUser.id,
+        });
+        if (!error && data?.success) rpcSuccess = true;
+      } catch (e) {}
+
+      if (!rpcSuccess) {
+        await supabase
+          .from('email_logs')
+          .delete()
+          .eq('user_id', targetUser.id)
+          .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+      }
+
+      setSelectedUserEmailStats({ count24h: 0, loading: false });
+
+      addTelemetryEvent({
+        table: 'profiles',
+        eventType: 'UPDATE',
+        title: 'User Email Limit Reset',
+        description: `Cleared 24h email dispatch rate limit for ${targetUser.full_name || targetUser.email}`,
+        badgeClass: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/20',
+        icon: 'restart_alt',
+        payload: { userId: targetUser.id },
+      });
+
+      // Persist in activity_log
+      try {
+        await supabase.from('activity_log').insert({
+          user_id: currentUserId,
+          action: 'ADMIN_RESET_USER_EMAIL_LIMIT',
+          details: {
+            target_user_id: targetUser.id,
+            target_email: targetUser.email,
+            admin_id: currentUserId,
+            timestamp: new Date().toISOString(),
+          },
+        });
+      } catch (_) {}
+
+      setActionFeedback({
+        type: 'success',
+        text: `24-hour email rate limit reset for ${targetUser.full_name || targetUser.email}. User can now receive transactional emails.`,
+      });
+    } catch (err: any) {
+      setActionFeedback({ type: 'error', text: err.message || 'Failed to reset email limit' });
     } finally {
       setActionLoading(false);
     }
@@ -1169,7 +1338,7 @@ export default function AdminDashboardPage() {
               />
             </div>
 
-            <div className="flex items-center gap-1.5 overflow-x-auto">
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
               {(
                 [
                   { id: 'all', label: 'All Users' },
@@ -1177,6 +1346,8 @@ export default function AdminDashboardPage() {
                   { id: 'ghost', label: 'Ghost' },
                   { id: 'isolated', label: 'Quarantined / Isolated' },
                   { id: 'active_debts', label: 'With Debts' },
+                  { id: 'email_on', label: 'Email Alerts ON' },
+                  { id: 'email_off', label: 'Email Alerts OFF' },
                 ] as const
               ).map((f) => (
                 <button
@@ -1269,6 +1440,19 @@ export default function AdminDashboardPage() {
                               {!isTombstone && (
                                 <span className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-[var(--surface-container-high)] text-[var(--outline)]">
                                   {u.is_shadow ? 'GHOST' : 'REG'}
+                                </span>
+                              )}
+
+                              {!isTombstone && !u.is_shadow && (
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                    u.notify_email
+                                      ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20'
+                                      : 'bg-neutral-500/15 text-neutral-500 dark:text-neutral-400 border border-neutral-500/20'
+                                  }`}
+                                  title={u.notify_email ? 'Email notifications enabled' : 'Email notifications muted'}
+                                >
+                                  {u.notify_email ? 'EMAIL ON' : 'EMAIL OFF'}
                                 </span>
                               )}
                             </div>
@@ -1577,6 +1761,25 @@ export default function AdminDashboardPage() {
           maxWidth="max-w-2xl"
         >
           <div className="space-y-5 font-mono text-xs">
+            {actionFeedback && (
+              <div
+                className={`p-3 rounded-xl text-xs font-mono flex items-center justify-between border ${
+                  actionFeedback.type === 'success'
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                    : 'bg-red-500/10 border-red-500/30 text-red-500'
+                }`}
+              >
+                <span>{actionFeedback.text}</span>
+                <button
+                  type="button"
+                  onClick={() => setActionFeedback(null)}
+                  className="text-[11px] underline cursor-pointer ml-2"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
             {/* Header info */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-[var(--surface-container)] rounded-2xl">
               <div className="flex items-center gap-3">
@@ -1689,6 +1892,109 @@ export default function AdminDashboardPage() {
                   >
                     <span className="material-symbols-outlined text-[16px]">delete_forever</span>
                     <span>Purge User</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Notification Standing & Daily Email Rate Limit */}
+            {selectedUser.id !== '00000000-0000-0000-0000-000000000001' && !selectedUser.is_purged && !selectedUser.is_shadow && (
+              <div className="p-4 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[18px] text-[var(--primary)]">
+                      mark_email_read
+                    </span>
+                    <span className="font-bold text-[var(--on-surface)] uppercase tracking-wider block">
+                      Email Standing &amp; Daily Quota
+                    </span>
+                  </div>
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border self-start sm:self-auto ${
+                      selectedUser.notify_email
+                        ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30'
+                        : 'bg-neutral-500/15 text-neutral-500 dark:text-neutral-400 border-neutral-500/30'
+                    }`}
+                  >
+                    {selectedUser.notify_email ? 'EMAIL ALERTS ACTIVE' : 'EMAIL ALERTS MUTED'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  {/* 24h Meter */}
+                  <div className="p-3 rounded-xl bg-[var(--surface-container-high)]/60 border border-[var(--outline-variant)]/20 space-y-2">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-[var(--on-surface-variant)]">24h Outgoing Dispatches</span>
+                      <span className="font-bold text-[var(--on-surface)]">
+                        {selectedUserEmailStats?.loading
+                          ? 'Checking...'
+                          : `${selectedUserEmailStats?.count24h ?? 0} / 5 sent`}
+                      </span>
+                    </div>
+                    <div className="h-2 rounded-full bg-[var(--surface-container-highest)] overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          (selectedUserEmailStats?.count24h ?? 0) >= 5
+                            ? 'bg-red-500'
+                            : (selectedUserEmailStats?.count24h ?? 0) >= 4
+                            ? 'bg-amber-500'
+                            : 'bg-emerald-500'
+                        }`}
+                        style={{
+                          width: `${Math.min(100, Math.round(((selectedUserEmailStats?.count24h ?? 0) / 5) * 100))}%`,
+                        }}
+                      />
+                    </div>
+                    <p className="text-[10px] text-[var(--outline)] leading-tight">
+                      Per-user cap: 5 transactional emails per 24 hours (Brevo platform safeguard).
+                    </p>
+                  </div>
+
+                  {/* Push Status Info */}
+                  <div className="p-3 rounded-xl bg-[var(--surface-container-high)]/60 border border-[var(--outline-variant)]/20 space-y-1">
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-[var(--on-surface)]">
+                      <span className="material-symbols-outlined text-[15px] text-emerald-500">cell_tower</span>
+                      <span>OS Background Push</span>
+                    </div>
+                    <p className="text-[10px] text-[var(--on-surface-variant)] leading-relaxed">
+                      Native browser &amp; phone lockscreen push notifications are free and completely unthrottled.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Control Actions */}
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[var(--outline-variant)]/15">
+                  {selectedUser.notify_email ? (
+                    <button
+                      type="button"
+                      disabled={actionLoading}
+                      onClick={() => handleToggleUserEmailNotif(selectedUser, false)}
+                      className="px-3.5 py-2 rounded-xl border border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 font-bold transition-all cursor-pointer text-xs flex items-center gap-1.5 min-h-[44px]"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">mail_lock</span>
+                      <span>Mute Outgoing Emails</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={actionLoading}
+                      onClick={() => handleToggleUserEmailNotif(selectedUser, true)}
+                      className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold transition-all cursor-pointer text-xs flex items-center gap-1.5 min-h-[44px]"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">mail</span>
+                      <span>Enable Outgoing Emails</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    disabled={actionLoading || (selectedUserEmailStats?.count24h ?? 0) === 0}
+                    onClick={() => handleResetUserEmailLimit(selectedUser)}
+                    className="px-3.5 py-2 rounded-xl bg-[var(--surface-container-high)] hover:bg-[var(--surface-container-highest)] text-[var(--on-surface)] border border-[var(--outline-variant)]/40 font-bold transition-all cursor-pointer text-xs flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
+                    title="Clear 24h email dispatch count to unthrottle user immediately"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">restart_alt</span>
+                    <span>Reset 24h Email Limit</span>
                   </button>
                 </div>
               </div>
