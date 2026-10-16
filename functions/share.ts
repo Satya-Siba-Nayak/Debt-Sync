@@ -263,17 +263,43 @@ export const onRequest = async (context: {
   }
 
   const url = new URL(request.url);
-  const debtId = (url.searchParams.get('id') || '').trim();
-  const token = (url.searchParams.get('token') || '').trim();
+  let debtId = (
+    url.searchParams.get('id') ||
+    url.searchParams.get('debt') ||
+    url.searchParams.get('debt_id') ||
+    url.searchParams.get('debtId') ||
+    url.searchParams.get('transaction_id') ||
+    ''
+  ).trim();
+  let token = (url.searchParams.get('token') || '').trim();
+
+  // If token is a UUID and debtId is empty, token was passed as the debt ID
+  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!debtId && UUID_REGEX.test(token)) {
+    debtId = token;
+    token = '';
+  }
+
+  // Also check pathname for UUID fallback: e.g. /share/uuid
+  if (!debtId) {
+    const pathMatch = url.pathname.match(
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+    );
+    if (pathMatch) {
+      debtId = pathMatch[0];
+    }
+  }
+
   const iconUrl = `${url.origin}/icons/icon-192.png`;
 
-  // Fetch the underlying static /share HTML asset from Cloudflare Pages ASSETS
+  // Fetch the underlying static /share.html asset from Cloudflare Pages ASSETS
   let baseResponse: Response;
   try {
     if (env.ASSETS) {
-      baseResponse = await env.ASSETS.fetch(request);
-      if (baseResponse.status !== 200) {
-        baseResponse = await env.ASSETS.fetch(new Request(`${url.origin}/share.html`));
+      // Direct request for share.html avoids directory redirects or trailing-slash issues
+      baseResponse = await env.ASSETS.fetch(new Request(`${url.origin}/share.html`));
+      if (!baseResponse.ok) {
+        baseResponse = await env.ASSETS.fetch(request);
       }
     } else {
       baseResponse = await context.next();
@@ -432,6 +458,13 @@ export const onRequest = async (context: {
   });
 
   const headers = new Headers(baseResponse.headers);
+  // CRITICAL: Since rawHtml was decompressed with .text() and enriched,
+  // we MUST delete compression & length headers to prevent browser ERR_CONTENT_DECODING_FAILED
+  // and Cloudflare 520 / 1101 proxy errors!
+  headers.delete('content-encoding');
+  headers.delete('content-length');
+  headers.delete('etag');
+  headers.delete('location');
   headers.set('Content-Type', 'text/html; charset=utf-8');
   headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
 

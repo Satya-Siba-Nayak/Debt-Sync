@@ -13,9 +13,63 @@ import { respondToDebtAgreement } from '@/lib/utils/debt-acceptance';
 import { parseSplitDetails, getCleanDebtNotes } from '@/lib/utils/split-bills';
 import Link from 'next/link';
 
+function extractAcceptDebtId(searchParams: URLSearchParams | null): string {
+  let id = '';
+  if (searchParams) {
+    id = (
+      searchParams.get('token') ||
+      searchParams.get('id') ||
+      searchParams.get('debt') ||
+      searchParams.get('debt_id') ||
+      searchParams.get('debtId') ||
+      ''
+    ).trim();
+  }
+  if (!id && typeof window !== 'undefined') {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      id = (
+        urlParams.get('token') ||
+        urlParams.get('id') ||
+        urlParams.get('debt') ||
+        urlParams.get('debt_id') ||
+        urlParams.get('debtId') ||
+        ''
+      ).trim();
+    } catch (_) {}
+
+    if (!id && window.location.hash) {
+      try {
+        const hashParams = new URLSearchParams(window.location.hash.replace(/^[#?]+/, ''));
+        id = (
+          hashParams.get('token') ||
+          hashParams.get('id') ||
+          hashParams.get('debt') ||
+          hashParams.get('debt_id') ||
+          hashParams.get('debtId') ||
+          ''
+        ).trim();
+      } catch (_) {}
+    }
+
+    if (!id) {
+      const match = window.location.pathname.match(
+        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+      );
+      if (match) id = match[0];
+    }
+  }
+  return id;
+}
+
 function AcceptDebtContent() {
   const searchParams = useSearchParams();
-  const debtId = searchParams.get('token') || searchParams.get('id') || '';
+  const [debtId, setDebtId] = useState(() => extractAcceptDebtId(searchParams));
+
+  useEffect(() => {
+    setDebtId(extractAcceptDebtId(searchParams));
+  }, [searchParams]);
+
   const router = useRouter();
 
   const supabase = createClient();

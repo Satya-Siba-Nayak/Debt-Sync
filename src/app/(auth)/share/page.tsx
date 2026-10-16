@@ -28,12 +28,103 @@ function maskEmailAddress(email?: string | null): string {
   return `${local[0]}***${local.slice(-1)}@${domain}`;
 }
 
+function extractShareParams(searchParams: URLSearchParams | null): {
+  debtId: string;
+  token: string;
+  mode: string;
+} {
+  let debtId = '';
+  let token = '';
+  let mode = '';
+
+  // 1. Next.js searchParams
+  if (searchParams) {
+    debtId = (
+      searchParams.get('id') ||
+      searchParams.get('debt') ||
+      searchParams.get('debt_id') ||
+      searchParams.get('debtId') ||
+      searchParams.get('transaction_id') ||
+      searchParams.get('transaction') ||
+      ''
+    ).trim();
+    token = (searchParams.get('token') || searchParams.get('key') || '').trim();
+    mode = (searchParams.get('mode') || '').trim();
+  }
+
+  // 2. Client-side browser fallbacks (handles hydration, redirect services, and in-app webviews)
+  if (typeof window !== 'undefined') {
+    if (!debtId || !token || !mode) {
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        if (!debtId) {
+          debtId = (
+            urlParams.get('id') ||
+            urlParams.get('debt') ||
+            urlParams.get('debt_id') ||
+            urlParams.get('debtId') ||
+            urlParams.get('transaction_id') ||
+            urlParams.get('transaction') ||
+            ''
+          ).trim();
+        }
+        if (!token) token = (urlParams.get('token') || urlParams.get('key') || '').trim();
+        if (!mode) mode = (urlParams.get('mode') || '').trim();
+      } catch (_) {}
+    }
+
+    // 3. Fallback to hash: e.g. #?id=... or #id=...
+    if (!debtId && window.location.hash) {
+      try {
+        const hashStr = window.location.hash.replace(/^[#?]+/, '');
+        const hashParams = new URLSearchParams(hashStr);
+        debtId = (
+          hashParams.get('id') ||
+          hashParams.get('debt') ||
+          hashParams.get('debt_id') ||
+          hashParams.get('debtId') ||
+          hashParams.get('transaction_id') ||
+          hashParams.get('transaction') ||
+          ''
+        ).trim();
+        if (!token) token = (hashParams.get('token') || hashParams.get('key') || '').trim();
+        if (!mode) mode = (hashParams.get('mode') || '').trim();
+      } catch (_) {}
+    }
+
+    // 4. Fallback to pathname UUID: e.g. /share/<uuid>
+    if (!debtId) {
+      const pathMatch = window.location.pathname.match(
+        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+      );
+      if (pathMatch) {
+        debtId = pathMatch[0];
+      }
+    }
+  }
+
+  // 5. If token matches a UUID and debtId is empty, token was passed as the debt ID
+  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!debtId && token && UUID_REGEX.test(token)) {
+    debtId = token;
+    token = '';
+  }
+
+  return { debtId, token, mode };
+}
+
 function ShareTransactionContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const debtId = searchParams.get('id') || '';
-  const mode = searchParams.get('mode') || '';
-  const token = searchParams.get('token') || '';
+  const [params, setParams] = useState(() => extractShareParams(searchParams));
+
+  useEffect(() => {
+    setParams(extractShareParams(searchParams));
+  }, [searchParams]);
+
+  const debtId = params.debtId;
+  const mode = params.mode;
+  const token = params.token;
 
   const supabase = createClient();
 
@@ -53,8 +144,33 @@ function ShareTransactionContent() {
   const [error, setError] = useState('');
 
   const loadSharedTransaction = useCallback(async () => {
-    if (!debtId) {
-      setError('No transaction ID specified in share link.');
+    let effectiveDebtId = debtId;
+
+    if (!effectiveDebtId) {
+      const live = extractShareParams(searchParams);
+      if (live.debtId) {
+        effectiveDebtId = live.debtId;
+        setParams(live);
+      }
+    }
+
+    // Fallback: If no debtId was in URL but a global token was provided, attempt to locate debt by token
+    if (!effectiveDebtId && token) {
+      try {
+        const { data: matched } = await supabase
+          .from('debts')
+          .select('id')
+          .ilike('notes', `%"globalToken":"${token}"%`)
+          .limit(1);
+        if (matched && matched.length > 0 && matched[0].id) {
+          effectiveDebtId = matched[0].id;
+          setParams((prev) => ({ ...prev, debtId: effectiveDebtId }));
+        }
+      } catch (_) {}
+    }
+
+    if (!effectiveDebtId) {
+      setError('No transaction ID or token was found in this share link.');
       setLoading(false);
       return;
     }
@@ -91,7 +207,7 @@ function ShareTransactionContent() {
             borrower:profiles!debts_borrower_id_fkey(id, email, full_name, avatar_url, network_score)
           `
           )
-          .eq('id', debtId)
+          .eq('id', effectiveDebtId)
           .maybeSingle();
 
         if (directDebt) {
@@ -102,7 +218,7 @@ function ShareTransactionContent() {
       // 2. Fallback to SECURITY DEFINER RPC (works for unauthenticated global link viewers & split group members)
       if (!resolvedDebt) {
         const { data: rpcData, error: rpcErr } = await supabase.rpc('get_debt_for_acceptance', {
-          p_debt_id: debtId,
+          p_debt_id: effectiveDebtId,
         });
 
         if (!rpcErr && rpcData && rpcData.length > 0) {
@@ -143,12 +259,12 @@ function ShareTransactionContent() {
           supabase
             .from('payments')
             .select('*')
-            .eq('debt_id', debtId)
+            .eq('debt_id', effectiveDebtId)
             .order('created_at', { ascending: false }),
           supabase
             .from('activity_log')
             .select('*')
-            .eq('debt_id', debtId)
+            .eq('debt_id', effectiveDebtId)
             .order('created_at', { ascending: false })
             .limit(25),
         ]);
@@ -196,7 +312,7 @@ function ShareTransactionContent() {
     } finally {
       setLoading(false);
     }
-  }, [debtId, supabase]);
+  }, [debtId, token, supabase, searchParams]);
 
   useEffect(() => {
     loadSharedTransaction();
@@ -438,17 +554,28 @@ function ShareTransactionContent() {
               <span className="material-symbols-outlined text-2xl">error</span>
             </div>
             <h2 className="font-heading text-lg font-bold text-[var(--on-surface)]">
-              Transaction Not Found
+              {error?.includes('No transaction ID')
+                ? 'Missing Transaction ID'
+                : 'Transaction Not Found'}
             </h2>
             <p className="font-mono text-xs text-[var(--on-surface-variant)] leading-relaxed">
-              {error || 'This transaction link is invalid or the record has been deleted.'}
+              {error?.includes('No transaction ID')
+                ? 'No transaction ID or token was found in this share link. If someone shared this transaction with you, please make sure the full link was copied.'
+                : error || 'This transaction link is invalid or the record has been deleted.'}
             </p>
-            <div className="pt-2">
+            <div className="pt-2 flex flex-col sm:flex-row gap-2.5 justify-center">
+              <Link
+                href="/transactions"
+                className="px-5 py-2.5 bg-[var(--primary)] text-[var(--on-primary)] rounded-xl font-mono text-xs font-bold inline-flex items-center justify-center gap-1.5 min-h-[44px]"
+              >
+                <span className="material-symbols-outlined text-[16px]">receipt_long</span>
+                <span>View Transactions</span>
+              </Link>
               <Link
                 href="/"
-                className="px-5 py-2.5 bg-[var(--primary)] text-[var(--on-primary)] rounded-xl font-mono text-xs font-bold inline-block"
+                className="px-5 py-2.5 border border-[var(--outline-variant)]/40 text-[var(--on-surface)] rounded-xl font-mono text-xs font-semibold hover:bg-[var(--surface-container)] inline-flex items-center justify-center min-h-[44px]"
               >
-                Go to DebtSync
+                Go to Dashboard
               </Link>
             </div>
           </div>

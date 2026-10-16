@@ -20,10 +20,55 @@ import { parseSplitDetails, parseShareMetadata, getCleanDebtNotes } from '@/lib/
 import { respondToDebtAgreement, cancelPendingDebt } from '@/lib/utils/debt-acceptance';
 import Link from 'next/link';
 
+function extractDeepLinkedDebtId(searchParams: URLSearchParams | null): string | null {
+  let id: string | null = null;
+  if (searchParams) {
+    id =
+      searchParams.get('debt') ||
+      searchParams.get('id') ||
+      searchParams.get('debt_id') ||
+      searchParams.get('debtId') ||
+      searchParams.get('token') ||
+      null;
+  }
+  if (!id && typeof window !== 'undefined') {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      id =
+        urlParams.get('debt') ||
+        urlParams.get('id') ||
+        urlParams.get('debt_id') ||
+        urlParams.get('debtId') ||
+        urlParams.get('token') ||
+        null;
+    } catch (_) {}
+
+    if (!id && window.location.hash) {
+      try {
+        const hashParams = new URLSearchParams(window.location.hash.replace(/^[#?]+/, ''));
+        id =
+          hashParams.get('debt') ||
+          hashParams.get('id') ||
+          hashParams.get('debt_id') ||
+          hashParams.get('debtId') ||
+          hashParams.get('token') ||
+          null;
+      } catch (_) {}
+    }
+  }
+  return id ? id.trim() : null;
+}
+
 function TransactionsPageContent() {
   const supabase = createClient();
   const searchParams = useSearchParams();
-  const deepLinkedDebtId = searchParams.get('debt');
+  const [deepLinkedDebtId, setDeepLinkedDebtId] = useState<string | null>(() =>
+    extractDeepLinkedDebtId(searchParams)
+  );
+
+  useEffect(() => {
+    setDeepLinkedDebtId(extractDeepLinkedDebtId(searchParams));
+  }, [searchParams]);
 
   const initialCache = getLedgerCache();
   const [loading, setLoading] = useState(!initialCache);
@@ -79,6 +124,10 @@ function TransactionsPageContent() {
       if (typeof window !== 'undefined') {
         const url = new URL(window.location.href);
         url.searchParams.delete('debt');
+        url.searchParams.delete('id');
+        url.searchParams.delete('debt_id');
+        url.searchParams.delete('debtId');
+        url.searchParams.delete('token');
         window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
       }
     }
