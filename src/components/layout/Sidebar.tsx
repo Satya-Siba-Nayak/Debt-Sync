@@ -8,6 +8,7 @@ import { ThemeToggle } from '../ui/ThemeToggle';
 import { BrandLogo } from '../ui/BrandLogo';
 
 import { clearAuthSessionData } from '@/lib/utils/auth-session';
+import { unsubscribeFromPush } from '@/lib/utils/push-notifications';
 import { useViewMode } from '@/lib/hooks/useViewMode';
 
 interface SidebarProps {
@@ -22,6 +23,7 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
   const { isAdmin: effectiveIsAdmin, inAdminMode, toggleViewMode: handleToggleMode } = useViewMode(isAdmin);
 
   const handleSignOut = async () => {
+    await unsubscribeFromPush().catch(() => {});
     clearAuthSessionData();
     await supabase.auth.signOut();
     router.push('/login');

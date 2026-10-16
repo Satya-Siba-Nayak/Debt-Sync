@@ -28,6 +28,17 @@ import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { triggerPWAInstallPrompt } from '@/components/ui/PWAInstallPrompt';
 import { isValidUPIId, detectUPIApp, isValidIFSC, isValidBankAccount, normalizeIFSC } from '@/lib/utils/upi-link';
+import {
+  isPushSupported,
+  subscribeToPush,
+  unsubscribeFromPush,
+  isPushSubscribed,
+} from '@/lib/utils/push-notifications';
+import {
+  requestNotificationPermission,
+  getNotificationPermission,
+  sendWebNotification,
+} from '@/lib/utils/web-notifications';
 
 export default function SettingsPage() {
   const supabase = createClient();
@@ -75,6 +86,10 @@ export default function SettingsPage() {
   const [showAdvancedApp, setShowAdvancedApp] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [viewMode, setViewMode] = useState<'admin' | 'user'>('admin');
+  const [notifyEmail, setNotifyEmail] = useState(true);
+  const [pushStatus, setPushStatus] = useState<'granted' | 'default' | 'denied' | 'unsupported'>('default');
+  const [pushActive, setPushActive] = useState(false);
+  const [pushWorking, setPushWorking] = useState(false);
 
   // Account deletion & CSV export states
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -104,6 +119,7 @@ export default function SettingsPage() {
     defaultInterestType: 'none' | 'simple' | 'compound';
     defaultInterestRate: number;
     defaultCompoundFreq: 'daily' | 'weekly' | 'monthly' | 'yearly';
+    notifyEmail: boolean;
   } | null>(null);
 
   const isDirty = useMemo(() => {
@@ -123,6 +139,7 @@ export default function SettingsPage() {
       defaultInterestType !== initialSettings.defaultInterestType ||
       defaultInterestRate !== initialSettings.defaultInterestRate ||
       defaultCompoundFreq !== initialSettings.defaultCompoundFreq ||
+      notifyEmail !== initialSettings.notifyEmail ||
       newPassword.trim().length > 0
     );
   }, [
@@ -142,6 +159,7 @@ export default function SettingsPage() {
     defaultInterestType,
     defaultInterestRate,
     defaultCompoundFreq,
+    notifyEmail,
     newPassword,
   ]);
 
@@ -165,6 +183,7 @@ export default function SettingsPage() {
     setDefaultInterestRate(initialSettings.defaultInterestRate);
     setDefaultInterestRateStr(String(initialSettings.defaultInterestRate));
     setDefaultCompoundFreq(initialSettings.defaultCompoundFreq);
+    setNotifyEmail(initialSettings.notifyEmail);
     setNewPassword('');
     setError('');
     setPendingNav(null);
@@ -223,6 +242,7 @@ export default function SettingsPage() {
         defaultInterestType,
         defaultInterestRate,
         defaultCompoundFreq,
+        notifyEmail,
         newPassword,
       };
       sessionStorage.setItem(draftKey, JSON.stringify(draft));
@@ -248,6 +268,7 @@ export default function SettingsPage() {
     defaultInterestType,
     defaultInterestRate,
     defaultCompoundFreq,
+    notifyEmail,
     newPassword,
   ]);
 
@@ -357,7 +378,7 @@ export default function SettingsPage() {
         const [profileRes, settingsRes, debtsRes] = await Promise.all([
           supabase
             .from('profiles')
-            .select('full_name, phone, secondary_emails, avatar_url, recent_custom_avatars, upi_id, is_admin, preferred_repayment_method, bank_name, bank_account_number, bank_ifsc, bank_account_holder_name')
+            .select('full_name, phone, secondary_emails, avatar_url, recent_custom_avatars, upi_id, is_admin, preferred_repayment_method, bank_name, bank_account_number, bank_ifsc, bank_account_holder_name, notify_email')
             .eq('id', user.id)
             .single(),
           supabase
@@ -397,6 +418,16 @@ export default function SettingsPage() {
           setIsAdmin(Boolean(profile.is_admin));
           setSecondaryEmails(profile.secondary_emails || []);
           setAvatarUrl(profile.avatar_url || null);
+          setNotifyEmail(profile.notify_email !== false);
+
+          // Check device push status
+          if (!isPushSupported()) {
+            setPushStatus('unsupported');
+            setPushActive(false);
+          } else {
+            setPushStatus(getNotificationPermission());
+            isPushSubscribed().then((active) => setPushActive(active)).catch(() => {});
+          }
 
           // Resolve recent custom avatars (strictly custom photos, max 2)
           const rawRecent = Array.isArray(profile.recent_custom_avatars)
@@ -507,6 +538,7 @@ export default function SettingsPage() {
           defaultInterestType: resolvedType,
           defaultInterestRate: isNaN(resolvedRate) ? 0 : resolvedRate,
           defaultCompoundFreq: resolvedFreq,
+          notifyEmail: profile?.notify_email !== false,
         });
 
         // Restore any unsaved changes draft from sessionStorage
@@ -533,6 +565,7 @@ export default function SettingsPage() {
                 setDefaultInterestRateStr(String(draft.defaultInterestRate));
               }
               if (draft.defaultCompoundFreq !== undefined) setDefaultCompoundFreq(draft.defaultCompoundFreq);
+              if (draft.notifyEmail !== undefined) setNotifyEmail(draft.notifyEmail);
               if (draft.newPassword !== undefined) setNewPassword(draft.newPassword);
             }
           } catch (_) {}
@@ -637,6 +670,7 @@ export default function SettingsPage() {
         secondary_emails: secondaryEmails,
         avatar_url: avatarUrl,
         recent_custom_avatars: recentCustomAvatars,
+        notify_email: notifyEmail,
       };
 
       let { error: profileError } = await supabase
@@ -653,6 +687,7 @@ export default function SettingsPage() {
         delete profilePayload.bank_account_holder_name;
         delete profilePayload.recent_custom_avatars;
         delete profilePayload.upi_id;
+        delete profilePayload.notify_email;
         const retryRes = await supabase.from('profiles').update(profilePayload).eq('id', user.id);
         profileError = retryRes.error;
       }
@@ -740,6 +775,7 @@ export default function SettingsPage() {
         defaultInterestType,
         defaultInterestRate,
         defaultCompoundFreq,
+        notifyEmail,
       });
 
       if (userId) {
@@ -753,6 +789,41 @@ export default function SettingsPage() {
       return false;
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleTogglePush = async () => {
+    if (!isPushSupported()) return;
+    setPushWorking(true);
+    setError('');
+    setMessage('');
+    try {
+      if (pushActive) {
+        await unsubscribeFromPush();
+        setPushActive(false);
+        setMessage('Background push notifications disabled for this device.');
+      } else {
+        const granted = await requestNotificationPermission();
+        setPushStatus(granted ? 'granted' : 'denied');
+        if (!granted) {
+          setError('Notification permission was blocked. Please enable notifications in your browser settings.');
+          return;
+        }
+        const res = await subscribeToPush();
+        if (res.ok) {
+          setPushActive(true);
+          sendWebNotification('DebtSync Notifications Active', {
+            body: 'You will receive background alerts for debt and repayment requests even when DebtSync is closed.',
+          });
+          setMessage('Background push notifications enabled on this device!');
+        } else {
+          setError(`Failed to activate push notifications: ${res.reason}`);
+        }
+      }
+    } catch (err: any) {
+      setError(err.message || 'Error updating push preferences');
+    } finally {
+      setPushWorking(false);
     }
   };
 
@@ -818,6 +889,7 @@ export default function SettingsPage() {
       }
 
       // 3. Clear all client storage & session
+      await unsubscribeFromPush().catch(() => {});
       await supabase.auth.signOut();
       if (typeof window !== 'undefined') {
         localStorage.clear();
@@ -1668,6 +1740,108 @@ export default function SettingsPage() {
               </div>
             </div>
           )}
+        </div>
+
+        {/* Notification Preferences */}
+        <div className="pt-6 border-t border-[var(--outline-variant)]/20 space-y-4">
+          <div>
+            <h3 className="font-mono text-xs uppercase tracking-wider font-semibold text-[var(--on-surface-variant)] flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">notifications_active</span>
+              <span>Notification Preferences</span>
+            </h3>
+            <p className="text-[11px] font-mono text-[var(--outline)] mt-0.5">
+              Automated delivery via Brevo email receipts and background OS-level browser push notifications.
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            {/* 1. Transaction & Ledger Email Receipts */}
+            <div className="p-4 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="min-w-0 pr-2">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[18px] text-[var(--primary)] shrink-0">mail</span>
+                  <span className="font-mono text-xs font-bold text-[var(--on-surface)]">
+                    Transaction &amp; Ledger Email Receipts
+                  </span>
+                </div>
+                <p className="text-xs text-[var(--on-surface-variant)] mt-1 leading-relaxed">
+                  Receive email receipts via Brevo when someone records a debt with you, reports a repayment, or verifies a transaction.
+                </p>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer select-none shrink-0 self-start sm:self-center">
+                <input
+                  type="checkbox"
+                  checked={notifyEmail}
+                  onChange={(e) => setNotifyEmail(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-[var(--surface-container-high)] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--primary)] transition-colors"></div>
+              </label>
+            </div>
+
+            {/* 2. OS Background Push Notifications */}
+            <div className="p-4 rounded-2xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[18px] text-[var(--primary)] shrink-0">cell_tower</span>
+                  <span className="font-mono text-xs font-bold text-[var(--on-surface)]">
+                    OS Background Push Notifications
+                  </span>
+                </div>
+
+                <div>
+                  {pushStatus === 'unsupported' ? (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-gray-500/15 text-gray-500">
+                      UNSUPPORTED IN THIS BROWSER
+                    </span>
+                  ) : pushActive ? (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                      ACTIVE ON THIS DEVICE
+                    </span>
+                  ) : pushStatus === 'denied' ? (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-500/15 text-rose-600 dark:text-rose-400">
+                      PERMISSION BLOCKED
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                      DISABLED ON THIS DEVICE
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <p className="text-xs text-[var(--on-surface-variant)] leading-relaxed">
+                Wakes up your device lockscreen or desktop alerts even when DebtSync is completely closed. Clicking an alert navigates directly to the relevant ledger.
+              </p>
+
+              {pushStatus !== 'unsupported' && (
+                <div className="pt-1 flex flex-wrap items-center gap-2">
+                  {pushActive ? (
+                    <button
+                      type="button"
+                      onClick={handleTogglePush}
+                      disabled={pushWorking}
+                      className="px-3.5 py-1.5 rounded-xl border border-[var(--outline-variant)]/50 hover:bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] text-xs font-mono font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-colors"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">notifications_off</span>
+                      <span>{pushWorking ? 'Updating...' : 'Disable Push On This Device'}</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleTogglePush}
+                      disabled={pushWorking}
+                      className="px-3.5 py-1.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] text-xs font-mono font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-xs hover:brightness-110 disabled:opacity-50 transition-all"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">notifications_active</span>
+                      <span>{pushWorking ? 'Enabling...' : 'Enable Background Push On This Device'}</span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Security & Password */}

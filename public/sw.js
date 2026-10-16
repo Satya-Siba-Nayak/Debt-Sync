@@ -1,4 +1,4 @@
-const CACHE_NAME = 'debtsync-cache-v5';
+const CACHE_NAME = 'debtsync-cache-v6';
 const PRECACHE_ASSETS = [
   '/',
   '/manifest.json',
@@ -66,5 +66,56 @@ self.addEventListener('fetch', (event) => {
           headers: { 'Content-Type': 'text/plain' },
         });
       })
+  );
+});
+
+// ─── Background Web Push ────────────────────────────────────────────────────
+// Runs even when no DebtSync tab/PWA window is open.
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch (_) {
+    data = { title: 'DebtSync', body: event.data ? event.data.text() : '' };
+  }
+
+  const title = data.title || 'DebtSync';
+  const options = {
+    body: data.body || '',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    tag: data.tag || undefined,
+    renotify: Boolean(data.tag),
+    data: { url: data.url || '/transactions' },
+  };
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      // If the user is actively looking at the app, the in-app realtime
+      // notification already covers it - avoid a redundant OS popup.
+      const appFocused = clients.some((c) => c.focused && c.visibilityState === 'visible');
+      if (appFocused) return undefined;
+      return self.registration.showNotification(title, options);
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = new URL(
+    (event.notification.data && event.notification.data.url) || '/transactions',
+    self.location.origin
+  ).href;
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        if (new URL(client.url).origin === self.location.origin && 'focus' in client) {
+          if ('navigate' in client) client.navigate(target);
+          return client.focus();
+        }
+      }
+      return self.clients.openWindow(target);
+    })
   );
 });

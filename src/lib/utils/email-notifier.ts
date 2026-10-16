@@ -10,19 +10,8 @@ export interface EmailNotificationPayload {
 }
 
 export async function sendNotificationEmail(payload: EmailNotificationPayload) {
-  if (!payload.recipientEmail || payload.recipientEmail.endsWith('@phone.debtsync.local')) {
-    return { success: true, skipped: true };
-  }
-
-  try {
-    const res = await fetch('/api/notifications/email', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    return await res.json();
-  } catch (err) {
-    console.warn('Email notification dispatch skipped or failed:', err);
-    return null;
-  }
+  // In DebtSync v2.5+, email notifications are triggered server-side by PostgreSQL
+  // database triggers calling the Brevo SMTP Edge Function directly.
+  // This client helper remains as a safe non-blocking no-op for backward compatibility.
+  return { success: true, serverTriggered: true };
 }

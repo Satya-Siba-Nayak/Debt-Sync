@@ -19,6 +19,7 @@ import {
   isUserParticipantInDebt,
   TransactionShareMetadata,
 } from '@/lib/utils/split-bills';
+import { unsubscribeFromPush } from '@/lib/utils/push-notifications';
 
 function maskEmailAddress(email?: string | null): string {
   if (!email || !email.includes('@')) return 'Protected Email';
@@ -526,6 +527,7 @@ function ShareTransactionContent() {
                   <button
                     type="button"
                     onClick={async () => {
+                      await unsubscribeFromPush().catch(() => {});
                       await supabase.auth.signOut();
                       router.push(`/login?next=${encodeURIComponent(currentRelativeUrl)}`);
                     }}

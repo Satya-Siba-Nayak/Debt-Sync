@@ -9,6 +9,7 @@ import { BrandLogo } from '../ui/BrandLogo';
 import { NotificationCenter } from './NotificationCenter';
 import { createClient } from '@/lib/supabase/client';
 import { clearAuthSessionData } from '@/lib/utils/auth-session';
+import { unsubscribeFromPush } from '@/lib/utils/push-notifications';
 import { useViewMode } from '@/lib/hooks/useViewMode';
 
 interface TopBarProps {
@@ -95,6 +96,7 @@ export function TopBar({
 
   const handleSignOut = async () => {
     setIsDropdownOpen(false);
+    await unsubscribeFromPush().catch(() => {});
     clearAuthSessionData();
     await supabase.auth.signOut();
     router.push('/login');

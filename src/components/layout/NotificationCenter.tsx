@@ -12,6 +12,7 @@ import {
   requestNotificationPermission,
   sendWebNotification,
 } from '@/lib/utils/web-notifications';
+import { subscribeToPush, syncPushSubscription } from '@/lib/utils/push-notifications';
 import { formatPaymentMethodDisplay } from '@/lib/utils/upi-link';
 import { respondToDebtAgreement } from '@/lib/utils/debt-acceptance';
 import { invalidateCooldownCache } from '@/lib/utils/debt-cooldown';
@@ -131,15 +132,28 @@ export function NotificationCenter() {
 
   useEffect(() => {
     setWebPermission(getNotificationPermission());
-  }, []);
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+      getCurrentUserFast(supabase).then((u) => {
+        if (u) syncPushSubscription(u.id).catch(() => {});
+      });
+    }
+  }, [supabase]);
 
   const handleEnableWebNotifications = async () => {
     const granted = await requestNotificationPermission();
     setWebPermission(granted ? 'granted' : 'denied');
     if (granted) {
       sendWebNotification('Notifications Enabled!', {
-        body: 'You will now receive instant desktop alerts for repayment requests and debt syncs.',
+        body: 'You will now receive instant alerts for repayment requests and debt syncs, even when the browser is closed.',
       });
+      try {
+        const u = await getCurrentUserFast(supabase);
+        if (u) {
+          await subscribeToPush();
+        }
+      } catch (pushErr) {
+        console.warn('Failed to subscribe to background push:', pushErr);
+      }
     }
   };
 
@@ -791,7 +805,7 @@ export function NotificationCenter() {
                   notifications_active
                 </span>
                 <span className="truncate text-[11px] leading-tight">
-                  Turn on desktop alerts for new repayment and sync requests
+                  Turn on instant alerts for new repayment &amp; sync requests (even when closed)
                 </span>
               </div>
               <button
