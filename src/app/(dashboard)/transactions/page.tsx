@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment } from '@/lib/types/database';
-import { calculateDebtBalance, sortDebtsActiveFirst } from '@/lib/utils/interest';
+import { calculateDebtBalance, sortDebtsActiveFirst, isDebtPurgedByAdmin } from '@/lib/utils/interest';
 import { formatCurrency } from '@/lib/utils/currency';
 import { Chip } from '@/components/ui/Chip';
 import { Avatar } from '@/components/ui/Avatar';
@@ -174,12 +174,12 @@ function TransactionsPageContent() {
     visibleDebts
       .filter((d) => {
         const isLender = d.lender_id === currentUserId;
-        const isPurged = d.status === 'purged' || (typeof d.notes === 'string' && d.notes.includes('[TRANSACTION PURGED BY ADMIN'));
-        if (filter === 'pending') return d.status === 'pending';
+        const isPurged = isDebtPurgedByAdmin(d);
+        if (filter === 'pending') return d.status === 'pending' && !isPurged;
         if (filter === 'lent') return isLender && d.status !== 'declined' && !isPurged;
         if (filter === 'borrowed') return !isLender && d.status !== 'declined' && !isPurged;
-        if (filter === 'settled') return d.status === 'settled';
-        if (filter === 'declined') return d.status === 'declined';
+        if (filter === 'settled') return d.status === 'settled' && !isPurged;
+        if (filter === 'declined') return d.status === 'declined' && !isPurged;
         if (filter === 'purged') return isPurged;
         return true;
       })
@@ -232,16 +232,16 @@ function TransactionsPageContent() {
               placeholder="Search notes, names, amounts..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full sm:w-64 pl-9 pr-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-xs text-[var(--on-surface)] font-mono outline-none focus:border-[var(--primary)]"
+              className="w-full sm:w-64 pl-9 pr-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-base sm:text-xs text-[var(--on-surface)] font-mono outline-none focus:border-[var(--primary)]"
             />
           </div>
 
           <div className="flex bg-[var(--surface-container)] p-1 rounded-xl border border-[var(--outline-variant)]/20 self-start flex-wrap gap-0.5">
             {(['all', 'pending', 'lent', 'borrowed', 'settled', 'declined', 'purged'] as const).map((tab) => {
               const count = tab === 'pending'
-                ? visibleDebts.filter((d) => d.status === 'pending').length
+                ? visibleDebts.filter((d) => d.status === 'pending' && !isDebtPurgedByAdmin(d)).length
                 : tab === 'purged'
-                ? visibleDebts.filter((d) => d.status === 'purged' || (typeof d.notes === 'string' && d.notes.includes('[TRANSACTION PURGED BY ADMIN'))).length
+                ? visibleDebts.filter((d) => isDebtPurgedByAdmin(d)).length
                 : 0;
               return (
                 <button
@@ -280,12 +280,12 @@ function TransactionsPageContent() {
               {filteredDebts.map((d) => {
                 const isLender = d.lender_id === currentUserId;
                 const otherPerson = isLender ? d.borrower : d.lender;
-                const isPurged =
-                  d.status === 'purged' ||
-                  (typeof d.notes === 'string' && d.notes.includes('[TRANSACTION PURGED BY ADMIN')) ||
-                  Boolean((otherPerson as any)?.is_purged);
+                const isPurged = isDebtPurgedByAdmin(d);
                 const name = otherPerson?.full_name || otherPerson?.email || (isPurged ? 'Purged Account' : 'Unknown');
                 const debtPayments = payments.filter((p) => p.debt_id === d.id);
+                const unverifiedCount = debtPayments.filter(
+                  (p) => !p.is_verified && !(typeof p.note === 'string' && p.note.includes('[DISPUTED]'))
+                ).length;
                 const calc = calculateDebtBalance(d, debtPayments);
                 const dueDateInfo = getDueDateInfo(d.due_date, d.status);
                 const split = parseSplitDetails(d);
@@ -364,6 +364,20 @@ function TransactionsPageContent() {
                               {dueDateInfo.isOverdue ? 'warning' : 'event'}
                             </span>
                             {dueDateInfo.text}
+                          </span>
+                        )}
+                        {unverifiedCount > 0 && d.status === 'active' && !isPurged && (
+                          <span
+                            className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-bold border flex items-center gap-1 ${
+                              isLender
+                                ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 animate-pulse'
+                                : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                            }`}
+                          >
+                            <span className="material-symbols-outlined text-[11px]">
+                              {isLender ? 'fact_check' : 'hourglass_top'}
+                            </span>
+                            <span>{isLender ? 'Verify Payment' : 'Payment Pending Check'}</span>
                           </span>
                         )}
                       </div>
@@ -588,12 +602,12 @@ function TransactionsPageContent() {
                   {filteredDebts.map((d) => {
                     const isLender = d.lender_id === currentUserId;
                     const otherPerson = isLender ? d.borrower : d.lender;
-                    const isPurged =
-                      d.status === 'purged' ||
-                      (typeof d.notes === 'string' && d.notes.includes('[TRANSACTION PURGED BY ADMIN')) ||
-                      Boolean((otherPerson as any)?.is_purged);
+                    const isPurged = isDebtPurgedByAdmin(d);
                     const name = otherPerson?.full_name || otherPerson?.email || (isPurged ? 'Purged Account' : 'Unknown');
                     const debtPayments = payments.filter((p) => p.debt_id === d.id);
+                    const unverifiedCount = debtPayments.filter(
+                      (p) => !p.is_verified && !(typeof p.note === 'string' && p.note.includes('[DISPUTED]'))
+                    ).length;
                     const calc = calculateDebtBalance(d, debtPayments);
                     const dueDateInfo = getDueDateInfo(d.due_date, d.status);
                     const split = parseSplitDetails(d);
@@ -757,6 +771,20 @@ function TransactionsPageContent() {
                                   {dueDateInfo.isOverdue ? 'warning' : 'event'}
                                 </span>
                                 {dueDateInfo.text}
+                              </span>
+                            )}
+                            {unverifiedCount > 0 && d.status === 'active' && !isPurged && (
+                              <span
+                                className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-bold border flex items-center gap-1 ${
+                                  isLender
+                                    ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 animate-pulse'
+                                    : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                                }`}
+                              >
+                                <span className="material-symbols-outlined text-[11px]">
+                                  {isLender ? 'fact_check' : 'hourglass_top'}
+                                </span>
+                                <span>{isLender ? 'Verify Payment' : 'Payment Pending Check'}</span>
                               </span>
                             )}
                           </div>

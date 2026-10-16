@@ -1221,6 +1221,12 @@ export default function AdminDashboardPage() {
         <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
           <Link
             href="/"
+            onClick={() => {
+              if (typeof window !== 'undefined') {
+                localStorage.setItem('debtsync_view_mode', 'user');
+                window.dispatchEvent(new CustomEvent('debtsync:view_mode_changed', { detail: { mode: 'user' } }));
+              }
+            }}
             className="px-3.5 py-2 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
             title="Switch back to regular client dashboard view"
           >
@@ -1254,13 +1260,13 @@ export default function AdminDashboardPage() {
             },
             {
               id: 'users' as AdminTab,
-              label: `Users (${allProfiles.length})`,
+              label: `Users (${regularProfiles.length})`,
               icon: 'manage_accounts',
               badge: metrics.isolatedUsers > 0 ? `${metrics.isolatedUsers} ISOLATED` : undefined,
             },
             {
               id: 'transactions' as AdminTab,
-              label: `All Ledgers (${allDebts.length})`,
+              label: `All Ledgers (${validDebts.length})`,
               icon: 'receipt_long',
               badge: undefined,
             },

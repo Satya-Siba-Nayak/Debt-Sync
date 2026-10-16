@@ -72,7 +72,7 @@ export function BottomNav({ onNewTransaction, isAdmin }: BottomNavProps) {
   const rightItems = inAdminMode
     ? [
         { label: 'Ledgers', href: '/admin?tab=transactions', icon: 'receipt_long' },
-        { label: 'Settings', href: '/settings', icon: 'settings' },
+        { label: 'Analytics', href: '/admin?tab=analytics', icon: 'monitoring' },
       ]
     : [
         { label: 'Ledgers', href: '/transactions', icon: 'receipt_long' },

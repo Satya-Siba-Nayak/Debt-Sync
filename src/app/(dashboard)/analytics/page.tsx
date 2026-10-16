@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment } from '@/lib/types/database';
-import { calculateDebtBalance, round2 } from '@/lib/utils/interest';
+import { calculateDebtBalance, isDebtPurgedByAdmin, round2 } from '@/lib/utils/interest';
 import { formatCurrency } from '@/lib/utils/currency';
 import { CashflowChart } from '@/components/dashboard/CashflowChart';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
@@ -109,9 +109,11 @@ export default function AnalyticsPage() {
   let totalRepaymentsMade = 0;
   let settledDebtsCount = 0;
 
+  const validDebtIds = new Set<string>();
   for (const d of debts) {
+    if (d.status === 'declined' || d.status === 'purged' || isDebtPurgedByAdmin(d)) continue;
+    validDebtIds.add(d.id);
     if (d.status === 'settled') settledDebtsCount++;
-    if (d.status === 'declined' || d.status === 'purged') continue;
 
     const debtPayments = payments.filter((p) => p.debt_id === d.id);
     const calc = calculateDebtBalance(d, debtPayments);
@@ -169,7 +171,7 @@ export default function AnalyticsPage() {
   };
 
   for (const p of payments) {
-    if (!p.is_verified) continue;
+    if (!p.is_verified || !validDebtIds.has(p.debt_id)) continue;
     const mode = (p.payment_method || 'other').toLowerCase();
     const amount = Number(p.amount) || 0;
 
@@ -203,17 +205,20 @@ export default function AnalyticsPage() {
     }
   }
 
-  // Debt Age Distribution
+  // Debt Age Distribution (using remaining unpaid balance on active non-purged debts)
   const ageBuckets = { '0-30d': 0, '31-60d': 0, '61-90d': 0, '91-120d': 0, '>120d': 0 };
   const now = Date.now();
   for (const d of debts) {
-    if (d.status === 'declined' || d.status === 'settled' || d.status === 'purged') continue;
+    if (d.status === 'declined' || d.status === 'settled' || d.status === 'purged' || isDebtPurgedByAdmin(d)) continue;
+    const debtPayments = payments.filter((p) => p.debt_id === d.id);
+    const remBal = calculateDebtBalance(d, debtPayments).currentBalance;
+    if (remBal <= 0) continue;
     const days = Math.floor((now - new Date(d.created_at).getTime()) / (1000 * 60 * 60 * 24));
-    if (days <= 30) ageBuckets['0-30d'] += Number(d.principal);
-    else if (days <= 60) ageBuckets['31-60d'] += Number(d.principal);
-    else if (days <= 90) ageBuckets['61-90d'] += Number(d.principal);
-    else if (days <= 120) ageBuckets['91-120d'] += Number(d.principal);
-    else ageBuckets['>120d'] += Number(d.principal);
+    if (days <= 30) ageBuckets['0-30d'] = round2(ageBuckets['0-30d'] + remBal);
+    else if (days <= 60) ageBuckets['31-60d'] = round2(ageBuckets['31-60d'] + remBal);
+    else if (days <= 90) ageBuckets['61-90d'] = round2(ageBuckets['61-90d'] + remBal);
+    else if (days <= 120) ageBuckets['91-120d'] = round2(ageBuckets['91-120d'] + remBal);
+    else ageBuckets['>120d'] = round2(ageBuckets['>120d'] + remBal);
   }
 
   const maxBucketVal = Math.max(...Object.values(ageBuckets), 1000);

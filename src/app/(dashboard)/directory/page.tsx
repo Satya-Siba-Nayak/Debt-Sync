@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment } from '@/lib/types/database';
-import { calculateDebtBalance } from '@/lib/utils/interest';
+import { calculateDebtBalance, isDebtPurgedByAdmin } from '@/lib/utils/interest';
 import { formatCurrency } from '@/lib/utils/currency';
 import { PersonCard, PersonSummary } from '@/components/directory/PersonCard';
 import { AddPersonModal } from '@/components/directory/AddPersonModal';
@@ -51,15 +51,15 @@ export default function PeopleDirectoryPage() {
           .from('contacts')
           .select(`
             contact_id, nickname,
-            profile:profiles!contacts_contact_id_fkey(id, email, full_name, phone, is_shadow, secondary_emails, avatar_url)
+            profile:profiles!contacts_contact_id_fkey(id, email, full_name, phone, is_shadow, is_purged, secondary_emails, avatar_url)
           `)
           .eq('owner_id', user.id),
         supabase
           .from('debts')
           .select(`
             *,
-            lender:profiles!debts_lender_id_fkey(id, email, full_name, phone, is_shadow, secondary_emails, avatar_url),
-            borrower:profiles!debts_borrower_id_fkey(id, email, full_name, phone, is_shadow, secondary_emails, avatar_url)
+            lender:profiles!debts_lender_id_fkey(id, email, full_name, phone, is_shadow, is_purged, secondary_emails, avatar_url),
+            borrower:profiles!debts_borrower_id_fkey(id, email, full_name, phone, is_shadow, is_purged, secondary_emails, avatar_url)
           `)
           .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`),
       ]);
@@ -82,10 +82,16 @@ export default function PeopleDirectoryPage() {
       // Collect all counterparties (from contacts + from debts)
       const peopleMap = new Map<string, PersonSummary>();
 
-      // Initialize from contacts
+      // Initialize from contacts (excluding purged / system tombstone accounts)
       if (contactRows) {
         for (const c of contactRows as any[]) {
-          if (!c.profile) continue;
+          if (
+            !c.profile ||
+            c.contact_id === '00000000-0000-0000-0000-000000000001' ||
+            Boolean(c.profile.is_purged)
+          ) {
+            continue;
+          }
           const contactCreated = c.created_at ? new Date(c.created_at).getTime() : 0;
           peopleMap.set(c.contact_id, {
             id: c.contact_id,
@@ -107,14 +113,20 @@ export default function PeopleDirectoryPage() {
 
       // Add counterparties from debts and calculate balances
       for (const d of allDebts) {
-        // Privacy: Declined requests must NEVER add counterparties to directory
-        if (d.status === 'declined') {
+        // Privacy & Integrity: Declined or purged requests must NEVER add counterparties to directory
+        if (d.status === 'declined' || isDebtPurgedByAdmin(d)) {
           continue;
         }
 
         const isLender = d.lender_id === user.id;
         const otherParty = isLender ? d.borrower : d.lender;
-        if (!otherParty) continue;
+        if (
+          !otherParty ||
+          otherParty.id === '00000000-0000-0000-0000-000000000001' ||
+          Boolean((otherParty as any).is_purged)
+        ) {
+          continue;
+        }
 
         if (!peopleMap.has(otherParty.id)) {
           peopleMap.set(otherParty.id, {

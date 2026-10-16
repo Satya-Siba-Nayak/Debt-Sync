@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment } from '@/lib/types/database';
-import { calculateDebtBalance, calculatePortfolioAccrualRates, round2, sortDebtsActiveFirst } from '@/lib/utils/interest';
+import { calculateDebtBalance, calculatePortfolioAccrualRates, round2, sortDebtsActiveFirst, isDebtPurgedByAdmin } from '@/lib/utils/interest';
 import { BalanceCards } from '@/components/dashboard/BalanceCards';
 import { LiveTicker } from '@/components/dashboard/LiveTicker';
 import { CashflowChart } from '@/components/dashboard/CashflowChart';
@@ -32,6 +32,24 @@ export default function GlobalDashboardPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(initialCache?.userId || null);
   const [selectedDebtForEdit, setSelectedDebtForEdit] = useState<Debt | null>(null);
   const [selectedDebtForDetail, setSelectedDebtForDetail] = useState<Debt | null>(null);
+  const [showFlowGuide, setShowFlowGuide] = useState(false);
+
+  useEffect(() => {
+    try {
+      const dismissed = localStorage.getItem('debtsync_flow_guide_dismissed');
+      if (!dismissed) {
+        setShowFlowGuide(true);
+      }
+    } catch {}
+  }, []);
+
+  const toggleFlowGuide = (next: boolean) => {
+    setShowFlowGuide(next);
+    try {
+      if (!next) localStorage.setItem('debtsync_flow_guide_dismissed', 'true');
+      else localStorage.removeItem('debtsync_flow_guide_dismissed');
+    } catch {}
+  };
 
   const initialStats = initialCache && initialCache.userId
     ? computeDashboardStats(initialCache.debts, initialCache.payments, initialCache.userId)
@@ -210,8 +228,24 @@ export default function GlobalDashboardPage() {
   );
 
   const incomingPendingDebts = visibleDebts.filter(
-    (d) => d.status === 'pending' && d.created_by !== currentUserId
+    (d) => d.status === 'pending' && d.created_by !== currentUserId && !isDebtPurgedByAdmin(d)
   );
+
+  const debtsWithUnverifiedRepayments = React.useMemo(() => {
+    if (!currentUserId) return [];
+    return visibleDebts
+      .filter((d) => d.status === 'active' && d.lender_id === currentUserId && !isDebtPurgedByAdmin(d))
+      .map((d) => {
+        const unverified = payments.filter(
+          (p) =>
+            p.debt_id === d.id &&
+            !p.is_verified &&
+            !(typeof p.note === 'string' && p.note.includes('[DISPUTED]'))
+        );
+        return { debt: d, unverifiedPayments: unverified };
+      })
+      .filter((item) => item.unverifiedPayments.length > 0);
+  }, [visibleDebts, payments, currentUserId]);
 
   const sortedDebts = React.useMemo(() => sortDebtsActiveFirst(visibleDebts), [visibleDebts]);
 
@@ -339,6 +373,162 @@ export default function GlobalDashboardPage() {
         </section>
       )}
 
+      {/* Repayments Awaiting Lender Verification Alert */}
+      {debtsWithUnverifiedRepayments.length > 0 && (
+        <section className="bg-emerald-500/10 border border-emerald-500/30 dark:bg-emerald-950/20 rounded-2xl p-5 md:p-6 space-y-3.5 animate-in fade-in duration-300">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 font-bold text-sm">
+              <span className="material-symbols-outlined text-[20px]">verified</span>
+              <span>Repayments Awaiting Your Verification</span>
+            </div>
+            <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-800 dark:text-emerald-300">
+              {debtsWithUnverifiedRepayments.reduce((acc, item) => acc + item.unverifiedPayments.length, 0)} Payment(s) Logged
+            </span>
+          </div>
+          <p className="text-xs font-mono text-[var(--on-surface-variant)]">
+            A borrower logged a repayment toward your loan. Confirm receipt in your bank/UPI app and verify below to deduct the balance.
+          </p>
+
+          <div className="space-y-2.5">
+            {debtsWithUnverifiedRepayments.map(({ debt: d, unverifiedPayments }) => {
+              const borrower = d.borrower;
+              const name = borrower?.full_name || borrower?.email || 'Borrower';
+              const totalClaimed = unverifiedPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+              const latestPayment = unverifiedPayments[0];
+
+              return (
+                <div
+                  key={d.id}
+                  onClick={() => setSelectedDebtForDetail(d)}
+                  className="bg-[var(--surface-container-lowest)] hover:bg-[var(--surface-container-low)] p-4 rounded-xl border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center gap-3">
+                    <Avatar src={borrower?.avatar_url} name={name} size="md" />
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-heading font-bold text-sm text-[var(--on-surface)]">{name}</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                          Sent {formatCurrency(totalClaimed, d.currency || currency)}
+                        </span>
+                      </div>
+                      <p className="font-mono text-xs text-[var(--on-surface-variant)] mt-0.5">
+                        Original Loan: {formatCurrency(d.principal, d.currency || currency)}
+                        {latestPayment?.note ? ` • Note: "${latestPayment.note}"` : ''}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 self-end sm:self-auto" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDebtForDetail(d)}
+                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs font-bold transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">fact_check</span>
+                      <span>Review &amp; Verify</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* Interactive 4-Stage Bilateral Workflow Guide */}
+      {(showFlowGuide || (!loading && debts.length === 0)) && (
+        <section className="bg-[var(--surface-container-lowest)] rounded-2xl p-5 md:p-6 border border-[var(--primary)]/25 shadow-xs relative overflow-hidden">
+          <div className="flex items-start justify-between gap-4 mb-4">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-[var(--primary)]/15 text-[var(--primary)] flex items-center justify-center shrink-0">
+                <span className="material-symbols-outlined text-[18px]">route</span>
+              </div>
+              <div>
+                <h3 className="font-heading text-sm md:text-base font-bold text-[var(--on-surface)]">
+                  How DebtSync Bilateral Ledger Works
+                </h3>
+                <p className="font-mono text-[11px] text-[var(--on-surface-variant)]">
+                  Zero-dispute peer-to-peer agreements in 4 transparent steps
+                </p>
+              </div>
+            </div>
+            {debts.length > 0 && (
+              <button
+                type="button"
+                onClick={() => toggleFlowGuide(false)}
+                className="px-2.5 py-1 rounded-lg text-[11px] font-mono text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors flex items-center gap-1 cursor-pointer shrink-0"
+                title="Hide workflow guide"
+              >
+                <span>Got it</span>
+                <span className="material-symbols-outlined text-[14px]">close</span>
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="p-3.5 rounded-xl bg-[var(--surface-container-low)]/70 border border-[var(--outline-variant)]/20 flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                  STEP 1 • PROPOSE
+                </span>
+                <span className="material-symbols-outlined text-[18px] text-amber-500">post_add</span>
+              </div>
+              <p className="font-heading font-bold text-xs text-[var(--on-surface)] mt-0.5">
+                Log Loan or Split Bill
+              </p>
+              <p className="font-mono text-[11px] text-[var(--on-surface-variant)] leading-relaxed">
+                Tap <strong>+ New Transaction</strong> to record a loan, borrowing, or multi-person split bill. It starts as <strong>Pending</strong>.
+              </p>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-[var(--surface-container-low)]/70 border border-[var(--outline-variant)]/20 flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-500/15 text-blue-600 dark:text-blue-400">
+                  STEP 2 • BILATERAL LOCK
+                </span>
+                <span className="material-symbols-outlined text-[18px] text-blue-500">handshake</span>
+              </div>
+              <p className="font-heading font-bold text-xs text-[var(--on-surface)] mt-0.5">
+                Counterparty Accepts
+              </p>
+              <p className="font-mono text-[11px] text-[var(--on-surface-variant)] leading-relaxed">
+                The other party reviews and clicks <strong>Accept</strong>. Once accepted, terms lock in as <strong>Active</strong> and cannot be unilaterally altered.
+              </p>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-[var(--surface-container-low)]/70 border border-[var(--outline-variant)]/20 flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-purple-500/15 text-purple-600 dark:text-purple-400">
+                  STEP 3 • REPAY
+                </span>
+                <span className="material-symbols-outlined text-[18px] text-purple-500">qr_code_2</span>
+              </div>
+              <p className="font-heading font-bold text-xs text-[var(--on-surface)] mt-0.5">
+                Pay via Direct UPI or Cash
+              </p>
+              <p className="font-mono text-[11px] text-[var(--on-surface-variant)] leading-relaxed">
+                Borrower pays directly to the lender&apos;s UPI ID / QR code (0% platform fees) and logs the repayment in the ledger.
+              </p>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-[var(--surface-container-low)]/70 border border-[var(--outline-variant)]/20 flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                  STEP 4 • VERIFY &amp; SETTLE
+                </span>
+                <span className="material-symbols-outlined text-[18px] text-emerald-500">verified</span>
+              </div>
+              <p className="font-heading font-bold text-xs text-[var(--on-surface)] mt-0.5">
+                Lender Verifies Receipt
+              </p>
+              <p className="font-mono text-[11px] text-[var(--on-surface-variant)] leading-relaxed">
+                Lender confirms bank receipt with 1 click. The balance updates automatically and marks the contract <strong>Settled</strong> at ₹0.
+              </p>
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* 1. Top Bento Summary Grid */}
       {loading && debts.length === 0 ? (
         <SkeletonBalanceCards />
@@ -378,17 +568,27 @@ export default function GlobalDashboardPage() {
 
       {/* 3. Recent Activity & Active Ledgers Overview */}
       <section className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 md:p-8 border border-[var(--outline-variant)]/30 shadow-sm">
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex justify-between items-center mb-6 flex-wrap gap-2">
           <div>
             <h3 className="font-heading text-lg md:text-xl font-bold text-[var(--on-surface)]">
               Active Transactions
             </h3>
             <p className="font-mono text-xs text-[var(--on-surface-variant)] mt-0.5">
-              Recent micro-loans and peer obligations
+              Recent micro-loans and peer obligations — click any row to inspect, repay, or send reminders
             </p>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-3">
+            {!showFlowGuide && debts.length > 0 && (
+              <button
+                type="button"
+                onClick={() => toggleFlowGuide(true)}
+                className="px-2.5 py-1 rounded-lg border border-[var(--outline-variant)]/30 text-[11px] font-mono font-bold text-[var(--on-surface-variant)] hover:text-[var(--primary)] hover:border-[var(--primary)]/40 transition-colors flex items-center gap-1 cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[14px]">help</span>
+                <span>How It Works</span>
+              </button>
+            )}
             <Link
               href="/transactions"
               className="text-xs font-mono font-bold text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] hover:underline flex items-center gap-1"
@@ -420,12 +620,12 @@ export default function GlobalDashboardPage() {
               {sortedDebts.slice(0, 8).map((d) => {
                 const isLender = d.lender_id === currentUserId;
                 const otherPerson = isLender ? d.borrower : d.lender;
-                const isPurged =
-                  d.status === 'purged' ||
-                  (typeof d.notes === 'string' && d.notes.includes('[TRANSACTION PURGED BY ADMIN')) ||
-                  Boolean((otherPerson as any)?.is_purged);
+                const isPurged = isDebtPurgedByAdmin(d);
                 const name = otherPerson?.full_name || otherPerson?.email || (isPurged ? 'Purged Account' : 'Unknown');
                 const debtPayments = payments.filter((p) => p.debt_id === d.id);
+                const unverifiedCount = debtPayments.filter(
+                  (p) => !p.is_verified && !(typeof p.note === 'string' && p.note.includes('[DISPUTED]'))
+                ).length;
                 const calc = calculateDebtBalance(d, debtPayments);
                 const dueDateInfo = getDueDateInfo(d.due_date, d.status);
                 const split = parseSplitDetails(d);
@@ -512,6 +712,20 @@ export default function GlobalDashboardPage() {
                               {dueDateInfo.isOverdue ? 'warning' : 'event'}
                             </span>
                             {dueDateInfo.text}
+                          </span>
+                        )}
+                        {unverifiedCount > 0 && d.status === 'active' && !isPurged && (
+                          <span
+                            className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-bold border flex items-center gap-1 ${
+                              isLender
+                                ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 animate-pulse'
+                                : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                            }`}
+                          >
+                            <span className="material-symbols-outlined text-[11px]">
+                              {isLender ? 'fact_check' : 'hourglass_top'}
+                            </span>
+                            <span>{isLender ? 'Verify Payment' : 'Payment Pending Check'}</span>
                           </span>
                         )}
                       </div>
@@ -668,12 +882,12 @@ export default function GlobalDashboardPage() {
                   {sortedDebts.slice(0, 8).map((d) => {
                     const isLender = d.lender_id === currentUserId;
                     const otherPerson = isLender ? d.borrower : d.lender;
-                    const isPurged =
-                      d.status === 'purged' ||
-                      (typeof d.notes === 'string' && d.notes.includes('[TRANSACTION PURGED BY ADMIN')) ||
-                      Boolean((otherPerson as any)?.is_purged);
+                    const isPurged = isDebtPurgedByAdmin(d);
                     const name = otherPerson?.full_name || otherPerson?.email || (isPurged ? 'Purged Account' : 'Unknown');
                     const debtPayments = payments.filter((p) => p.debt_id === d.id);
+                    const unverifiedCount = debtPayments.filter(
+                      (p) => !p.is_verified && !(typeof p.note === 'string' && p.note.includes('[DISPUTED]'))
+                    ).length;
                     const calc = calculateDebtBalance(d, debtPayments);
                     const dueDateInfo = getDueDateInfo(d.due_date, d.status);
                     const split = parseSplitDetails(d);
@@ -817,6 +1031,20 @@ export default function GlobalDashboardPage() {
                                   {dueDateInfo.isOverdue ? 'warning' : 'event'}
                                 </span>
                                 {dueDateInfo.text}
+                              </span>
+                            )}
+                            {unverifiedCount > 0 && d.status === 'active' && !isPurged && (
+                              <span
+                                className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-bold border flex items-center gap-1 ${
+                                  isLender
+                                    ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 animate-pulse'
+                                    : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                                }`}
+                              >
+                                <span className="material-symbols-outlined text-[11px]">
+                                  {isLender ? 'fact_check' : 'hourglass_top'}
+                                </span>
+                                <span>{isLender ? 'Verify Payment' : 'Payment Pending Check'}</span>
                               </span>
                             )}
                           </div>
