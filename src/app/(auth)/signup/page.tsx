@@ -23,10 +23,16 @@ function maskEmailAddress(email?: string | null): string {
 }
 
 function SignupContent() {
-  const [email, setEmail] = useState('');
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextUrl = searchParams.get('next') || '/';
+  const initialEmail = searchParams.get('email') || '';
+  const initialPhone = searchParams.get('phone') || '';
+
+  const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
-  const [phone, setPhone] = useState('');
+  const [phone, setPhone] = useState(initialPhone);
   const [showPassword, setShowPassword] = useState(false);
   const [notifyEmail, setNotifyEmail] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -39,9 +45,6 @@ function SignupContent() {
   } | null>(null);
   const [resolutionMode, setResolutionMode] = useState<'update' | 'secondary_keep' | 'primary_keep'>('update');
 
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const nextUrl = searchParams.get('next') || '/';
   const supabase = createClient();
 
   const executeSignup = async (ghostOptions?: ClaimProfileOptions) => {

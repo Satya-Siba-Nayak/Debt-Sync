@@ -74,7 +74,13 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       const user = await getCurrentUserFast(supabase);
       if (!user) {
         clearAuthSessionData();
-        router.replace('/login');
+        const currentPath = typeof window !== 'undefined'
+          ? window.location.pathname + window.location.search
+          : '';
+        const nextQuery = currentPath && currentPath !== '/'
+          ? `?next=${encodeURIComponent(currentPath)}`
+          : '';
+        router.replace(`/login${nextQuery}`);
         return;
       }
 

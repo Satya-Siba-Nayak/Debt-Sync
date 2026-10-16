@@ -148,7 +148,7 @@ function buildMessage(
         amountLine: debtAmount,
         url: debtUrl,
         tag: `debt-${tagBase}-created`,
-        cta: 'Review Agreement',
+        cta: recipientIsGhost ? 'Sign Up to Review & Accept' : 'Review Agreement',
       };
     }
     case 'repayment_reported':
@@ -227,11 +227,13 @@ function buildMessage(
     case 'debt_pending_reminder':
       return {
         title: `Reminder: Pending agreement from ${actorName}`,
-        body: `${actorName} sent a friendly reminder to review and respond to the pending ${debtAmount} agreement on your shared ledger.`,
+        body: recipientIsGhost
+          ? `${actorName} sent a friendly reminder to review and respond to the pending ${debtAmount} agreement on DebtSync.`
+          : `${actorName} sent a friendly reminder to review and respond to the pending ${debtAmount} agreement on your shared ledger.`,
         amountLine: debtAmount,
         url: debtUrl,
         tag: `debt-${tagBase}-reminder`,
-        cta: 'Review Agreement',
+        cta: recipientIsGhost ? 'Sign Up to Review & Accept' : 'Review Agreement',
       };
     default:
       return {
@@ -248,8 +250,11 @@ function buildEmailHtml(
   name: string,
   msg: Message,
   ghostNote: string,
-  unsubUrl: string
+  unsubUrl: string,
+  ghostInfo?: { email: string; signupUrl: string; loginUrl: string } | null
 ): string {
+  const effectiveCtaUrl = ghostInfo ? ghostInfo.signupUrl : msg.url;
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -317,7 +322,31 @@ function buildEmailHtml(
             }
 
             ${
-              ghostNote
+              ghostInfo
+                ? `<div style="background-color:#101a28;border:1px solid #00818d;border-radius:14px;padding:20px;margin:20px 0;text-align:left;">
+              <div style="font-size:14px;font-weight:700;color:#67e8f9;margin-bottom:10px;">
+                ⚡ Action Required: Create Free Account to Accept
+              </div>
+              <p style="margin:0 0 10px;font-size:13px;line-height:1.6;color:#cbd5e1;">
+                You don&apos;t have an active DebtSync account yet. This transaction agreement is securely held for <strong style="color:#ffffff;background-color:#070d17;padding:2px 8px;border-radius:6px;border:1px solid #1f2d42;font-family:monospace;">${escapeHtml(ghostInfo.email)}</strong>.
+              </p>
+              <div style="background-color:#070d17;border-radius:10px;padding:12px 14px;margin-bottom:14px;border:1px solid #1c283a;font-size:13px;line-height:1.6;color:#e2e8f0;">
+                <strong style="color:#ffffff;">How to claim and accept this agreement:</strong>
+                <ol style="margin:6px 0 0;padding-left:20px;color:#94a3b8;">
+                  <li style="margin-bottom:4px;"><strong style="color:#ffffff;">Sign up</strong> with this exact email (<span style="color:#22d3ee;">${escapeHtml(ghostInfo.email)}</span>).</li>
+                  <li style="margin-bottom:0;"><strong style="color:#ffffff;">Log in</strong> to view your shared ledger and tap <strong style="color:#34d399;">Accept Agreement</strong>.</li>
+                </ol>
+              </div>
+              <div style="text-align:center;margin-top:14px;">
+                <a href="${escapeHtml(ghostInfo.signupUrl)}" style="display:inline-block;background:linear-gradient(135deg,#00818d 0%,#009aa8 100%);background-color:#00818d;color:#ffffff !important;text-decoration:none;font-weight:700;font-size:13px;padding:11px 24px;border-radius:10px;box-shadow:0 4px 12px rgba(0,129,141,0.35);">
+                  Sign Up with ${escapeHtml(ghostInfo.email)} &rarr;
+                </a>
+                <div style="margin-top:10px;font-size:12px;color:#94a3b8;">
+                  Already registered? <a href="${escapeHtml(ghostInfo.loginUrl)}" style="color:#38bdf8;text-decoration:underline;font-weight:600;">Log in to accept agreement</a>
+                </div>
+              </div>
+            </div>`
+                : ghostNote
                 ? `<div style="background-color:#202018;border:1px solid #6b5314;border-radius:12px;padding:14px 16px;margin:18px 0;color:#fde047;font-size:13px;line-height:1.55;">
               ${escapeHtml(ghostNote)}
             </div>`
@@ -326,7 +355,7 @@ function buildEmailHtml(
 
             <!-- CTA Button -->
             <div style="text-align:center;margin:26px 0 12px;">
-              <a href="${escapeHtml(msg.url)}" style="display:inline-block;background:linear-gradient(135deg,#00818d 0%,#009aa8 100%);background-color:#00818d;color:#ffffff !important;text-decoration:none;font-weight:700;font-size:14px;padding:13px 30px;border-radius:12px;box-shadow:0 4px 16px rgba(0,129,141,0.4);letter-spacing:0.3px;">${escapeHtml(msg.cta)} &rarr;</a>
+              <a href="${escapeHtml(effectiveCtaUrl)}" style="display:inline-block;background:linear-gradient(135deg,#00818d 0%,#009aa8 100%);background-color:#00818d;color:#ffffff !important;text-decoration:none;font-weight:700;font-size:14px;padding:13px 30px;border-radius:12px;box-shadow:0 4px 16px rgba(0,129,141,0.4);letter-spacing:0.3px;">${escapeHtml(msg.cta)} &rarr;</a>
             </div>
           </div>
 
@@ -406,6 +435,12 @@ async function sendEmail(to: Profile, msg: Message, ghost: boolean, event: strin
     ? `You don't have a DebtSync account yet. Sign up with ${to.email} and this record will appear in your ledger automatically.`
     : '';
 
+  const ghostInfo = ghost && to.email ? {
+    email: to.email,
+    signupUrl: `${APP_URL}/signup?email=${encodeURIComponent(to.email)}&next=${encodeURIComponent(msg.url)}`,
+    loginUrl: `${APP_URL}/login?email=${encodeURIComponent(to.email)}&next=${encodeURIComponent(msg.url)}`,
+  } : null;
+
   const unsubUrl = await createUnsubscribeUrl(to.id);
 
   let cleanSenderEmail = EMAIL_FROM.trim();
@@ -427,7 +462,7 @@ async function sendEmail(to: Profile, msg: Message, ghost: boolean, event: strin
       sender: { name: cleanSenderName, email: cleanSenderEmail },
       to: [{ email: to.email, name: displayName(to) }],
       subject: msg.title,
-      htmlContent: buildEmailHtml(displayName(to), msg, ghostNote, unsubUrl),
+      htmlContent: buildEmailHtml(displayName(to), msg, ghostNote, unsubUrl, ghostInfo),
       headers: {
         'List-Unsubscribe': `<${unsubUrl}>`,
         'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',

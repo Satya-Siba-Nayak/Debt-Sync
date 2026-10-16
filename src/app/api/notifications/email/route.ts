@@ -103,7 +103,36 @@ export async function POST(request: NextRequest) {
       description = `<strong>${senderName}</strong> updated a shared transaction agreement for <strong>${formattedAmount}</strong>.`;
     }
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://debtsync.com';
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://debtsync.com').replace(/\/$/, '');
+    const targetNext = body.debtId ? `/transactions?debt=${body.debtId}` : '/transactions';
+    const signupUrl = `${appUrl}/signup?email=${encodeURIComponent(cleanEmail)}&next=${encodeURIComponent(targetNext)}`;
+    const loginUrl = `${appUrl}/login?email=${encodeURIComponent(cleanEmail)}&next=${encodeURIComponent(targetNext)}`;
+    let ctaUrl = appUrl;
+
+    if (type === 'ghost_account_invite') {
+      subject = `${senderName} logged a transaction of ${formattedAmount} with you on DebtSync`;
+      headline = 'New Peer Ledger Agreement Recorded';
+      description = `<strong>${senderName}</strong> recorded a transaction agreement of <strong>${formattedAmount}</strong> with you. A ledger profile has been reserved for you to review, track live interest, and verify payments.`;
+      ctaText = 'Sign Up to Review & Accept';
+      ctaUrl = signupUrl;
+    } else if (type === 'payment_request') {
+      subject = `Repayment of ${formattedAmount} reported by ${senderName}`;
+      headline = 'Payment Verification Request';
+      description = `<strong>${senderName}</strong> has reported a repayment of <strong>${formattedAmount}</strong> on your shared ledger. Please review and verify the receipt.`;
+      ctaText = 'Verify Repayment Receipt';
+      ctaUrl = body.debtId ? `${appUrl}/transactions?debt=${body.debtId}` : `${appUrl}/transactions`;
+    } else if (type === 'split_bill_request') {
+      subject = `${senderName} split an expense with you: ${formattedAmount}`;
+      headline = 'Group Expense Split Request';
+      description = `<strong>${senderName}</strong> recorded a group expense split on DebtSync. Your share is <strong>${formattedAmount}</strong>.`;
+      ctaText = 'Review & Accept Split';
+      ctaUrl = body.debtId ? `${appUrl}/transactions?debt=${body.debtId}` : `${appUrl}/transactions`;
+    } else {
+      subject = `Ledger update of ${formattedAmount} from ${senderName}`;
+      headline = 'Ledger Agreement Update';
+      description = `<strong>${senderName}</strong> updated a shared transaction agreement for <strong>${formattedAmount}</strong>.`;
+      ctaUrl = body.debtId ? `${appUrl}/transactions?debt=${body.debtId}` : `${appUrl}/transactions`;
+    }
 
     const htmlBody = `
       <!DOCTYPE html>
@@ -144,8 +173,36 @@ export async function POST(request: NextRequest) {
                 ${notes ? `<div style="margin-top:10px; font-size:12px; color:#94a3b8; font-style:italic;">"${notes}"</div>` : ''}
               </div>
 
+              ${
+                type === 'ghost_account_invite'
+                  ? `<div style="background-color:#101a28;border:1px solid #00818d;border-radius:14px;padding:20px;margin:20px 0;text-align:left;">
+                <div style="font-size:14px;font-weight:700;color:#67e8f9;margin-bottom:10px;">
+                  ⚡ Action Required: Create Free Account to Accept
+                </div>
+                <p style="margin:0 0 10px;font-size:13px;line-height:1.6;color:#cbd5e1;">
+                  You don&apos;t have an active DebtSync account yet. This transaction agreement is securely held for <strong style="color:#ffffff;background-color:#070d17;padding:2px 8px;border-radius:6px;border:1px solid #1f2d42;font-family:monospace;">${cleanEmail}</strong>.
+                </p>
+                <div style="background-color:#070d17;border-radius:10px;padding:12px 14px;margin-bottom:14px;border:1px solid #1c283a;font-size:13px;line-height:1.6;color:#e2e8f0;">
+                  <strong style="color:#ffffff;">How to claim and accept this agreement:</strong>
+                  <ol style="margin:6px 0 0;padding-left:20px;color:#94a3b8;">
+                    <li style="margin-bottom:4px;"><strong style="color:#ffffff;">Sign up</strong> with this exact email (<span style="color:#22d3ee;">${cleanEmail}</span>).</li>
+                    <li style="margin-bottom:0;"><strong style="color:#ffffff;">Log in</strong> to view your shared ledger and tap <strong style="color:#34d399;">Accept Agreement</strong>.</li>
+                  </ol>
+                </div>
+                <div style="text-align:center;margin-top:14px;">
+                  <a href="${signupUrl}" style="display:inline-block;background:linear-gradient(135deg,#00818d 0%,#009aa8 100%);background-color:#00818d;color:#ffffff !important;text-decoration:none;font-weight:700;font-size:13px;padding:11px 24px;border-radius:10px;box-shadow:0 4px 12px rgba(0,129,141,0.35);">
+                    Sign Up with ${cleanEmail} &rarr;
+                  </a>
+                  <div style="margin-top:10px;font-size:12px;color:#94a3b8;">
+                    Already registered? <a href="${loginUrl}" style="color:#38bdf8;text-decoration:underline;font-weight:600;">Log in to accept agreement</a>
+                  </div>
+                </div>
+              </div>`
+                  : ''
+              }
+
               <div style="text-align: center; margin: 26px 0 10px;">
-                <a href="${appUrl}" class="btn" style="color:#ffffff !important;">${ctaText} &rarr;</a>
+                <a href="${ctaUrl}" class="btn" style="color:#ffffff !important;">${ctaText} &rarr;</a>
               </div>
             </div>
             <div class="footer" style="padding:20px 24px; font-size:11px; color:#7e8b9d; text-align:center; border-top:1px solid #1c283a; background-color:#0a101b;">

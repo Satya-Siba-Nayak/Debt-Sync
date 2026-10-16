@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment } from '@/lib/types/database';
@@ -37,14 +37,53 @@ function TransactionsPageContent() {
   const [selectedDebtForDetail, setSelectedDebtForDetail] = useState<Debt | null>(null);
   const [selectedDebtForEdit, setSelectedDebtForEdit] = useState<Debt | null>(null);
 
+  const handledDeepLinkRef = useRef<string | null>(null);
+  const dismissedDeepLinkRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (deepLinkedDebtId && debts.length > 0 && !selectedDebtForDetail) {
+    if (!deepLinkedDebtId) return;
+    if (handledDeepLinkRef.current === deepLinkedDebtId || dismissedDeepLinkRef.current === deepLinkedDebtId) return;
+
+    if (debts.length > 0) {
       const target = debts.find((d) => d.id === deepLinkedDebtId);
       if (target) {
+        handledDeepLinkRef.current = deepLinkedDebtId;
         setSelectedDebtForDetail(target);
+        return;
       }
     }
-  }, [deepLinkedDebtId, debts, selectedDebtForDetail]);
+
+    // Fallback: fetch individual debt by ID if not yet in cache or newly assigned
+    if (!loading && handledDeepLinkRef.current !== deepLinkedDebtId) {
+      handledDeepLinkRef.current = deepLinkedDebtId;
+      supabase
+        .from('debts')
+        .select(`
+          *,
+          lender:profiles!debts_lender_id_fkey(id, email, full_name, avatar_url),
+          borrower:profiles!debts_borrower_id_fkey(id, email, full_name, avatar_url)
+        `)
+        .eq('id', deepLinkedDebtId)
+        .single()
+        .then((res: any) => {
+          if (res?.data && dismissedDeepLinkRef.current !== deepLinkedDebtId) {
+            setSelectedDebtForDetail(res.data as Debt);
+          }
+        });
+    }
+  }, [deepLinkedDebtId, debts, loading, supabase]);
+
+  const handleCloseDetailModal = () => {
+    if (deepLinkedDebtId) {
+      dismissedDeepLinkRef.current = deepLinkedDebtId;
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('debt');
+        window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
+      }
+    }
+    setSelectedDebtForDetail(null);
+  };
 
   const fetchTransactions = useCallback(async () => {
     try {
@@ -912,7 +951,7 @@ function TransactionsPageContent() {
           debt={selectedDebtForDetail}
           currentUserId={currentUserId || ''}
           currency={currency}
-          onClose={() => setSelectedDebtForDetail(null)}
+          onClose={handleCloseDetailModal}
           onDebtUpdated={fetchTransactions}
         />
       )}

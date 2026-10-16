@@ -11,16 +11,18 @@ import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { BrandLogo } from '@/components/ui/BrandLogo';
 
 function LoginContent() {
-  const [authMode, setAuthMode] = useState<'password' | 'magic_link'>('password');
-  const [identifier, setIdentifier] = useState('');
-  const [primaryEmail, setPrimaryEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextUrl = searchParams.get('next') || '/';
+  const initialEmail = searchParams.get('email') || searchParams.get('identifier') || '';
   const isDeleted = searchParams.get('deleted') === 'true';
+
+  const [authMode, setAuthMode] = useState<'password' | 'magic_link'>('password');
+  const [identifier, setIdentifier] = useState(initialEmail);
+  const [primaryEmail, setPrimaryEmail] = useState(initialEmail);
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState(
     isDeleted ? 'Your DebtSync account and personal records have been permanently deleted.' : ''
   );
