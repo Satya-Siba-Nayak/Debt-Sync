@@ -231,7 +231,7 @@ function ShareTransactionContent() {
   const isParticipant = Boolean(
     debt &&
       currentUser &&
-      isUserParticipantInDebt(debt, currentUser, userProfile?.secondary_emails || [])
+      isUserParticipantInDebt(debt, currentUser, userProfile?.secondary_emails || []).isParticipant
   );
 
   const isDirectParty = Boolean(
@@ -554,20 +554,50 @@ function ShareTransactionContent() {
   const splitDetails = parseSplitDetails(debt);
   const cleanCreatorNote = getCleanDebtNotes(debt.notes);
 
+  const isPurged =
+    debt.status === 'purged' ||
+    debt.lender_id === '00000000-0000-0000-0000-000000000001' ||
+    debt.borrower_id === '00000000-0000-0000-0000-000000000001' ||
+    (typeof debt.notes === 'string' &&
+      (debt.notes.includes('[TRANSACTION PURGED BY ADMIN') ||
+        debt.notes.includes('[ADMIN_PURGED:'))) ||
+    Boolean(debt.lender?.is_purged) ||
+    Boolean(debt.borrower?.is_purged);
+
+  const formatPartyName = (name?: string | null, email?: string | null, fallback = 'Participant') => {
+    if (name) {
+      if (!isParticipant && name.includes('@')) return maskEmailAddress(name);
+      return name;
+    }
+    if (email) {
+      return isParticipant ? email : maskEmailAddress(email);
+    }
+    return fallback;
+  };
+
   const lenderName =
-    debt.lender?.full_name ||
-    (isParticipant ? debt.lender?.email : maskEmailAddress(debt.lender?.email)) ||
-    'Lender';
+    debt.lender_id === '00000000-0000-0000-0000-000000000001'
+      ? 'Purged Account'
+      : formatPartyName(debt.lender?.full_name, debt.lender?.email, 'Lender');
+
   const borrowerName =
-    debt.borrower?.full_name ||
-    (isParticipant ? debt.borrower?.email : maskEmailAddress(debt.borrower?.email)) ||
-    'Borrower';
-  const lenderEmailDisplay = isParticipant
-    ? debt.lender?.email
-    : maskEmailAddress(debt.lender?.email);
-  const borrowerEmailDisplay = isParticipant
-    ? debt.borrower?.email
-    : maskEmailAddress(debt.borrower?.email);
+    debt.borrower_id === '00000000-0000-0000-0000-000000000001'
+      ? 'Purged Account'
+      : formatPartyName(debt.borrower?.full_name, debt.borrower?.email, 'Borrower');
+
+  const lenderEmailDisplay =
+    debt.lender_id === '00000000-0000-0000-0000-000000000001'
+      ? 'purged-account@debtsync.local'
+      : isParticipant
+      ? debt.lender?.email
+      : maskEmailAddress(debt.lender?.email);
+
+  const borrowerEmailDisplay =
+    debt.borrower_id === '00000000-0000-0000-0000-000000000001'
+      ? 'purged-account@debtsync.local'
+      : isParticipant
+      ? debt.borrower?.email
+      : maskEmailAddress(debt.borrower?.email);
 
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const participantShareUrl = `${origin}/share?id=${debt.id}&mode=participants`;
@@ -576,12 +606,47 @@ function ShareTransactionContent() {
       ? `${origin}/share?id=${debt.id}&token=${shareMeta.globalToken}`
       : '';
 
+  useEffect(() => {
+    if (!debt) return;
+    const formattedAmt = formatCurrency(debt.principal, debtCurrency);
+    let statusText = 'Agreement';
+    if (isPurged) statusText = 'Purged by Admin';
+    else if (debt.status === 'settled' || calc.currentBalance <= 0) statusText = 'Settled';
+    else if (debt.status === 'pending') statusText = 'Pending';
+    else if (debt.status === 'active') statusText = 'Active';
+    document.title = `${formattedAmt} • ${statusText} — DebtSync`;
+  }, [debt, debtCurrency, isPurged, calc.currentBalance]);
+
   const copyLink = async (url: string, type: 'participant' | 'global') => {
     try {
       await navigator.clipboard.writeText(url);
       setCopiedType(type);
       setTimeout(() => setCopiedType(null), 2500);
     } catch (_) {}
+  };
+
+  const handleNativeShare = async (url: string, type: 'participant' | 'global') => {
+    if (!url) return;
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        const formattedAmt = formatCurrency(debt.principal, debtCurrency);
+        const shareTitle = splitDetails
+          ? `DebtSync Split Bill: ${splitDetails.title} (${formattedAmt})`
+          : `DebtSync Agreement (${formattedAmt} • ${isPurged ? 'Purged' : debt.status})`;
+        const shareText =
+          type === 'participant'
+            ? `View our transaction record on DebtSync (Restricted to participating members):`
+            : `View this shared transaction record on DebtSync (${formattedAmt} • ${isPurged ? 'Purged by Admin' : debt.status}):`;
+
+        await navigator.share({
+          title: shareTitle,
+          text: shareText,
+          url,
+        });
+        return;
+      } catch (_) {}
+    }
+    copyLink(url, type);
   };
 
   return (
@@ -660,6 +725,14 @@ function ShareTransactionContent() {
                     {copiedType === 'participant' ? 'Copied!' : 'Copy Participant Link'}
                   </span>
                 </button>
+                <button
+                  type="button"
+                  onClick={() => handleNativeShare(participantShareUrl, 'participant')}
+                  className="p-2 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container)] text-[var(--on-surface)] transition-colors cursor-pointer min-h-[38px] flex items-center justify-center"
+                  title="Share participant link via device share sheet"
+                >
+                  <span className="material-symbols-outlined text-[16px]">ios_share</span>
+                </button>
               </div>
             </div>
 
@@ -682,15 +755,28 @@ function ShareTransactionContent() {
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 shrink-0 flex-wrap">
                   {globalShareUrl && (
-                    <button
-                      type="button"
-                      onClick={() => copyLink(globalShareUrl, 'global')}
-                      className="py-1.5 px-2.5 rounded-lg bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/40 text-[var(--on-surface)] font-mono text-[10px] font-bold hover:bg-[var(--surface-container-highest)] cursor-pointer min-h-[34px]"
-                    >
-                      {copiedType === 'global' ? 'Copied!' : 'Copy Public Link'}
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => copyLink(globalShareUrl, 'global')}
+                        className="py-1.5 px-2.5 rounded-lg bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/40 text-[var(--on-surface)] font-mono text-[10px] font-bold hover:bg-[var(--surface-container-highest)] cursor-pointer min-h-[34px] flex items-center gap-1"
+                      >
+                        <span className="material-symbols-outlined text-[13px]">
+                          {copiedType === 'global' ? 'check' : 'content_copy'}
+                        </span>
+                        <span>{copiedType === 'global' ? 'Copied!' : 'Copy Public Link'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleNativeShare(globalShareUrl, 'global')}
+                        className="p-1.5 rounded-lg border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container-highest)] text-[var(--on-surface)] transition-colors cursor-pointer min-h-[34px] flex items-center justify-center"
+                        title="Share public link via Signal, WhatsApp, or device share sheet"
+                      >
+                        <span className="material-symbols-outlined text-[15px]">ios_share</span>
+                      </button>
+                    </>
                   )}
                   {isDirectParty && (
                     <button
@@ -760,15 +846,64 @@ function ShareTransactionContent() {
                 </p>
               </div>
             </div>
-            <Link
-              href={`/login?next=${encodeURIComponent(currentRelativeUrl)}`}
-              className="py-2 px-3 rounded-xl bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)]/40 font-mono text-[11px] font-bold text-[var(--on-surface)] hover:bg-[var(--surface-container)] shrink-0 self-start sm:self-center min-h-[38px] flex items-center gap-1.5"
-            >
-              <span className="material-symbols-outlined text-[14px] text-[var(--primary)]">
-                manage_accounts
+            <div className="flex items-center gap-2 shrink-0 self-start sm:self-center flex-wrap">
+              {globalShareUrl && (
+                <button
+                  type="button"
+                  onClick={() => handleNativeShare(globalShareUrl, 'global')}
+                  className="py-2 px-3 rounded-xl bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)]/40 font-mono text-[11px] font-bold text-[var(--on-surface)] hover:bg-[var(--surface-container)] min-h-[38px] flex items-center gap-1.5 cursor-pointer"
+                  title="Share link via Signal, WhatsApp, or Discord"
+                >
+                  <span className="material-symbols-outlined text-[14px]">share</span>
+                  <span>Share</span>
+                </button>
+              )}
+              <Link
+                href={`/login?next=${encodeURIComponent(currentRelativeUrl)}`}
+                className="py-2 px-3 rounded-xl bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)]/40 font-mono text-[11px] font-bold text-[var(--on-surface)] hover:bg-[var(--surface-container)] min-h-[38px] flex items-center gap-1.5"
+              >
+                <span className="material-symbols-outlined text-[14px] text-[var(--primary)]">
+                  manage_accounts
+                </span>
+                <span>Participant? Sign in</span>
+              </Link>
+            </div>
+          </div>
+        )}
+
+        {/* Administrative Purge Notification Banner */}
+        {isPurged && (
+          <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in duration-200">
+            <div className="flex items-start gap-2.5">
+              <span className="material-symbols-outlined text-red-500 text-[22px] mt-0.5 shrink-0">
+                admin_panel_settings
               </span>
-              <span>Participant? Sign in</span>
-            </Link>
+              <div>
+                <div className="font-heading font-bold text-sm text-red-700 dark:text-red-400 flex items-center gap-2">
+                  <span>(Transaction purged by admin)</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/20 text-red-700 dark:text-red-300 font-mono font-bold">
+                    Purged
+                  </span>
+                </div>
+                <p className="text-xs text-red-600/90 dark:text-red-300/90 mt-1 leading-relaxed">
+                  This transaction was purged by a DebtSync administrator due to counterparty account termination.
+                  If you have any problems or disputes regarding this record, please contact support at{' '}
+                  <a
+                    href={`mailto:support@satya-nayak.dev?subject=Support%20Inquiry%20-%20Purged%20Transaction%20${debt.id}`}
+                    className="font-bold underline text-red-800 dark:text-red-200 hover:opacity-80"
+                  >
+                    support@satya-nayak.dev
+                  </a>.
+                </p>
+              </div>
+            </div>
+            <a
+              href={`mailto:support@satya-nayak.dev?subject=Support%20Inquiry%20-%20Purged%20Transaction%20${debt.id}`}
+              className="px-3 py-1.5 rounded-lg border border-red-500/40 bg-red-500/15 text-red-700 dark:text-red-300 font-mono text-xs font-bold hover:bg-red-500/25 transition-colors shrink-0 flex items-center gap-1.5 self-start sm:self-center"
+            >
+              <span className="material-symbols-outlined text-[14px]">mail</span>
+              <span>Contact Support</span>
+            </a>
           </div>
         )}
 
@@ -789,7 +924,9 @@ function ShareTransactionContent() {
             <div className="flex items-center gap-2">
               <span
                 className={`px-2.5 py-1 rounded-md font-mono text-[10px] uppercase font-bold ${
-                  debt.status === 'active'
+                  isPurged
+                    ? 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/25'
+                    : debt.status === 'active'
                     ? 'bg-[var(--primary)]/10 text-[var(--primary)]'
                     : debt.status === 'pending'
                     ? 'bg-amber-500/10 text-amber-500'
@@ -798,7 +935,7 @@ function ShareTransactionContent() {
                     : 'bg-red-500/10 text-red-500'
                 }`}
               >
-                {debt.status}
+                {isPurged ? '(Transaction purged by admin)' : debt.status}
               </span>
             </div>
           </div>
@@ -870,7 +1007,13 @@ function ShareTransactionContent() {
                 Remaining Balance
               </div>
               <div className="font-numeric-ticker text-base font-bold text-[var(--primary)] mt-1">
-                {formatCurrency(calc.currentBalance, debtCurrency)}
+                {isPurged ? (
+                  <span className="text-red-500 line-through text-sm font-mono">Purged by Admin</span>
+                ) : debt.status === 'declined' ? (
+                  <span className="text-red-500 line-through text-sm font-mono">Void</span>
+                ) : (
+                  formatCurrency(calc.currentBalance, debtCurrency)
+                )}
               </div>
             </div>
           </div>

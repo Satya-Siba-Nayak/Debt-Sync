@@ -395,7 +395,7 @@ BEGIN
 
     -- Clean up any contact_requests referencing the ghost profile
     DELETE FROM public.contact_requests
-    WHERE sender_id = v_ghost.id OR recipient_id = v_ghost.id;
+    WHERE sender_id = v_ghost.id OR receiver_id = v_ghost.id;
 
     -- Collect ghost email if it was a real email and differs from p_user_email
     IF v_ghost.email IS NOT NULL
@@ -435,30 +435,42 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.resolve_ghost_profile_by_phone(TEXT, UUID, TEXT, BOOLEAN) TO authenticated;
 
--- 5. Harden admin_delete_user RPC (Clean all FK references so purge never fails)
-CREATE OR REPLACE FUNCTION public.admin_delete_user(target_user_id UUID)
-RETURNS VOID
+-- 5. Harden admin_delete_user RPC (Clean all FK references and mark counterparty debts as purged)
+DROP FUNCTION IF EXISTS public.admin_delete_user(UUID);
+DROP FUNCTION IF EXISTS public.admin_delete_user(UUID, BOOLEAN);
+
+CREATE OR REPLACE FUNCTION public.admin_delete_user(
+  target_user_id UUID,
+  p_force_cascade BOOLEAN DEFAULT FALSE
+)
+RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, auth, pg_temp
 AS $$
 DECLARE
-  v_caller_is_admin BOOLEAN;
-  v_target_is_admin BOOLEAN;
+  v_is_admin BOOLEAN;
   v_target_profile RECORD;
-  v_preserved_debts_count INT := 0;
+  v_active_debts_count INT := 0;
+  v_total_debts_count INT := 0;
   v_tombstone_id UUID := '00000000-0000-0000-0000-000000000001';
+  v_preserved_debts_count INT := 0;
+  v_purge_notice TEXT;
 BEGIN
-  SELECT is_admin INTO v_caller_is_admin
+  SELECT (COALESCE(is_admin, false) OR COALESCE(is_super_admin, false)) INTO v_is_admin
   FROM public.profiles
   WHERE id = auth.uid();
 
-  IF NOT COALESCE(v_caller_is_admin, false) THEN
-    RAISE EXCEPTION 'Unauthorized: Only administrators can delete user accounts.';
+  IF NOT COALESCE(v_is_admin, false) THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Unauthorized: Admin privileges required.');
+  END IF;
+
+  IF target_user_id = auth.uid() THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Administrators cannot purge their own account via this tool.');
   END IF;
 
   IF target_user_id = v_tombstone_id THEN
-    RAISE EXCEPTION 'System Protection: The Purged Account system placeholder cannot be deleted.';
+    RETURN jsonb_build_object('success', false, 'error', 'System Protection: The Purged Account tombstone profile cannot be deleted.');
   END IF;
 
   SELECT * INTO v_target_profile
@@ -466,44 +478,68 @@ BEGIN
   WHERE id = target_user_id;
 
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'Target profile not found.';
+    RETURN jsonb_build_object('success', false, 'error', 'Target profile not found.');
   END IF;
 
-  v_target_is_admin := COALESCE(v_target_profile.is_admin, false);
-  IF v_target_is_admin THEN
-    RAISE EXCEPTION 'Cannot delete an administrator account. Revoke admin privileges first.';
+  IF COALESCE(v_target_profile.is_admin, false) OR COALESCE(v_target_profile.is_super_admin, false) THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Cannot delete an administrator account. Revoke admin privileges first.');
   END IF;
 
   -- Ensure system tombstone exists
   INSERT INTO public.profiles (
-    id, email, full_name, is_shadow, is_isolated, isolation_reason
+    id, email, full_name, is_shadow, is_isolated, is_purged, isolation_reason
   )
   VALUES (
     v_tombstone_id,
-    'purged-account@system.debtsync.local',
+    'purged-account@debtsync.local',
     'Purged Account',
+    true,
     true,
     true,
     'System tombstone profile for accounts purged by administrator'
   )
-  ON CONFLICT (id) DO NOTHING;
+  ON CONFLICT (id) DO UPDATE SET
+    is_purged = true,
+    full_name = 'Purged Account',
+    is_shadow = true;
 
-  -- Delete debts where BOTH lender and borrower are the target user or tombstone
+  -- Count live debts
+  SELECT COUNT(*) INTO v_active_debts_count
+  FROM public.debts
+  WHERE (lender_id = target_user_id OR borrower_id = target_user_id)
+    AND status IN ('active', 'pending');
+
+  SELECT COUNT(*) INTO v_total_debts_count
+  FROM public.debts
+  WHERE (lender_id = target_user_id OR borrower_id = target_user_id);
+
+  IF v_active_debts_count > 0 AND NOT p_force_cascade THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'has_active_debts', true,
+      'active_count', v_active_debts_count,
+      'total_count', v_total_debts_count,
+      'error', 'Cannot purge account: user has ' || v_active_debts_count || ' active transaction(s). Force cascade confirmation required.'
+    );
+  END IF;
+
+  -- Delete purely self-referential or internal debts
   DELETE FROM public.debts
   WHERE (lender_id = target_user_id AND borrower_id IN (target_user_id, v_tombstone_id))
      OR (borrower_id = target_user_id AND lender_id IN (target_user_id, v_tombstone_id));
 
-  -- Preserve counterparty debts by reassigning the purged user's side to the tombstone profile
+  v_purge_notice := '[TRANSACTION PURGED BY ADMIN: Counterparty account (' || COALESCE(v_target_profile.full_name, v_target_profile.email, 'User') || ') was purged by an administrator. For inquiries or disputes, contact support@satya-nayak.dev]';
+
+  -- Preserve counterparty debts by marking status as 'purged', prepending notice, and reassigning target side to tombstone
   WITH updated_lender AS (
     UPDATE public.debts
     SET
+      status = 'purged',
       lender_id = v_tombstone_id,
-      created_by = CASE WHEN created_by = target_user_id THEN NULL ELSE created_by END,
+      created_by = CASE WHEN created_by = target_user_id THEN v_tombstone_id ELSE created_by END,
       notes = CASE
-        WHEN COALESCE(notes, '') LIKE '%[ADMIN_PURGED:%' THEN notes
-        ELSE TRIM(
-          COALESCE(notes, '') || E'\n[ADMIN_PURGED:' || COALESCE(v_target_profile.full_name, v_target_profile.email, 'User') || ']'
-        )
+        WHEN COALESCE(notes, '') LIKE '%[TRANSACTION PURGED BY ADMIN%' THEN notes
+        ELSE v_purge_notice || COALESCE(E'\n' || notes, '')
       END,
       updated_at = NOW()
     WHERE lender_id = target_user_id
@@ -512,13 +548,12 @@ BEGIN
   updated_borrower AS (
     UPDATE public.debts
     SET
+      status = 'purged',
       borrower_id = v_tombstone_id,
-      created_by = CASE WHEN created_by = target_user_id THEN NULL ELSE created_by END,
+      created_by = CASE WHEN created_by = target_user_id THEN v_tombstone_id ELSE created_by END,
       notes = CASE
-        WHEN COALESCE(notes, '') LIKE '%[ADMIN_PURGED:%' THEN notes
-        ELSE TRIM(
-          COALESCE(notes, '') || E'\n[ADMIN_PURGED:' || COALESCE(v_target_profile.full_name, v_target_profile.email, 'User') || ']'
-        )
+        WHEN COALESCE(notes, '') LIKE '%[TRANSACTION PURGED BY ADMIN%' THEN notes
+        ELSE v_purge_notice || COALESCE(E'\n' || notes, '')
       END,
       updated_at = NOW()
     WHERE borrower_id = target_user_id
@@ -528,29 +563,14 @@ BEGIN
   INTO v_preserved_debts_count;
 
   -- Clear remaining FK references to target_user_id across all tables
-  UPDATE public.debts SET created_by = NULL WHERE created_by = target_user_id;
+  UPDATE public.debts SET created_by = v_tombstone_id WHERE created_by = target_user_id;
   UPDATE public.payments SET paid_by = v_tombstone_id WHERE paid_by = target_user_id;
   UPDATE public.payments SET verified_by = NULL WHERE verified_by = target_user_id;
   UPDATE public.activity_log SET user_id = NULL WHERE user_id = target_user_id;
 
-  -- Log the admin purge action before removing user records
-  INSERT INTO public.activity_log (debt_id, user_id, action, details)
-  VALUES (
-    NULL,
-    auth.uid(),
-    'admin_purge_user',
-    jsonb_build_object(
-      'purged_user_id', target_user_id,
-      'purged_email', v_target_profile.email,
-      'purged_name', v_target_profile.full_name,
-      'preserved_counterparty_debts', v_preserved_debts_count,
-      'purged_at', NOW()
-    )
-  );
-
   -- Delete dependent user rows
   DELETE FROM public.contact_requests
-  WHERE sender_id = target_user_id OR recipient_id = target_user_id;
+  WHERE sender_id = target_user_id OR receiver_id = target_user_id;
 
   DELETE FROM public.contacts
   WHERE owner_id = target_user_id OR contact_id = target_user_id;
@@ -561,12 +581,39 @@ BEGIN
   DELETE FROM public.profiles
   WHERE id = target_user_id;
 
-  DELETE FROM auth.users
-  WHERE id = target_user_id;
+  BEGIN
+    DELETE FROM auth.users WHERE id = target_user_id;
+  EXCEPTION WHEN OTHERS THEN
+    NULL;
+  END;
+
+  -- Log admin audit event permanently
+  INSERT INTO public.activity_log (user_id, action, details)
+  VALUES (
+    auth.uid(),
+    'ADMIN_USER_PURGED',
+    jsonb_build_object(
+      'target_user_id', target_user_id,
+      'target_email', v_target_profile.email,
+      'target_name', v_target_profile.full_name,
+      'target_phone', v_target_profile.phone,
+      'preserved_counterparty_debts', v_preserved_debts_count,
+      'active_debts_count', v_active_debts_count,
+      'admin_id', auth.uid(),
+      'support_contact', 'support@satya-nayak.dev',
+      'purged_at', NOW()
+    )
+  );
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'message', 'User account successfully purged. Counterparty transactions preserved and marked as (Transaction purged by admin).',
+    'purged_debts_count', v_preserved_debts_count
+  );
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.admin_delete_user(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_delete_user(UUID, BOOLEAN) TO authenticated, service_role;
 
 -- 6. Harden delete_user_account RPC (Self-deletion preserves settled counterparty ledgers)
 CREATE OR REPLACE FUNCTION public.delete_user_account()
@@ -637,7 +684,7 @@ BEGIN
   UPDATE public.payments SET verified_by = NULL WHERE verified_by = v_user_id;
   UPDATE public.activity_log SET user_id = NULL WHERE user_id = v_user_id;
 
-  DELETE FROM public.contact_requests WHERE sender_id = v_user_id OR recipient_id = v_user_id;
+  DELETE FROM public.contact_requests WHERE sender_id = v_user_id OR receiver_id = v_user_id;
   DELETE FROM public.contacts WHERE owner_id = v_user_id OR contact_id = v_user_id;
   DELETE FROM public.user_settings WHERE user_id = v_user_id;
   DELETE FROM public.profiles WHERE id = v_user_id;
@@ -657,3 +704,68 @@ CREATE INDEX IF NOT EXISTS idx_payments_debt_verified ON public.payments(debt_id
 CREATE INDEX IF NOT EXISTS idx_activity_log_debt_created ON public.activity_log(debt_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_activity_log_created_desc ON public.activity_log(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_profiles_is_shadow ON public.profiles(is_shadow) WHERE is_shadow = true;
+
+-- 8. Enhanced get_debt_for_acceptance (Includes due_date, settled_at, and split details)
+DROP FUNCTION IF EXISTS public.get_debt_for_acceptance(UUID);
+
+CREATE OR REPLACE FUNCTION public.get_debt_for_acceptance(p_debt_id UUID)
+RETURNS TABLE (
+  id UUID,
+  created_by UUID,
+  lender_id UUID,
+  borrower_id UUID,
+  principal DECIMAL(12,2),
+  currency TEXT,
+  interest_type TEXT,
+  interest_rate DECIMAL(7,4),
+  compound_freq TEXT,
+  status TEXT,
+  notes TEXT,
+  due_date TIMESTAMPTZ,
+  settled_at TIMESTAMPTZ,
+  split_group_id UUID,
+  split_details JSONB,
+  accepted_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ,
+  lender_name TEXT,
+  lender_email TEXT,
+  lender_avatar TEXT,
+  borrower_name TEXT,
+  borrower_email TEXT,
+  borrower_avatar TEXT
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT 
+    d.id,
+    d.created_by,
+    d.lender_id,
+    d.borrower_id,
+    d.principal,
+    d.currency,
+    d.interest_type,
+    d.interest_rate,
+    d.compound_freq,
+    d.status,
+    d.notes,
+    d.due_date,
+    d.settled_at,
+    d.split_group_id,
+    d.split_details,
+    d.accepted_at,
+    d.created_at,
+    lp.full_name AS lender_name,
+    lp.email AS lender_email,
+    lp.avatar_url AS lender_avatar,
+    bp.full_name AS borrower_name,
+    bp.email AS borrower_email,
+    bp.avatar_url AS borrower_avatar
+  FROM public.debts d
+  LEFT JOIN public.profiles lp ON d.lender_id = lp.id
+  LEFT JOIN public.profiles bp ON d.borrower_id = bp.id
+  WHERE d.id = p_debt_id;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_debt_for_acceptance(UUID) TO anon, authenticated, service_role;

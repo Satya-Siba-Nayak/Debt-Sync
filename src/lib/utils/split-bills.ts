@@ -253,11 +253,15 @@ export function getCleanDebtNotes(notes: string | null | undefined): string {
     }
   }
 
-  // 2. Remove any lingering JSON fragment artifacts from previously saved buggy notes
+  // 2. Remove administrative purge notice tags so internal system notices don't clutter personal user notes
+  cleaned = cleaned.replace(/\[TRANSACTION PURGED BY ADMIN:[^\]]*\]/gi, '').trim();
+  cleaned = cleaned.replace(/\[ADMIN_PURGED:[^\]]*\]/gi, '').trim();
+
+  // 3. Remove any lingering JSON fragment artifacts from previously saved buggy notes
   cleaned = cleaned.replace(/^,?"[^"]*":(?:null|"[^"]*"|\d+|true|false)(?:,[^]]*)*\]*\]*/i, '').trim();
   cleaned = cleaned.replace(/^\]+/, '').trim();
 
-  // 3. Strip auto-generated title fallbacks if user didn't write an explicit personal note
+  // 4. Strip auto-generated title fallbacks if user didn't write an explicit personal note
   cleaned = cleaned.replace(/^Group Split Bill(\s*-\s*)?/i, '').trim();
   cleaned = cleaned.replace(/^Split:\s*[^-\n]+(\s*-\s*)?/i, '').trim();
 

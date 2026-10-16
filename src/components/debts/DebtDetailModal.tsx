@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { Modal } from '../ui/Modal';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment, ActivityLogEntry } from '@/lib/types/database';
-import { calculateDebtBalance, round2, sortPaymentsPendingFirst } from '@/lib/utils/interest';
+import { calculateDebtBalance, isDebtPurgedByAdmin, round2, sortPaymentsPendingFirst } from '@/lib/utils/interest';
+import { invalidateLedgerCache } from '@/lib/stores/ledger-store';
 import { formatCurrency } from '@/lib/utils/currency';
 import { Chip } from '../ui/Chip';
 import { Avatar } from '../ui/Avatar';
@@ -176,8 +177,7 @@ export function DebtDetailModal({
   const myName = myPerson?.full_name || myPerson?.email || 'Participant';
   const otherPerson = isLender ? debt.borrower : debt.lender;
   const isPurged =
-    debt.status === 'purged' ||
-    (typeof debt.notes === 'string' && debt.notes.includes('[TRANSACTION PURGED BY ADMIN')) ||
+    isDebtPurgedByAdmin(debt) ||
     Boolean((otherPerson as any)?.is_purged);
   const otherName = otherPerson?.full_name || otherPerson?.email || (isPurged ? 'Purged Account' : 'Counterparty');
   const calc = calculateDebtBalance(debt, payments);
@@ -213,14 +213,33 @@ export function DebtDetailModal({
     if (!targetUrl) return;
     if (typeof navigator !== 'undefined' && navigator.share) {
       try {
+        const formattedPrincipal = formatCurrency(debt.principal, debtCurrency);
+        const formattedBalance = formatCurrency(calc.currentBalance, debtCurrency);
+        const statusLabel = isPurged
+          ? 'Purged by Admin'
+          : debt.status === 'settled'
+          ? 'Settled'
+          : debt.status === 'pending'
+          ? 'Pending'
+          : 'Active';
+
+        const headline =
+          Math.abs(calc.currentBalance - calc.principal) >= 0.01 && !isPurged && debt.status !== 'settled'
+            ? `${formattedBalance} Due (${formattedPrincipal})`
+            : formattedPrincipal;
+
+        const shareTitle = splitInfo
+          ? `DebtSync: ${splitInfo.title} (${headline})`
+          : `DebtSync: ${headline} • ${statusLabel}`;
+
+        const shareText =
+          type === 'participant'
+            ? `DebtSync Agreement (${formattedPrincipal} • ${statusLabel}) — Restricted to participating members:`
+            : `DebtSync: ${headline} • ${statusLabel} (${myName} ↔ ${otherName}):`;
+
         await navigator.share({
-          title: splitInfo
-            ? `DebtSync Split Bill: ${splitInfo.title}`
-            : `DebtSync Agreement (${formatCurrency(debt.principal, debtCurrency)})`,
-          text:
-            type === 'participant'
-              ? `View our transaction record on DebtSync (Restricted to participating members):`
-              : `View this shared transaction record on DebtSync:`,
+          title: shareTitle,
+          text: shareText,
           url: targetUrl,
         });
         return;
@@ -375,11 +394,18 @@ export function DebtDetailModal({
     setVerifyingPaymentId(paymentId);
     try {
       const rpcDecision = decision === 'verified' ? 'accepted' : 'declined';
+      const updatedPaymentsSim = payments.map((p) =>
+        p.id === paymentId ? { ...p, is_verified: decision === 'verified' } : p
+      );
+      const simCalc = calculateDebtBalance(debt, updatedPaymentsSim);
+      const shouldSettle = simCalc.currentBalance <= 0.01;
+
       let handled = false;
       try {
         const { data, error } = await supabase.rpc('verify_repayment', {
           p_payment_id: paymentId,
           p_decision: rpcDecision,
+          p_should_settle: shouldSettle,
         });
         if (!error && data?.success) handled = true;
       } catch (_) {}
@@ -450,6 +476,7 @@ export function DebtDetailModal({
         }
       }
 
+      invalidateLedgerCache();
       window.dispatchEvent(new CustomEvent('debtsync:refresh'));
       await fetchDebtDetails();
       onDebtUpdated?.();
@@ -757,35 +784,94 @@ export function DebtDetailModal({
                   </div>
 
                   {isGlobalShared ? (
-                    <div className="flex items-center gap-1.5 pt-1 flex-wrap">
-                      <button
-                        type="button"
-                        onClick={() => handleCopyShareLink('global')}
-                        className="flex-1 py-2 px-2.5 rounded-lg bg-emerald-600 text-white font-mono text-xs font-bold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-1 cursor-pointer shadow-xs"
-                      >
-                        <span className="material-symbols-outlined text-[14px]">
-                          {copiedLinkType === 'global' ? 'check' : 'link'}
-                        </span>
-                        <span>{copiedLinkType === 'global' ? 'Copied Global Link!' : 'Copy Global Link'}</span>
-                      </button>
-                      <button
-                        type="button"
-                        disabled={shareUpdating}
-                        onClick={() => handleToggleGlobalShare('regenerate')}
-                        className="p-2 rounded-lg border border-[var(--outline-variant)]/40 text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors cursor-pointer disabled:opacity-50"
-                        title="Rotate link token (invalidates previously shared global links)"
-                      >
-                        <span className="material-symbols-outlined text-[15px]">refresh</span>
-                      </button>
-                      <button
-                        type="button"
-                        disabled={shareUpdating}
-                        onClick={() => handleToggleGlobalShare('disable')}
-                        className="py-2 px-2.5 rounded-lg border border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400 font-mono text-xs font-bold hover:bg-red-500/20 transition-colors cursor-pointer disabled:opacity-50"
-                        title="Turn off global sharing"
-                      >
-                        Off
-                      </button>
+                    <div className="space-y-2.5 pt-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => handleCopyShareLink('global')}
+                          className="flex-1 py-2 px-2.5 rounded-lg bg-emerald-600 text-white font-mono text-xs font-bold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-1 cursor-pointer shadow-xs"
+                        >
+                          <span className="material-symbols-outlined text-[14px]">
+                            {copiedLinkType === 'global' ? 'check' : 'link'}
+                          </span>
+                          <span>{copiedLinkType === 'global' ? 'Copied Global Link!' : 'Copy Global Link'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleNativeShare('global')}
+                          className="p-2 rounded-lg border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container)] text-[var(--on-surface)] transition-colors cursor-pointer"
+                          title="Share public link via Signal, WhatsApp, Discord, or device share sheet"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">ios_share</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={shareUpdating}
+                          onClick={() => handleToggleGlobalShare('regenerate')}
+                          className="p-2 rounded-lg border border-[var(--outline-variant)]/40 text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors cursor-pointer disabled:opacity-50"
+                          title="Rotate link token (invalidates previously shared global links)"
+                        >
+                          <span className="material-symbols-outlined text-[15px]">refresh</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={shareUpdating}
+                          onClick={() => handleToggleGlobalShare('disable')}
+                          className="py-2 px-2.5 rounded-lg border border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400 font-mono text-xs font-bold hover:bg-red-500/20 transition-colors cursor-pointer disabled:opacity-50"
+                          title="Turn off global sharing"
+                        >
+                          Off
+                        </button>
+                      </div>
+
+                      {/* Small Link Preview Card for Signal, WhatsApp & Discord */}
+                      <div className="p-2.5 rounded-lg bg-[var(--surface-container-high)]/50 border border-[var(--outline-variant)]/30 space-y-1.5">
+                        <div className="flex items-center justify-between gap-1 text-[10px] font-mono text-[var(--on-surface-variant)]">
+                          <span className="flex items-center gap-1">
+                            <span className="material-symbols-outlined text-[12px] text-emerald-500">
+                              preview
+                            </span>
+                            <span>Preview on Signal • WhatsApp • Discord</span>
+                          </span>
+                          <span className="text-[9px] px-1 py-0.2 rounded bg-[var(--surface-container)] border border-[var(--outline-variant)]/20">
+                            Small Card
+                          </span>
+                        </div>
+
+                        <div className="p-2 rounded-md bg-[var(--surface-container-lowest)] border-l-3 border-emerald-500 border border-[var(--outline-variant)]/25 flex items-center gap-2.5 shadow-xs">
+                          <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center shrink-0">
+                            <span className="material-symbols-outlined text-emerald-600 dark:text-emerald-400 text-[18px]">
+                              {isPurged
+                                ? 'admin_panel_settings'
+                                : debt.status === 'settled' || calc.currentBalance <= 0
+                                ? 'check_circle'
+                                : debt.status === 'pending'
+                                ? 'schedule'
+                                : 'bolt'}
+                            </span>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="font-heading font-bold text-xs text-[var(--on-surface)] truncate flex items-center gap-1.5">
+                              <span>
+                                {isPurged
+                                  ? `${formatCurrency(debt.principal, debtCurrency)} • Purged`
+                                  : debt.status === 'settled' || calc.currentBalance <= 0
+                                  ? `${formatCurrency(debt.principal, debtCurrency)} • Settled`
+                                  : debt.status === 'pending'
+                                  ? `${formatCurrency(debt.principal, debtCurrency)} • Pending`
+                                  : `${formatCurrency(calc.currentBalance, debtCurrency)} Due • Active`}
+                              </span>
+                              <span className="text-[9px] font-mono text-[var(--on-surface-variant)]">
+                                — DebtSync
+                              </span>
+                            </div>
+                            <div className="font-mono text-[10px] text-[var(--on-surface-variant)] truncate mt-0.5">
+                              {splitInfo ? `[${splitInfo.title}] ` : ''}
+                              {otherName} • {isPurged ? 'Purged by Admin' : `Remaining: ${formatCurrency(calc.currentBalance, debtCurrency)}`} • Public Ledger
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   ) : (
                     <div className="pt-1">

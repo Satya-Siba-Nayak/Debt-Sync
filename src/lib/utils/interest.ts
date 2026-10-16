@@ -19,6 +19,23 @@ export interface DebtBalanceCalculation {
 }
 
 /**
+ * Helper to identify whether a debt agreement has been marked as purged by an administrator
+ * or is associated with a terminated/purged system account.
+ */
+export function isDebtPurgedByAdmin(debt: Debt | any): boolean {
+  if (!debt) return false;
+  return (
+    debt.status === 'purged' ||
+    debt.lender_id === '00000000-0000-0000-0000-000000000001' ||
+    debt.borrower_id === '00000000-0000-0000-0000-000000000001' ||
+    (typeof debt.notes === 'string' &&
+      (debt.notes.includes('[TRANSACTION PURGED BY ADMIN') || debt.notes.includes('[ADMIN_PURGED:'))) ||
+    Boolean(debt.lender?.is_purged) ||
+    Boolean(debt.borrower?.is_purged)
+  );
+}
+
+/**
  * Calculates current outstanding balance including simple or compound interest.
  * Financial Rule: Only interest accrued at or above 2 decimal places (>= 0.01) is added to actual calculations.
  *
@@ -50,8 +67,11 @@ export function calculateDebtBalance(
   const pendingVerificationPaid = round2(pendingPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0));
   const disputedPaid = round2(disputedPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0));
 
+  // Helper to identify debts purged by an administrator
+  const isPurged = isDebtPurgedByAdmin(debt);
+
   // Declined or purged agreements are void: balance is 0 and no interest accrues
-  if (debt.status === 'declined' || debt.status === 'purged') {
+  if (debt.status === 'declined' || isPurged) {
     return {
       principal,
       totalAccruedInterest: 0,
