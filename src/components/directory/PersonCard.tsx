@@ -172,14 +172,14 @@ export function PersonCard({ person, currency = 'inr', onRecordDebt }: PersonCar
         </div>
 
         {person.status === 'pending' ? (
-          <div className="flex justify-between items-center text-[11px] font-mono text-[var(--on-surface-variant)] pt-2 border-t border-[var(--outline-variant)]/10">
-            <span>Awaiting confirmation</span>
-            <button
-              onClick={() => onRecordDebt?.(person.id)}
-              className="text-[var(--primary)] font-bold hover:underline"
-            >
-              Add Debt
-            </button>
+          <div className="flex justify-between items-center text-[11px] font-mono text-amber-600 dark:text-amber-400 pt-2 border-t border-[var(--outline-variant)]/10">
+            <span className="flex items-center gap-1">
+              <span className="material-symbols-outlined text-[13px]">schedule</span>
+              <span>Awaiting acceptance</span>
+            </span>
+            <span className="font-semibold">
+              {person.lentAmount >= person.owedAmount ? 'Receivable' : 'Payable'}
+            </span>
           </div>
         ) : isSettled ? (
           <div className="flex justify-between items-center text-[11px] font-mono text-[var(--on-surface-variant)] pt-2 border-t border-[var(--outline-variant)]/10">
@@ -198,16 +198,19 @@ export function PersonCard({ person, currency = 'inr', onRecordDebt }: PersonCar
         <div className="mt-3 pt-2 border-t border-[var(--outline-variant)]/20 flex gap-2">
           <Link
             href={`/directory/detail?id=${person.id}`}
-            className="flex-1 py-1.5 px-2 bg-[var(--surface-container-lowest)] hover:bg-[var(--surface-container)] rounded-lg text-center font-mono text-xs font-semibold text-[var(--on-surface)] transition-colors border border-[var(--outline-variant)]/20"
+            className="flex-1 py-1.5 px-2.5 bg-[var(--surface-container-lowest)] hover:bg-[var(--surface-container)] rounded-lg text-center font-mono text-xs font-semibold text-[var(--on-surface)] transition-colors border border-[var(--outline-variant)]/20 flex items-center justify-center gap-1"
           >
-            Ledger
+            <span className="material-symbols-outlined text-[14px] text-[var(--primary)]">menu_book</span>
+            <span>View Ledger</span>
           </Link>
           <button
+            type="button"
             onClick={() => onRecordDebt?.(person.id)}
-            className="py-1.5 px-3 bg-[var(--primary)] text-[var(--on-primary)] rounded-lg font-mono text-xs font-bold hover:opacity-90 transition-opacity"
-            title="Record Debt with this person"
+            className="py-1.5 px-3 bg-[var(--primary)] text-[var(--on-primary)] rounded-lg font-mono text-xs font-bold hover:opacity-90 transition-opacity flex items-center gap-1 cursor-pointer"
+            title="Record a new transaction with this person"
           >
-            + Debt
+            <span className="material-symbols-outlined text-[14px]">add</span>
+            <span>Record</span>
           </button>
         </div>
       </div>

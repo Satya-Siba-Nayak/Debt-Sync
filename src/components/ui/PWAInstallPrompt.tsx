@@ -23,9 +23,10 @@ export function triggerPWAInstallPrompt() {
 export function PWAInstallPrompt() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isStandalone, setIsStandalone] = useState(false);
-  const [isDismissed, setIsDismissed] = useState(false);
+  const [isDismissed, setIsDismissed] = useState(true);
   const [isIOS, setIsIOS] = useState(false);
   const [showIOSGuide, setShowIOSGuide] = useState(false);
+  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     // Check if already installed / standalone
@@ -39,6 +40,7 @@ export function PWAInstallPrompt() {
       const dismissUntil = Number(localStorage.getItem(PWA_DISMISS_UNTIL_KEY) || 0);
       if (dismissUntil > Date.now()) {
         setIsDismissed(true);
+        setIsReady(true);
         return;
       } else if (dismissUntil > 0 && Date.now() >= dismissUntil) {
         localStorage.removeItem(PWA_DISMISS_UNTIL_KEY);
@@ -47,14 +49,13 @@ export function PWAInstallPrompt() {
 
       // 2. Check session dismissal
       const dismissed = sessionStorage.getItem(PWA_SESSION_DISMISSED_KEY);
-      if (dismissed) {
-        setIsDismissed(true);
-      }
+      setIsDismissed(Boolean(dismissed));
 
       // Check if iOS Safari
       const userAgent = window.navigator.userAgent.toLowerCase();
       const isApple = /iphone|ipad|ipod/.test(userAgent);
       setIsIOS(isApple);
+      setIsReady(true);
 
       const handleBeforeInstallPrompt = (e: Event) => {
         e.preventDefault();
@@ -78,7 +79,7 @@ export function PWAInstallPrompt() {
     }
   }, []);
 
-  if (isStandalone || isDismissed) return null;
+  if (!isReady || isStandalone || isDismissed) return null;
   if (!deferredPrompt && !isIOS) return null;
 
   const handleInstallClick = async () => {

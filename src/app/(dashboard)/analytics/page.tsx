@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment } from '@/lib/types/database';
 import { calculateDebtBalance, isDebtPurgedByAdmin, round2 } from '@/lib/utils/interest';
@@ -11,6 +12,7 @@ import { getLedgerCache, setLedgerCache } from '@/lib/stores/ledger-store';
 import { SkeletonBalanceCards } from '@/components/ui/Skeleton';
 import { calculateTrustScore } from '@/lib/utils/trust-score';
 import { PAYMENT_METHOD_LABELS, isUPIMethod, PRIMARY_PAYMENT_METHODS } from '@/lib/utils/upi-link';
+import { exportUserDataToCSV } from '@/lib/utils/export-csv';
 
 export default function AnalyticsPage() {
   const supabase = createClient();
@@ -22,6 +24,7 @@ export default function AnalyticsPage() {
   const [debts, setDebts] = useState<Debt[]>(initialCache?.debts || []);
   const [payments, setPayments] = useState<Payment[]>(initialCache?.payments || []);
   const [showTrustDetails, setShowTrustDetails] = useState(false);
+  const [exportingCsv, setExportingCsv] = useState(false);
 
   const fetchAnalyticsData = useCallback(async () => {
     try {
@@ -39,8 +42,8 @@ export default function AnalyticsPage() {
           .from('debts')
           .select(`
             *,
-            lender:profiles!debts_lender_id_fkey(id, email, full_name),
-            borrower:profiles!debts_borrower_id_fkey(id, email, full_name)
+            lender:profiles!debts_lender_id_fkey(id, email, full_name, avatar_url),
+            borrower:profiles!debts_borrower_id_fkey(id, email, full_name, avatar_url)
           `)
           .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`),
       ]);
@@ -99,53 +102,131 @@ export default function AnalyticsPage() {
     };
   }, [fetchAnalyticsData, supabase]);
 
+  const handleExportCSV = async () => {
+    if (!currentUserId || exportingCsv) return;
+    setExportingCsv(true);
+    try {
+      await exportUserDataToCSV(supabase, currentUserId);
+    } finally {
+      setExportingCsv(false);
+    }
+  };
+
   // Aggregate metrics
   let totalLent = 0;
   let totalOwed = 0;
   let interestAccrued = 0;
+  let borrowingInterestCost = 0;
   let simpleInterestTotal = 0;
   let compoundInterestTotal = 0;
   let totalRepaymentsReceived = 0;
   let totalRepaymentsMade = 0;
   let settledDebtsCount = 0;
+  let activeLentCount = 0;
+  let activeOwedCount = 0;
+  let pendingCount = 0;
+  let lifetimeLentPrincipal = 0;
+  let lifetimeBorrowedPrincipal = 0;
+
+  const counterpartyMap = new Map<
+    string,
+    {
+      id: string;
+      name: string;
+      email: string;
+      lentBalance: number;
+      owedBalance: number;
+      totalPaid: number;
+      totalPrincipal: number;
+      activeCount: number;
+      settledCount: number;
+    }
+  >();
 
   const validDebtIds = new Set<string>();
   for (const d of debts) {
     if (d.status === 'declined' || d.status === 'purged' || isDebtPurgedByAdmin(d)) continue;
     validDebtIds.add(d.id);
     if (d.status === 'settled') settledDebtsCount++;
+    if (d.status === 'pending') pendingCount++;
 
     const debtPayments = payments.filter((p) => p.debt_id === d.id);
     const calc = calculateDebtBalance(d, debtPayments);
+    const isLender = d.lender_id === currentUserId;
 
-    if (d.lender_id === currentUserId) {
-      totalLent += calc.currentBalance;
+    if (isLender) {
+      lifetimeLentPrincipal += Number(d.principal) || 0;
+      if (d.status === 'active') {
+        totalLent += calc.currentBalance;
+        activeLentCount++;
+      }
       interestAccrued += calc.totalAccruedInterest;
       totalRepaymentsReceived += calc.totalPaid;
     } else {
-      totalOwed += calc.currentBalance;
+      lifetimeBorrowedPrincipal += Number(d.principal) || 0;
+      if (d.status === 'active') {
+        totalOwed += calc.currentBalance;
+        activeOwedCount++;
+      }
+      borrowingInterestCost += calc.totalAccruedInterest;
       totalRepaymentsMade += calc.totalPaid;
     }
 
     if (d.interest_type === 'simple') simpleInterestTotal += calc.totalAccruedInterest;
     if (d.interest_type === 'compound') compoundInterestTotal += calc.totalAccruedInterest;
+
+    // Counterparty aggregation
+    const otherParty = isLender ? d.borrower : d.lender;
+    const cpId = otherParty?.id || (isLender ? d.borrower_id : d.lender_id) || d.id;
+    const cpName = otherParty?.full_name || otherParty?.email || 'Counterparty';
+    const cpEmail = otherParty?.email || '';
+    const existing = counterpartyMap.get(cpId) || {
+      id: cpId,
+      name: cpName,
+      email: cpEmail,
+      lentBalance: 0,
+      owedBalance: 0,
+      totalPaid: 0,
+      totalPrincipal: 0,
+      activeCount: 0,
+      settledCount: 0,
+    };
+
+    if (d.status === 'active') {
+      if (isLender) existing.lentBalance = round2(existing.lentBalance + calc.currentBalance);
+      else existing.owedBalance = round2(existing.owedBalance + calc.currentBalance);
+      existing.activeCount += 1;
+    } else if (d.status === 'settled') {
+      existing.settledCount += 1;
+    }
+    existing.totalPaid = round2(existing.totalPaid + calc.totalPaid);
+    existing.totalPrincipal = round2(existing.totalPrincipal + (Number(d.principal) || 0));
+    counterpartyMap.set(cpId, existing);
   }
 
   totalLent = round2(totalLent);
   totalOwed = round2(totalOwed);
   interestAccrued = round2(interestAccrued);
+  borrowingInterestCost = round2(borrowingInterestCost);
   simpleInterestTotal = round2(simpleInterestTotal);
   compoundInterestTotal = round2(compoundInterestTotal);
   totalRepaymentsReceived = round2(totalRepaymentsReceived);
   totalRepaymentsMade = round2(totalRepaymentsMade);
+  lifetimeLentPrincipal = round2(lifetimeLentPrincipal);
+  lifetimeBorrowedPrincipal = round2(lifetimeBorrowedPrincipal);
   const netPosition = round2(totalLent - totalOwed);
 
+  const topCounterparties = Array.from(counterpartyMap.values())
+    .sort((a, b) => (b.lentBalance + b.owedBalance + b.totalPrincipal) - (a.lentBalance + a.owedBalance + a.totalPrincipal))
+    .slice(0, 5);
+
   // Real Repayment Velocity:
-  // % of total obligations that have been successfully repaid
-  const grandObligations = totalLent + totalRepaymentsReceived;
+  // % of total obligations (lent + borrowed) that have been repaid
+  const grandObligations = totalLent + totalRepaymentsReceived + totalOwed + totalRepaymentsMade;
+  const totalRepaidBothWays = totalRepaymentsReceived + totalRepaymentsMade;
   const repaymentVelocityPercent = grandObligations > 0
-    ? Math.min(100, Math.round((totalRepaymentsReceived / grandObligations) * 100))
-    : debts.length === 0 ? 100 : 85;
+    ? Math.min(100, Math.round((totalRepaidBothWays / grandObligations) * 100))
+    : validDebtIds.size === 0 ? 100 : 0;
 
   // Comprehensive Network Trust Score Breakdown & Performance Factors
   const trustBreakdown = calculateTrustScore(debts, payments, currentUserId || undefined);
@@ -153,7 +234,6 @@ export default function AnalyticsPage() {
   const trustRating = trustBreakdown.rating;
   const trustRatingColor = trustBreakdown.ratingColor;
   const trustFactors = trustBreakdown.factors;
-  const trustTips = trustBreakdown.tips;
 
   // Payment Channel & Methods Distribution (Consolidated under UPI with TPAP app breakdown)
   const channelStats: Record<string, { count: number; volume: number }> = {
@@ -206,89 +286,215 @@ export default function AnalyticsPage() {
   }
 
   // Debt Age Distribution (using remaining unpaid balance on active non-purged debts)
-  const ageBuckets = { '0-30d': 0, '31-60d': 0, '61-90d': 0, '91-120d': 0, '>120d': 0 };
+  const ageBuckets: Record<string, { amount: number; count: number }> = {
+    '0-30d': { amount: 0, count: 0 },
+    '31-60d': { amount: 0, count: 0 },
+    '61-90d': { amount: 0, count: 0 },
+    '91-120d': { amount: 0, count: 0 },
+    '>120d': { amount: 0, count: 0 },
+  };
   const now = Date.now();
   for (const d of debts) {
-    if (d.status === 'declined' || d.status === 'settled' || d.status === 'purged' || isDebtPurgedByAdmin(d)) continue;
+    if (d.status !== 'active' || isDebtPurgedByAdmin(d)) continue;
     const debtPayments = payments.filter((p) => p.debt_id === d.id);
     const remBal = calculateDebtBalance(d, debtPayments).currentBalance;
     if (remBal <= 0) continue;
     const days = Math.floor((now - new Date(d.created_at).getTime()) / (1000 * 60 * 60 * 24));
-    if (days <= 30) ageBuckets['0-30d'] = round2(ageBuckets['0-30d'] + remBal);
-    else if (days <= 60) ageBuckets['31-60d'] = round2(ageBuckets['31-60d'] + remBal);
-    else if (days <= 90) ageBuckets['61-90d'] = round2(ageBuckets['61-90d'] + remBal);
-    else if (days <= 120) ageBuckets['91-120d'] = round2(ageBuckets['91-120d'] + remBal);
-    else ageBuckets['>120d'] = round2(ageBuckets['>120d'] + remBal);
+    const key =
+      days <= 30
+        ? '0-30d'
+        : days <= 60
+        ? '31-60d'
+        : days <= 90
+        ? '61-90d'
+        : days <= 120
+        ? '91-120d'
+        : '>120d';
+    ageBuckets[key].amount = round2(ageBuckets[key].amount + remBal);
+    ageBuckets[key].count += 1;
   }
 
-  const maxBucketVal = Math.max(...Object.values(ageBuckets), 1000);
+  const bucketAmounts = Object.values(ageBuckets).map((b) => b.amount);
+  const totalAgeExposure = round2(bucketAmounts.reduce((s, v) => s + v, 0));
+  const maxBucketVal = Math.max(...bucketAmounts, 1);
 
-  // Dynamic 6-month Liquidity Forecast
-  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-  const nowMonth = new Date().getMonth();
+  // Real 6-month Liquidity & Maturity Forecast combining scheduled due_dates and open receivables
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const nowDate = new Date();
+  const undatedLentTotal = debts
+    .filter((d) => d.status === 'active' && d.lender_id === currentUserId && !d.due_date && !isDebtPurgedByAdmin(d))
+    .reduce((sum, d) => {
+      const p = payments.filter((pay) => pay.debt_id === d.id);
+      return sum + calculateDebtBalance(d, p).currentBalance;
+    }, 0);
+  const undatedOwedTotal = debts
+    .filter((d) => d.status === 'active' && d.borrower_id === currentUserId && !d.due_date && !isDebtPurgedByAdmin(d))
+    .reduce((sum, d) => {
+      const p = payments.filter((pay) => pay.debt_id === d.id);
+      return sum + calculateDebtBalance(d, p).currentBalance;
+    }, 0);
+
   const liquidityForecast = Array.from({ length: 6 }).map((_, idx) => {
-    const monthIndex = (nowMonth + 1 + idx) % 12;
-    const month = monthNames[monthIndex];
-    const baseInflow = totalLent > 0 ? (totalLent / 6) * (1 + idx * 0.05) : 0;
-    const baseRisk = totalLent > 0 ? -(totalLent * 0.02 * (idx + 1)) : 0;
+    const targetDate = new Date(nowDate.getFullYear(), nowDate.getMonth() + idx, 1);
+    const targetYear = targetDate.getFullYear();
+    const targetMonth = targetDate.getMonth();
+    const label = `${monthNames[targetMonth]} ${targetYear}`;
+
+    let scheduledReceivable = 0;
+    let scheduledPayable = 0;
+    let dueCount = 0;
+
+    for (const d of debts) {
+      if (d.status !== 'active' || !d.due_date || isDebtPurgedByAdmin(d)) continue;
+      const due = new Date(d.due_date);
+      const isDueThisMonth =
+        due.getFullYear() === targetYear && due.getMonth() === targetMonth;
+      const isOverdueIntoCurrentMonth =
+        idx === 0 && due.getTime() < targetDate.getTime();
+
+      if (isDueThisMonth || isOverdueIntoCurrentMonth) {
+        const p = payments.filter((pay) => pay.debt_id === d.id);
+        const bal = calculateDebtBalance(d, p).currentBalance;
+        if (bal > 0) {
+          dueCount += 1;
+          if (d.lender_id === currentUserId) scheduledReceivable += bal;
+          else scheduledPayable += bal;
+        }
+      }
+    }
+
+    const projectedOpenInflow = undatedLentTotal > 0 ? undatedLentTotal / 6 : 0;
+    const projectedOpenOutflow = undatedOwedTotal > 0 ? undatedOwedTotal / 6 : 0;
+
+    const totalExpectedInflow = round2(scheduledReceivable + projectedOpenInflow);
+    const totalExpectedOutflow = round2(scheduledPayable + projectedOpenOutflow);
+    const netFlow = round2(totalExpectedInflow - totalExpectedOutflow);
+
     return {
-      month,
-      inflow: Math.round(baseInflow),
-      riskAdj: Math.round(baseRisk),
-      status: idx < 2 ? 'High Certainty' : 'Moderate',
+      month: label,
+      inflow: totalExpectedInflow,
+      outflow: totalExpectedOutflow,
+      netFlow,
+      dueCount,
+      status: dueCount > 0 ? `${dueCount} Scheduled` : totalExpectedInflow > 0 || totalExpectedOutflow > 0 ? 'Projected' : 'Clear',
     };
   });
 
   return (
     <div className="page-enter space-y-6 md:space-y-8">
-      {/* Title */}
-      <div>
-        <h1 className="font-heading text-2xl md:text-3xl font-bold text-[var(--on-surface)]">
-          Analytics & Performance Hub
-        </h1>
-        <p className="font-mono text-xs text-[var(--on-surface-variant)] mt-1">
-          Comprehensive portfolio health, repayment velocity, and liquidity forecast
-        </p>
+      {/* Header Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="font-heading text-2xl md:text-3xl font-bold text-[var(--on-surface)]">
+            Analytics &amp; Performance Hub
+          </h1>
+          <p className="font-mono text-xs text-[var(--on-surface-variant)] mt-1">
+            Comprehensive portfolio health, counterparty exposure, and maturity schedule
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2.5 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={handleExportCSV}
+            disabled={exportingCsv || !currentUserId}
+            className="px-3.5 py-2 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-lowest)] hover:bg-[var(--surface-container)] text-[var(--on-surface)] font-mono text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-50"
+            title="Download full financial ledger archive as CSV"
+          >
+            <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">download</span>
+            <span>{exportingCsv ? 'Exporting...' : 'Export CSV Archive'}</span>
+          </button>
+        </div>
       </div>
 
-      {/* Top 4 Summary Cards */}
+      {/* Top 4 Institutional KPI Summary Cards */}
       {loading && debts.length === 0 ? (
         <SkeletonBalanceCards />
       ) : (
-        <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-[var(--surface-container-lowest)] p-5 rounded-2xl border border-[var(--outline-variant)]/30 shadow-sm">
-            <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider font-semibold">
-              Total Lent
-            </span>
-            <div className="font-heading text-2xl font-bold text-[var(--on-surface)] mt-2">
-              {formatCurrency(totalLent, currency)}
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Active Receivable */}
+          <div className="bg-[var(--surface-container-lowest)] p-5 rounded-2xl border border-[var(--outline-variant)]/30 shadow-sm flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider font-semibold">
+                  Active Receivable
+                </span>
+                <div className="w-8 h-8 rounded-xl bg-emerald-500/12 text-[var(--secondary)] flex items-center justify-center">
+                  <span className="material-symbols-outlined text-[18px]">call_made</span>
+                </div>
+              </div>
+              <div className="font-heading text-2xl md:text-3xl font-bold text-[var(--on-surface)]">
+                {formatCurrency(totalLent, currency)}
+              </div>
+            </div>
+            <div className="mt-4 pt-3 border-t border-[var(--outline-variant)]/15 flex items-center justify-between text-[11px] font-mono text-[var(--on-surface-variant)]">
+              <span>Collected: <strong className="text-[var(--secondary)]">{formatCurrency(totalRepaymentsReceived, currency)}</strong></span>
+              <span>{activeLentCount} active</span>
             </div>
           </div>
 
-          <div className="bg-[var(--surface-container-lowest)] p-5 rounded-2xl border border-[var(--outline-variant)]/30 shadow-sm">
-            <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider font-semibold">
-              Total Owed
-            </span>
-            <div className="font-heading text-2xl font-bold text-[var(--error)] mt-2">
-              {formatCurrency(totalOwed, currency)}
+          {/* Active Payable */}
+          <div className="bg-[var(--surface-container-lowest)] p-5 rounded-2xl border border-[var(--outline-variant)]/30 shadow-sm flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider font-semibold">
+                  Active Payable
+                </span>
+                <div className="w-8 h-8 rounded-xl bg-red-500/12 text-[var(--error)] flex items-center justify-center">
+                  <span className="material-symbols-outlined text-[18px]">call_received</span>
+                </div>
+              </div>
+              <div className="font-heading text-2xl md:text-3xl font-bold text-[var(--error)]">
+                {formatCurrency(totalOwed, currency)}
+              </div>
+            </div>
+            <div className="mt-4 pt-3 border-t border-[var(--outline-variant)]/15 flex items-center justify-between text-[11px] font-mono text-[var(--on-surface-variant)]">
+              <span>Repaid: <strong className="text-[var(--on-surface)]">{formatCurrency(totalRepaymentsMade, currency)}</strong></span>
+              <span>{activeOwedCount} active</span>
             </div>
           </div>
 
-          <div className="bg-[var(--primary)] text-[var(--on-primary)] p-5 rounded-2xl shadow-md">
-            <span className="font-mono text-xs uppercase tracking-wider font-semibold text-[var(--on-primary-container)]">
-              Net Position
-            </span>
-            <div className="font-heading text-2xl font-bold mt-2">
-              {formatCurrency(netPosition, currency)}
+          {/* Net Portfolio Position */}
+          <div className="bg-[var(--primary)] text-[var(--on-primary)] p-5 rounded-2xl shadow-md flex flex-col justify-between relative overflow-hidden">
+            <div className="absolute -right-6 -top-6 w-24 h-24 rounded-full bg-white/10 blur-xl pointer-events-none" />
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-mono text-xs uppercase tracking-wider font-semibold opacity-90">
+                  Net Position
+                </span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-black/20 text-white">
+                  {netPosition > 0 ? 'Creditor' : netPosition < 0 ? 'Borrower' : 'Balanced'}
+                </span>
+              </div>
+              <div className="font-heading text-2xl md:text-3xl font-bold">
+                {netPosition > 0 ? '+' : ''}
+                {formatCurrency(netPosition, currency)}
+              </div>
+            </div>
+            <div className="mt-4 pt-3 border-t border-white/15 flex items-center justify-between text-[11px] font-mono opacity-90">
+              <span>Lifetime Vol: {formatCurrency(lifetimeLentPrincipal + lifetimeBorrowedPrincipal, currency)}</span>
+              <span>{settledDebtsCount} settled</span>
             </div>
           </div>
 
-          <div className="bg-[var(--surface-container-lowest)] p-5 rounded-2xl border border-[var(--outline-variant)]/30 shadow-sm">
-            <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider font-semibold">
-              Interest Accrued
-            </span>
-            <div className="font-heading text-2xl font-bold text-[var(--secondary)] mt-2">
-              +{formatCurrency(interestAccrued, currency, { showDecimals: true })}
+          {/* Accrued Interest Yield */}
+          <div className="bg-[var(--surface-container-lowest)] p-5 rounded-2xl border border-[var(--outline-variant)]/30 shadow-sm flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider font-semibold">
+                  Interest Yield
+                </span>
+                <div className="w-8 h-8 rounded-xl bg-[var(--primary)]/12 text-[var(--primary)] flex items-center justify-center">
+                  <span className="material-symbols-outlined text-[18px]">monitoring</span>
+                </div>
+              </div>
+              <div className="font-heading text-2xl md:text-3xl font-bold text-[var(--secondary)]">
+                +{formatCurrency(interestAccrued, currency, { showDecimals: true })}
+              </div>
+            </div>
+            <div className="mt-4 pt-3 border-t border-[var(--outline-variant)]/15 flex items-center justify-between text-[11px] font-mono text-[var(--on-surface-variant)]">
+              <span>Borrow Cost: {formatCurrency(borrowingInterestCost, currency, { showDecimals: true })}</span>
+              <span>{pendingCount > 0 ? `${pendingCount} pending` : 'Verified'}</span>
             </div>
           </div>
         </section>
@@ -304,60 +510,95 @@ export default function AnalyticsPage() {
 
       {/* 2-Column Analytics Grid */}
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left: Net Flow & Age Distribution */}
+        {/* Left: Net Flow, Age Distribution, Forecast & Counterparty Exposure */}
         <div className="lg:col-span-8 space-y-6">
           {/* Debt Age Distribution */}
           <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 md:p-8 border border-[var(--outline-variant)]/30 shadow-sm">
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex justify-between items-center mb-6 flex-wrap gap-2">
               <div>
                 <h3 className="font-heading text-lg font-bold text-[var(--on-surface)]">
-                  Debt Age Distribution
+                  Active Debt Age Distribution
                 </h3>
                 <p className="font-mono text-xs text-[var(--on-surface-variant)] mt-0.5">
-                  Outstanding principal grouped by maturity duration
+                  Unpaid active balance grouped by days elapsed since origination
                 </p>
               </div>
-              <span className="font-mono text-xs text-[var(--on-surface-variant)] bg-[var(--surface-container)] px-3 py-1 rounded-lg">
-                Outstanding Time
+              <span className="font-mono text-xs font-bold text-[var(--on-surface)] bg-[var(--surface-container)] px-3 py-1 rounded-lg border border-[var(--outline-variant)]/20">
+                Active Exposure: {formatCurrency(totalAgeExposure, currency)}
               </span>
             </div>
 
-            <div className="h-44 flex items-end gap-4 pt-4 border-b border-[var(--outline-variant)]/20 pb-2">
-              {Object.entries(ageBuckets).map(([bucket, amount], idx) => {
-                const heightPercent = Math.max(12, (amount / maxBucketVal) * 100);
+            <div className="h-52 flex items-end gap-3 sm:gap-5 pt-8 border-b border-[var(--outline-variant)]/20 pb-3">
+              {Object.entries(ageBuckets).map(([bucket, data], idx) => {
+                const { amount, count } = data;
+                const heightPercent = amount > 0 ? Math.max(14, Math.round((amount / maxBucketVal) * 100)) : 3;
+                const shareOfTotal = totalAgeExposure > 0 ? Math.round((amount / totalAgeExposure) * 100) : 0;
                 const isOverdueRisk = idx >= 3;
                 return (
-                  <div key={bucket} className="flex-1 flex flex-col items-center gap-2 group h-full justify-end">
-                    <div
-                      className={`w-full rounded-t transition-all ${
-                        isOverdueRisk ? 'bg-[var(--error)]/70 hover:bg-[var(--error)]' : 'bg-[var(--secondary)]/80 hover:bg-[var(--secondary)]'
+                  <div key={bucket} className="flex-1 flex flex-col items-center gap-1.5 group h-full justify-end min-w-0">
+                    <span
+                      className={`font-mono text-[10px] sm:text-[11px] font-bold truncate max-w-full ${
+                        amount > 0
+                          ? isOverdueRisk
+                            ? 'text-[var(--error)]'
+                            : 'text-[var(--on-surface)]'
+                          : 'text-[var(--outline)]'
                       }`}
-                      style={{ height: `${heightPercent}%` }}
-                      title={`${bucket}: ${formatCurrency(amount, currency)}`}
-                    />
-                    <span className="font-mono text-xs text-[var(--on-surface-variant)] font-semibold">
-                      {bucket}
+                    >
+                      {formatCurrency(amount, currency)}
                     </span>
+                    <div className="w-full flex-1 flex items-end justify-center">
+                      <div
+                        className={`w-full max-w-[64px] rounded-t-lg transition-all duration-300 ${
+                          amount === 0
+                            ? 'bg-[var(--outline-variant)]/30'
+                            : isOverdueRisk
+                            ? 'bg-[var(--error)]/80 group-hover:bg-[var(--error)] shadow-xs'
+                            : 'bg-[var(--secondary)]/85 group-hover:bg-[var(--secondary)] shadow-xs'
+                        }`}
+                        style={{ height: `${heightPercent}%` }}
+                        title={`${bucket}: ${formatCurrency(amount, currency)} (${count} active ${count === 1 ? 'contract' : 'contracts'})`}
+                      />
+                    </div>
+                    <div className="text-center mt-1">
+                      <span className="font-mono text-xs text-[var(--on-surface)] font-semibold block">
+                        {bucket}
+                      </span>
+                      <span className="font-mono text-[10px] text-[var(--on-surface-variant)] block">
+                        {amount > 0 ? `${shareOfTotal}% (${count})` : '0 txns'}
+                      </span>
+                    </div>
                   </div>
                 );
               })}
             </div>
           </div>
 
-          {/* 6-Month Liquidity Forecast Table */}
+          {/* 6-Month Liquidity & Maturity Forecast Table */}
           <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 md:p-8 border border-[var(--outline-variant)]/30 shadow-sm">
-            <h3 className="font-heading text-lg font-bold text-[var(--on-surface)] mb-4">
-              6-Month Liquidity Forecast
-            </h3>
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
+              <div>
+                <h3 className="font-heading text-lg font-bold text-[var(--on-surface)]">
+                  6-Month Maturity &amp; Liquidity Schedule
+                </h3>
+                <p className="font-mono text-xs text-[var(--on-surface-variant)] mt-0.5">
+                  Scheduled due-date settlements combined with amortized open receivables
+                </p>
+              </div>
+              <span className="font-mono text-[11px] text-[var(--on-surface-variant)] bg-[var(--surface-container)] px-2.5 py-1 rounded-lg">
+                Rolling 6M Window
+              </span>
+            </div>
 
             <div className="overflow-x-auto">
               <table className="w-full text-left font-body-md text-xs">
                 <thead>
                   <tr className="border-b border-[var(--outline-variant)]/20 font-mono text-[var(--on-surface-variant)] uppercase">
-                    <th className="pb-3 font-semibold">Month</th>
+                    <th className="pb-3 font-semibold">Period</th>
                     <th className="pb-3 font-semibold">Expected Inflow</th>
-                    <th className="pb-3 font-semibold">Risk Adj.</th>
-                    <th className="pb-3 font-semibold text-right">Certainty</th>
+                    <th className="pb-3 font-semibold">Payable Outflow</th>
+                    <th className="pb-3 font-semibold">Net Cashflow</th>
+                    <th className="pb-3 font-semibold text-right">Schedule</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--outline-variant)]/10 font-mono">
@@ -368,14 +609,28 @@ export default function AnalyticsPage() {
                         +{formatCurrency(row.inflow, currency)}
                       </td>
                       <td className="py-3 text-[var(--error)]">
-                        {formatCurrency(row.riskAdj, currency)}
+                        {row.outflow > 0 ? `-${formatCurrency(row.outflow, currency)}` : formatCurrency(0, currency)}
+                      </td>
+                      <td
+                        className={`py-3 font-bold ${
+                          row.netFlow > 0
+                            ? 'text-[var(--primary)]'
+                            : row.netFlow < 0
+                            ? 'text-[var(--error)]'
+                            : 'text-[var(--on-surface-variant)]'
+                        }`}
+                      >
+                        {row.netFlow > 0 ? '+' : ''}
+                        {formatCurrency(row.netFlow, currency)}
                       </td>
                       <td className="py-3 text-right">
                         <span
                           className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
-                            row.status === 'High Certainty'
-                              ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
-                              : 'bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400'
+                            row.dueCount > 0
+                              ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                              : row.inflow > 0 || row.outflow > 0
+                              ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                              : 'bg-[var(--surface-container-high)] text-[var(--on-surface-variant)]'
                           }`}
                         >
                           {row.status}
@@ -387,6 +642,82 @@ export default function AnalyticsPage() {
               </table>
             </div>
           </div>
+
+          {/* Counterparty Exposure & Concentration */}
+          {topCounterparties.length > 0 && (
+            <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 md:p-8 border border-[var(--outline-variant)]/30 shadow-sm">
+              <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
+                <div>
+                  <h3 className="font-heading text-lg font-bold text-[var(--on-surface)]">
+                    Top Counterparty Exposure
+                  </h3>
+                  <p className="font-mono text-xs text-[var(--on-surface-variant)] mt-0.5">
+                    Bilateral concentration and repayment progress by contact
+                  </p>
+                </div>
+                <Link
+                  href="/directory"
+                  className="font-mono text-xs font-bold text-[var(--primary)] hover:underline flex items-center gap-0.5"
+                >
+                  <span>Directory</span>
+                  <span className="material-symbols-outlined text-[15px]">chevron_right</span>
+                </Link>
+              </div>
+
+              <div className="space-y-3">
+                {topCounterparties.map((cp) => {
+                  const cpNet = round2(cp.lentBalance - cp.owedBalance);
+                  const cpTotalObligation = cp.lentBalance + cp.owedBalance + cp.totalPaid;
+                  const cpRepaidPct =
+                    cpTotalObligation > 0
+                      ? Math.min(100, Math.round((cp.totalPaid / cpTotalObligation) * 100))
+                      : 100;
+
+                  return (
+                    <Link
+                      key={cp.id}
+                      href={`/directory/detail?id=${cp.id}`}
+                      className="block p-3.5 rounded-xl bg-[var(--surface-container-low)]/70 hover:bg-[var(--surface-container)] border border-[var(--outline-variant)]/20 transition-colors"
+                    >
+                      <div className="flex items-center justify-between gap-3 mb-2">
+                        <div className="min-w-0">
+                          <div className="font-heading font-bold text-sm text-[var(--on-surface)] truncate">
+                            {cp.name}
+                          </div>
+                          <div className="font-mono text-[11px] text-[var(--on-surface-variant)]">
+                            {cp.activeCount} active &bull; {cp.settledCount} settled &bull; Repaid {cpRepaidPct}%
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div
+                            className={`font-mono text-sm font-bold ${
+                              cpNet > 0
+                                ? 'text-[var(--secondary)]'
+                                : cpNet < 0
+                                ? 'text-[var(--error)]'
+                                : 'text-[var(--on-surface-variant)]'
+                            }`}
+                          >
+                            {cpNet > 0 ? '+' : ''}
+                            {formatCurrency(cpNet, currency)}
+                          </div>
+                          <span className="font-mono text-[10px] text-[var(--on-surface-variant)]">
+                            {cpNet > 0 ? 'Owes You' : cpNet < 0 ? 'You Owe' : 'Settled'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="w-full h-1.5 rounded-full bg-[var(--surface-container-high)] overflow-hidden">
+                        <div
+                          className="h-full bg-[var(--primary)] rounded-full transition-all duration-500"
+                          style={{ width: `${cpRepaidPct}%` }}
+                        />
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Payment Channels & Modes Distribution */}
           <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 md:p-8 border border-[var(--outline-variant)]/30 shadow-sm">

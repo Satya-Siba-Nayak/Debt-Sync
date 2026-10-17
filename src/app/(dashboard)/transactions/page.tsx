@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment } from '@/lib/types/database';
-import { calculateDebtBalance, sortDebtsActiveFirst, isDebtPurgedByAdmin } from '@/lib/utils/interest';
+import { calculateDebtBalance, sortDebtsActiveFirst, isDebtPurgedByAdmin, round2 } from '@/lib/utils/interest';
 import { formatCurrency } from '@/lib/utils/currency';
 import { Chip } from '@/components/ui/Chip';
 import { Avatar } from '@/components/ui/Avatar';
@@ -18,6 +18,7 @@ import { getLedgerCache, setLedgerCache } from '@/lib/stores/ledger-store';
 import { SkeletonTableRows } from '@/components/ui/Skeleton';
 import { parseSplitDetails, parseShareMetadata, getCleanDebtNotes } from '@/lib/utils/split-bills';
 import { respondToDebtAgreement, cancelPendingDebt } from '@/lib/utils/debt-acceptance';
+import { exportUserDataToCSV } from '@/lib/utils/export-csv';
 import Link from 'next/link';
 
 function extractDeepLinkedDebtId(searchParams: URLSearchParams | null): string | null {
@@ -59,6 +60,9 @@ function extractDeepLinkedDebtId(searchParams: URLSearchParams | null): string |
   return id ? id.trim() : null;
 }
 
+type FilterTab = 'all' | 'pending' | 'lent' | 'borrowed' | 'settled' | 'declined' | 'purged';
+const VALID_FILTERS: FilterTab[] = ['all', 'pending', 'lent', 'borrowed', 'settled', 'declined', 'purged'];
+
 function TransactionsPageContent() {
   const supabase = createClient();
   const searchParams = useSearchParams();
@@ -66,21 +70,29 @@ function TransactionsPageContent() {
     extractDeepLinkedDebtId(searchParams)
   );
 
-  useEffect(() => {
-    setDeepLinkedDebtId(extractDeepLinkedDebtId(searchParams));
-  }, [searchParams]);
-
   const initialCache = getLedgerCache();
   const [loading, setLoading] = useState(!initialCache);
   const [debts, setDebts] = useState<Debt[]>(initialCache?.debts || []);
   const [payments, setPayments] = useState<Payment[]>(initialCache?.payments || []);
   const [currentUserId, setCurrentUserId] = useState<string | null>(initialCache?.userId || null);
   const [currency, setCurrency] = useState(initialCache?.currency || 'inr');
-  const [filter, setFilter] = useState<'all' | 'pending' | 'lent' | 'borrowed' | 'settled' | 'declined' | 'purged'>('all');
+  const [filter, setFilter] = useState<FilterTab>(() => {
+    const param = searchParams?.get('filter')?.toLowerCase() as FilterTab;
+    return VALID_FILTERS.includes(param) ? param : 'all';
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDebtForNote, setSelectedDebtForNote] = useState<Debt | null>(null);
   const [selectedDebtForDetail, setSelectedDebtForDetail] = useState<Debt | null>(null);
   const [selectedDebtForEdit, setSelectedDebtForEdit] = useState<Debt | null>(null);
+  const [exportingCsv, setExportingCsv] = useState(false);
+
+  useEffect(() => {
+    setDeepLinkedDebtId(extractDeepLinkedDebtId(searchParams));
+    const param = searchParams?.get('filter')?.toLowerCase() as FilterTab;
+    if (param && VALID_FILTERS.includes(param)) {
+      setFilter(param);
+    }
+  }, [searchParams]);
 
   const handledDeepLinkRef = useRef<string | null>(null);
   const dismissedDeepLinkRef = useRef<string | null>(null);
@@ -256,6 +268,16 @@ function TransactionsPageContent() {
     }
   };
 
+  const handleExportCSV = async () => {
+    if (!currentUserId || exportingCsv) return;
+    setExportingCsv(true);
+    try {
+      await exportUserDataToCSV(supabase, currentUserId);
+    } finally {
+      setExportingCsv(false);
+    }
+  };
+
   const visibleDebts = debts.filter((d) => !d.hidden_by?.includes(currentUserId || ''));
 
   const filteredDebts = sortDebtsActiveFirst(
@@ -297,9 +319,31 @@ function TransactionsPageContent() {
       })
   );
 
+  // Compute live summary metrics for the currently filtered view
+  const filteredSummary = React.useMemo(() => {
+    let receivable = 0;
+    let payable = 0;
+    let settledPaid = 0;
+    for (const d of filteredDebts) {
+      if (d.status === 'declined' || isDebtPurgedByAdmin(d)) continue;
+      const debtPayments = payments.filter((p) => p.debt_id === d.id);
+      const calc = calculateDebtBalance(d, debtPayments);
+      settledPaid += calc.totalPaid;
+      if (d.status === 'active') {
+        if (d.lender_id === currentUserId) receivable += calc.currentBalance;
+        else payable += calc.currentBalance;
+      }
+    }
+    return {
+      receivable: round2(receivable),
+      payable: round2(payable),
+      settledPaid: round2(settledPaid),
+    };
+  }, [filteredDebts, payments, currentUserId]);
+
   return (
     <div className="page-enter space-y-6 md:space-y-8">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <h1 className="font-heading text-2xl md:text-3xl font-bold text-[var(--on-surface)]">
             Transactions History
@@ -309,7 +353,7 @@ function TransactionsPageContent() {
           </p>
         </div>
 
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-wrap">
           {/* Instant Search Bar */}
           <div className="relative">
             <span className="material-symbols-outlined absolute left-3 top-2.5 text-[16px] text-[var(--on-surface-variant)]">
@@ -320,37 +364,73 @@ function TransactionsPageContent() {
               placeholder="Search notes, names, amounts..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full sm:w-64 pl-9 pr-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-base sm:text-xs text-[var(--on-surface)] font-mono outline-none focus:border-[var(--primary)]"
+              className="w-full sm:w-60 pl-9 pr-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-base sm:text-xs text-[var(--on-surface)] font-mono outline-none focus:border-[var(--primary)]"
             />
           </div>
 
-          <div className="flex bg-[var(--surface-container)] p-1 rounded-xl border border-[var(--outline-variant)]/20 self-start flex-wrap gap-0.5">
-            {(['all', 'pending', 'lent', 'borrowed', 'settled', 'declined', 'purged'] as const).map((tab) => {
-              const count = tab === 'pending'
-                ? visibleDebts.filter((d) => d.status === 'pending' && !isDebtPurgedByAdmin(d)).length
-                : tab === 'purged'
-                ? visibleDebts.filter((d) => isDebtPurgedByAdmin(d)).length
-                : 0;
-              return (
-                <button
-                  key={tab}
-                  onClick={() => setFilter(tab)}
-                  className={`px-3 py-1.5 font-mono text-xs font-bold rounded-lg uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
-                    filter === tab
-                      ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-sm'
-                      : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
-                  }`}
-                >
-                  <span>{tab}</span>
-                  {count > 0 && (
-                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400">
-                      {count}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+          <button
+            type="button"
+            onClick={handleExportCSV}
+            disabled={exportingCsv || !currentUserId}
+            className="px-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-lowest)] hover:bg-[var(--surface-container)] text-[var(--on-surface)] font-mono text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+            title="Export ledger to CSV"
+          >
+            <span className="material-symbols-outlined text-[15px] text-[var(--primary)]">download</span>
+            <span>{exportingCsv ? 'Exporting...' : 'Export CSV'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Filter Tabs & Live Summary Bar */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-[var(--surface-container-lowest)] p-3.5 rounded-2xl border border-[var(--outline-variant)]/30 shadow-2xs">
+        <div className="flex bg-[var(--surface-container)] p-1 rounded-xl border border-[var(--outline-variant)]/20 self-start flex-wrap gap-0.5">
+          {VALID_FILTERS.map((tab) => {
+            const count = tab === 'pending'
+              ? visibleDebts.filter((d) => d.status === 'pending' && !isDebtPurgedByAdmin(d)).length
+              : tab === 'purged'
+              ? visibleDebts.filter((d) => isDebtPurgedByAdmin(d)).length
+              : 0;
+            return (
+              <button
+                key={tab}
+                onClick={() => setFilter(tab)}
+                className={`px-3 py-1.5 font-mono text-xs font-bold rounded-lg uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
+                  filter === tab
+                    ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-sm'
+                    : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                }`}
+              >
+                <span>{tab}</span>
+                {count > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400">
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center gap-4 flex-wrap text-xs font-mono text-[var(--on-surface-variant)] px-1">
+          <span>
+            Showing <strong className="text-[var(--on-surface)]">{filteredDebts.length}</strong> {filteredDebts.length === 1 ? 'entry' : 'entries'}
+          </span>
+          <span className="text-[var(--outline-variant)]">&bull;</span>
+          <span>
+            Receivable: <strong className="text-[var(--secondary)]">{formatCurrency(filteredSummary.receivable, currency)}</strong>
+          </span>
+          <span className="text-[var(--outline-variant)]">&bull;</span>
+          <span>
+            Payable: <strong className="text-[var(--error)]">{formatCurrency(filteredSummary.payable, currency)}</strong>
+          </span>
+          {filteredSummary.settledPaid > 0 && (
+            <>
+              <span className="text-[var(--outline-variant)]">&bull;</span>
+              <span>
+                Repaid: <strong className="text-[var(--on-surface)]">{formatCurrency(filteredSummary.settledPaid, currency)}</strong>
+              </span>
+            </>
+          )}
         </div>
       </div>
 

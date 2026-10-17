@@ -33,18 +33,26 @@ export default function GlobalDashboardPage() {
   const [selectedDebtForEdit, setSelectedDebtForEdit] = useState<Debt | null>(null);
   const [selectedDebtForDetail, setSelectedDebtForDetail] = useState<Debt | null>(null);
   const [showFlowGuide, setShowFlowGuide] = useState(false);
+  const [hasCompletedFetch, setHasCompletedFetch] = useState(Boolean(initialCache));
+  const [isFlowGuideDismissed, setIsFlowGuideDismissed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    try {
+      return localStorage.getItem('debtsync_flow_guide_dismissed') === 'true';
+    } catch {
+      return false;
+    }
+  });
 
   useEffect(() => {
     try {
-      const dismissed = localStorage.getItem('debtsync_flow_guide_dismissed');
-      if (!dismissed) {
-        setShowFlowGuide(true);
-      }
+      const dismissed = localStorage.getItem('debtsync_flow_guide_dismissed') === 'true';
+      setIsFlowGuideDismissed(dismissed);
     } catch {}
   }, []);
 
   const toggleFlowGuide = (next: boolean) => {
     setShowFlowGuide(next);
+    setIsFlowGuideDismissed(!next);
     try {
       if (!next) localStorage.setItem('debtsync_flow_guide_dismissed', 'true');
       else localStorage.removeItem('debtsync_flow_guide_dismissed');
@@ -126,6 +134,7 @@ export default function GlobalDashboardPage() {
 
       setDebts(allDebts);
       setPayments(allPayments);
+      setHasCompletedFetch(true);
 
       // Compute calculations instantly via shared utility
       const stats = computeDashboardStats(allDebts, allPayments, user.id);
@@ -248,6 +257,8 @@ export default function GlobalDashboardPage() {
   }, [visibleDebts, payments, currentUserId]);
 
   const sortedDebts = React.useMemo(() => sortDebtsActiveFirst(visibleDebts), [visibleDebts]);
+  const shouldDisplayFlowGuide =
+    showFlowGuide || (hasCompletedFetch && !loading && !isFlowGuideDismissed && debts.length === 0);
 
   return (
     <div className="page-enter flex flex-col gap-6 md:gap-8">
@@ -346,15 +357,8 @@ export default function GlobalDashboardPage() {
                     onClick={(e) => e.stopPropagation()}
                   >
                     <button
-                      type="button"
-                      onClick={() => setSelectedDebtForDetail(d)}
-                      className="px-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 text-[var(--on-surface)] font-mono text-xs font-bold hover:bg-[var(--surface-container)] transition-colors cursor-pointer"
-                    >
-                      Details
-                    </button>
-                    <button
                       onClick={() => handleAcceptDebt(d.id, 'declined')}
-                      className="px-3 py-1.5 rounded-xl border border-error/30 text-error font-mono text-xs font-bold hover:bg-error/10 transition-colors cursor-pointer"
+                      className="px-3.5 py-1.5 rounded-xl border border-error/30 text-error font-mono text-xs font-bold hover:bg-error/10 transition-colors cursor-pointer"
                     >
                       Decline
                     </button>
@@ -436,7 +440,7 @@ export default function GlobalDashboardPage() {
       )}
 
       {/* Interactive 4-Stage Bilateral Workflow Guide */}
-      {(showFlowGuide || (!loading && debts.length === 0)) && (
+      {shouldDisplayFlowGuide && (
         <section className="bg-[var(--surface-container-lowest)] rounded-2xl p-5 md:p-6 border border-[var(--primary)]/25 shadow-xs relative overflow-hidden">
           <div className="flex items-start justify-between gap-4 mb-4">
             <div className="flex items-center gap-2.5">
@@ -452,17 +456,15 @@ export default function GlobalDashboardPage() {
                 </p>
               </div>
             </div>
-            {debts.length > 0 && (
-              <button
-                type="button"
-                onClick={() => toggleFlowGuide(false)}
-                className="px-2.5 py-1 rounded-lg text-[11px] font-mono text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors flex items-center gap-1 cursor-pointer shrink-0"
-                title="Hide workflow guide"
-              >
-                <span>Got it</span>
-                <span className="material-symbols-outlined text-[14px]">close</span>
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => toggleFlowGuide(false)}
+              className="px-2.5 py-1 rounded-lg text-[11px] font-mono text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors flex items-center gap-1 cursor-pointer shrink-0"
+              title="Dismiss workflow guide"
+            >
+              <span>Got it</span>
+              <span className="material-symbols-outlined text-[14px]">close</span>
+            </button>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -541,6 +543,8 @@ export default function GlobalDashboardPage() {
           activeOwedCount={activeOwedCount}
           currency={currency}
           monthlyGrowth={dailyAccrualRate * 30}
+          totalInterestAccrued={totalInterestAccrued}
+          borrowingInterestAccrued={borrowingInterestAccrued}
         />
       )}
 
@@ -579,7 +583,7 @@ export default function GlobalDashboardPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            {!showFlowGuide && debts.length > 0 && (
+            {!shouldDisplayFlowGuide && (
               <button
                 type="button"
                 onClick={() => toggleFlowGuide(true)}
@@ -610,8 +614,26 @@ export default function GlobalDashboardPage() {
               No active debts recorded yet
             </p>
             <p className="font-mono text-xs text-[var(--on-surface-variant)] mt-1">
-              Click &quot;New Transaction&quot; to log your first loan or borrowing
+              Record a peer-to-peer loan or split a group expense to get started
             </p>
+            <div className="mt-4 flex items-center justify-center gap-2.5 flex-wrap">
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_record_modal'))}
+                className="px-4 py-2 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 transition-opacity shadow-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[16px]">add</span>
+                <span>New Transaction</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_split_modal'))}
+                className="px-4 py-2 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">call_split</span>
+                <span>Split a Bill</span>
+              </button>
+            </div>
           </div>
         ) : (
           <div>

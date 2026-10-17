@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { ThemeToggle } from '../ui/ThemeToggle';
 import { Avatar, AVATAR_PRESETS } from '../ui/Avatar';
 import { BrandLogo } from '../ui/BrandLogo';
@@ -24,7 +24,7 @@ interface TopBarProps {
 }
 
 export function TopBar({
-  title = 'Global Dashboard',
+  title,
   userId,
   userName,
   userEmail,
@@ -45,6 +45,30 @@ export function TopBar({
   const triggerDesktopRef = useRef<HTMLButtonElement>(null);
   const supabase = createClient();
   const router = useRouter();
+  const pathname = usePathname();
+
+  const resolvedHeader = React.useMemo(() => {
+    if (title) return { heading: title, subtitle: 'Bilateral P2P Financial Ledger', icon: 'dashboard' };
+    if (pathname?.startsWith('/admin')) {
+      return { heading: 'Admin Observatory', subtitle: 'Platform telemetry, user governance & live ledgers', icon: 'shield_person' };
+    }
+    if (pathname?.startsWith('/directory/detail')) {
+      return { heading: 'Counterparty Ledger', subtitle: 'Bilateral agreement history & direct settlement', icon: 'menu_book' };
+    }
+    if (pathname?.startsWith('/directory')) {
+      return { heading: 'People Directory', subtitle: 'Counterparties, trust scores & net positions', icon: 'group' };
+    }
+    if (pathname?.startsWith('/transactions')) {
+      return { heading: 'Transactions Ledger', subtitle: 'Audit trail of peer-to-peer agreements & repayments', icon: 'receipt_long' };
+    }
+    if (pathname?.startsWith('/analytics')) {
+      return { heading: 'Analytics & Performance', subtitle: 'Portfolio yield, repayment velocity & maturity profile', icon: 'monitoring' };
+    }
+    if (pathname?.startsWith('/settings')) {
+      return { heading: 'Account & Preferences', subtitle: 'Profile identity, UPI settlement & alert controls', icon: 'tune' };
+    }
+    return { heading: 'Global Dashboard', subtitle: 'Real-time bilateral portfolio & active obligations', icon: 'space_dashboard' };
+  }, [title, pathname]);
 
   // Close dropdown on outside click or escape
   useEffect(() => {
@@ -135,21 +159,55 @@ export function TopBar({
       </header>
 
       {/* Desktop Header */}
-      <div className="hidden md:flex justify-between items-center px-8 py-4 sticky top-0 bg-[var(--surface)]/90 backdrop-blur-md z-30 border-b border-[var(--outline-variant)]/20">
-        <div>
-          <h1 className="font-heading text-2xl font-bold text-[var(--on-surface)]">
-            {title}
-          </h1>
+      <div className="hidden md:flex justify-between items-center px-8 py-3.5 sticky top-0 bg-[var(--surface)]/90 backdrop-blur-md z-30 border-b border-[var(--outline-variant)]/20">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-9 h-9 rounded-xl bg-[var(--surface-container-high)] text-[var(--primary)] flex items-center justify-center shrink-0 border border-[var(--outline-variant)]/20">
+            <span className="material-symbols-outlined text-[19px]">
+              {resolvedHeader.icon}
+            </span>
+          </div>
+          <div className="min-w-0">
+            <h1 className="font-heading text-xl font-bold text-[var(--on-surface)] truncate leading-tight">
+              {resolvedHeader.heading}
+            </h1>
+            <p className="font-mono text-[11px] text-[var(--on-surface-variant)] truncate">
+              {resolvedHeader.subtitle}
+            </p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
+          {!inAdminMode && (
+            <div className="flex items-center gap-2 mr-1">
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_split_modal'))}
+                className="px-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-low)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
+                title="Split a bill among multiple people"
+              >
+                <span className="material-symbols-outlined text-[15px] text-[var(--primary)]">call_split</span>
+                <span>Split Bill</span>
+              </button>
+              {onNewTransaction && (
+                <button
+                  type="button"
+                  onClick={onNewTransaction}
+                  className="px-3.5 py-1.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 transition-opacity shadow-xs flex items-center gap-1 cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[15px]">add</span>
+                  <span>New Entry</span>
+                </button>
+              )}
+            </div>
+          )}
+
           <NotificationCenter />
 
           <button
             ref={triggerDesktopRef}
             type="button"
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-            className="flex items-center gap-2.5 group cursor-pointer focus:outline-none"
+            className="flex items-center gap-2.5 pl-2 border-l border-[var(--outline-variant)]/20 group cursor-pointer focus:outline-none"
             title="Profile & Avatar menu"
           >
             <Avatar
@@ -159,7 +217,7 @@ export function TopBar({
               className="rounded-full group-hover:ring-2 ring-[var(--primary)]/30 transition-all shadow-sm"
             />
             {userName && (
-              <span className="font-mono text-xs font-semibold text-[var(--on-surface)] group-hover:text-[var(--primary)] transition-colors">
+              <span className="font-mono text-xs font-semibold text-[var(--on-surface)] group-hover:text-[var(--primary)] transition-colors max-w-[140px] truncate">
                 {userName}
               </span>
             )}
