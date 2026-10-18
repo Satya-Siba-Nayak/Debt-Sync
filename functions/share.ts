@@ -312,12 +312,20 @@ export const onRequest = async (context: {
       token = '';
     }
 
-    // Also check pathname for UUID fallback: e.g. /share/uuid
+    // Also check pathname and full URL href for UUID fallback: e.g. /share/uuid or ?<uuid>
     const pathMatch = url.pathname.match(
       /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
     );
     if (!debtId && pathMatch) {
       debtId = pathMatch[0];
+    }
+    if (!debtId) {
+      const anyHrefUuid = url.href.match(
+        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+      );
+      if (anyHrefUuid) {
+        debtId = anyHrefUuid[0];
+      }
     }
 
     // If request arrived at pathname /share/<uuid>, 302 redirect to canonical /share?id=<uuid>
@@ -416,9 +424,13 @@ export const onRequest = async (context: {
             );
 
             if (!isGlobalValid) {
-              previewTitle = '🔒 Public Link Disabled — DebtSync';
-              previewDescription =
-                'Global public sharing is turned off for this transaction. Only participating members can view it.';
+              const isRotatedOrExpired = Boolean(token && shareMeta?.globalToken && shareMeta.globalToken !== token);
+              previewTitle = isRotatedOrExpired
+                ? '🔒 Public Link Expired or Rotated — DebtSync'
+                : '🔒 Public Link Disabled — DebtSync';
+              previewDescription = isRotatedOrExpired
+                ? 'This public link contains an expired or previously rotated token. Participating members can log in on DebtSync to view the active agreement.'
+                : 'Global public sharing is turned off for this transaction. Only participating members can view it.';
               themeColor = '#64748b';
             } else {
               const splitMeta = parseTagJson<{

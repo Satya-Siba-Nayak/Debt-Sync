@@ -126,6 +126,17 @@ function extractShareParams(searchParams: URLSearchParams | null): {
         debtId = pathMatch[0];
       }
     }
+
+    // 2e. Fallback to full href and referrer UUID: search whole URL for ANY valid UUID!
+    if (!debtId) {
+      const fullUrlStr = `${window.location.href} ${document.referrer || ''}`;
+      const anyUuidMatch = fullUrlStr.match(
+        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+      );
+      if (anyUuidMatch) {
+        debtId = anyUuidMatch[0];
+      }
+    }
   }
 
   // 3. If token is a UUID and debtId is empty, token was passed as the debt ID
@@ -143,6 +154,22 @@ function extractShareParams(searchParams: URLSearchParams | null): {
       if (p.startsWith('token=') && !token) {
         token = p.replace('token=', '');
       }
+    }
+  }
+
+  // 5. Session storage persistence & fallback
+  if (typeof window !== 'undefined') {
+    if (debtId && UUID_REGEX.test(debtId)) {
+      try {
+        sessionStorage.setItem('debtsync_last_share_id', debtId);
+      } catch (_) {}
+    } else if (!debtId) {
+      try {
+        const cached = sessionStorage.getItem('debtsync_last_share_id');
+        if (cached && UUID_REGEX.test(cached)) {
+          debtId = cached;
+        }
+      } catch (_) {}
     }
   }
 
@@ -191,6 +218,37 @@ function parseArbitraryShareInput(input: string): { debtId: string; token: strin
   return { debtId, token, mode };
 }
 
+function fallbackCopyTextToClipboard(text: string): boolean {
+  if (typeof document === 'undefined') return false;
+  try {
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.top = '-999999px';
+    textArea.style.left = '-999999px';
+    textArea.setAttribute('readonly', '');
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    const successful = document.execCommand('copy');
+    document.body.removeChild(textArea);
+    return successful;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  try {
+    if (navigator?.clipboard?.writeText && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (_) {}
+  return fallbackCopyTextToClipboard(text);
+}
+
 function ShareTransactionContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -235,9 +293,9 @@ function ShareTransactionContent() {
       }
     }
 
-    // If still empty during hydration frame 0, delay slightly before giving up
-    if (!effectiveDebtId && !effectiveToken && typeof window !== 'undefined') {
-      await new Promise((r) => setTimeout(r, 120));
+    // If still empty during hydration frame 0, delay up to 350ms before concluding
+    if (!effectiveDebtId && typeof window !== 'undefined') {
+      await new Promise((r) => setTimeout(r, 350));
       const liveAgain = extractShareParams(searchParams);
       if (liveAgain.debtId) {
         effectiveDebtId = liveAgain.debtId;
@@ -262,7 +320,11 @@ function ShareTransactionContent() {
     }
 
     if (!effectiveDebtId) {
-      setError('No transaction ID or token was found in this share link.');
+      if (effectiveToken) {
+        setError('The public share link you followed has expired or has been rotated by the owner.');
+      } else {
+        setError('No transaction ID or token was found in this share link.');
+      }
       setLoading(false);
       return;
     }
@@ -309,28 +371,68 @@ function ShareTransactionContent() {
 
       // 2. Fallback to SECURITY DEFINER RPC (works for unauthenticated global link viewers & split group members)
       if (!resolvedDebt) {
-        const { data: rpcData, error: rpcErr } = await supabase.rpc('get_debt_for_acceptance', {
-          p_debt_id: effectiveDebtId,
-        });
+        try {
+          const { data: rpcData, error: rpcErr } = await supabase.rpc('get_debt_for_acceptance', {
+            p_debt_id: effectiveDebtId,
+          });
 
-        if (!rpcErr && rpcData && rpcData.length > 0) {
-          const d = rpcData[0];
-          resolvedDebt = {
-            ...d,
-            lender: {
-              id: d.lender_id,
-              full_name: d.lender_name,
-              email: d.lender_email,
-              avatar_url: d.lender_avatar,
+          if (!rpcErr && rpcData && rpcData.length > 0) {
+            const d = rpcData[0];
+            resolvedDebt = {
+              ...d,
+              lender: {
+                id: d.lender_id,
+                full_name: d.lender_name,
+                email: d.lender_email,
+                avatar_url: d.lender_avatar,
+              },
+              borrower: {
+                id: d.borrower_id,
+                full_name: d.borrower_name,
+                email: d.borrower_email,
+                avatar_url: d.borrower_avatar,
+              },
+            };
+          }
+        } catch (_) {}
+      }
+
+      // 3. Fallback to anonymous client (prevents expired browser JWT tokens from failing RPC)
+      if (!resolvedDebt) {
+        try {
+          const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://bqnqtnpeyxruriiwjxbi.supabase.co';
+          const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJxbnF0bnBleXhydXJpaXdqeGJpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkxMjM4NjUsImV4cCI6MjEwNDY5OTg2NX0.TuqQEfoHbQ800oJ9JcjjHaTjUAMZ69BMsUTYQn7U3rU';
+          const anonRes = await fetch(`${supabaseUrl}/rest/v1/rpc/get_debt_for_acceptance`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              apikey: supabaseAnonKey,
+              Authorization: `Bearer ${supabaseAnonKey}`,
             },
-            borrower: {
-              id: d.borrower_id,
-              full_name: d.borrower_name,
-              email: d.borrower_email,
-              avatar_url: d.borrower_avatar,
-            },
-          };
-        }
+            body: JSON.stringify({ p_debt_id: effectiveDebtId }),
+          });
+          if (anonRes.ok) {
+            const rows = await anonRes.json();
+            if (Array.isArray(rows) && rows.length > 0) {
+              const d = rows[0];
+              resolvedDebt = {
+                ...d,
+                lender: {
+                  id: d.lender_id,
+                  full_name: d.lender_name,
+                  email: d.lender_email,
+                  avatar_url: d.lender_avatar,
+                },
+                borrower: {
+                  id: d.borrower_id,
+                  full_name: d.borrower_name,
+                  email: d.borrower_email,
+                  avatar_url: d.borrower_avatar,
+                },
+              };
+            }
+          }
+        } catch (_) {}
       }
 
       if (!resolvedDebt) {
@@ -458,6 +560,12 @@ function ShareTransactionContent() {
       shareMeta?.globalToken &&
       token &&
       token === shareMeta.globalToken
+  );
+
+  const isOutdatedToken = Boolean(
+    token &&
+      shareMeta?.globalToken &&
+      token !== shareMeta.globalToken
   );
 
   const canViewTransaction = isParticipant || isGlobalAccessValid;
@@ -590,11 +698,11 @@ function ShareTransactionContent() {
       } else {
         const origin = typeof window !== 'undefined' ? window.location.origin : '';
         const newGlobalUrl = `${origin}/share?id=${debt.id}&token=${nextShareMeta.globalToken}`;
-        try {
-          await navigator.clipboard.writeText(newGlobalUrl);
+        const copied = await copyTextToClipboard(newGlobalUrl);
+        if (copied) {
           setCopiedType('global');
           setTimeout(() => setCopiedType(null), 2500);
-        } catch (_) {}
+        }
         setFeedbackMessage({
           type: 'success',
           text:
@@ -648,6 +756,8 @@ function ShareTransactionContent() {
             <h2 className="font-heading text-lg font-bold text-[var(--on-surface)]">
               {error?.includes('No transaction ID')
                 ? 'Missing Transaction ID'
+                : error?.includes('expired or has been rotated')
+                ? 'Link Expired or Rotated'
                 : 'Transaction Not Found'}
             </h2>
             <p className="font-mono text-xs text-[var(--on-surface-variant)] leading-relaxed">
@@ -728,7 +838,7 @@ function ShareTransactionContent() {
           <div className="w-full max-w-md bg-[var(--surface-container-lowest)] rounded-2xl p-6 md:p-8 border border-[var(--outline-variant)]/30 shadow-xl text-center space-y-5">
             <div className="w-14 h-14 rounded-2xl bg-[var(--primary)]/10 border border-[var(--primary)]/20 flex items-center justify-center mx-auto text-[var(--primary)]">
               <span className="material-symbols-outlined text-3xl">
-                {wasGlobalLinkAttempt ? 'link_off' : 'lock'}
+                {isOutdatedToken ? 'update_disabled' : wasGlobalLinkAttempt ? 'link_off' : 'lock'}
               </span>
             </div>
 
@@ -736,18 +846,24 @@ function ShareTransactionContent() {
               <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--surface-container-high)] font-mono text-[10px] font-bold uppercase tracking-wider text-[var(--on-surface-variant)]">
                 <span className="material-symbols-outlined text-[12px]">verified_user</span>
                 <span>
-                  {wasGlobalLinkAttempt
+                  {isOutdatedToken
+                    ? 'Global Token Rotated'
+                    : wasGlobalLinkAttempt
                     ? 'Global Link Inactive'
                     : 'Participants-Only Protected Link'}
                 </span>
               </div>
               <h1 className="font-heading text-xl font-bold text-[var(--on-surface)]">
-                {wasGlobalLinkAttempt
+                {isOutdatedToken
+                  ? 'Public Link Rotated or Expired'
+                  : wasGlobalLinkAttempt
                   ? 'Public Link Disabled or Expired'
                   : 'Participant Verification Required'}
               </h1>
               <p className="text-xs text-[var(--on-surface-variant)] leading-relaxed">
-                {wasGlobalLinkAttempt
+                {isOutdatedToken
+                  ? 'This link contains an expired or previously rotated token. A participant has regenerated the public link for this transaction. If you are a participating member of this transaction, sign in below to view it.'
+                  : wasGlobalLinkAttempt
                   ? `${disabledByInfo} Only participating members of this transaction (Lender, Borrower, or Split Bill members) can open it.`
                   : 'This transaction link is private and can only be opened by participating members of the agreement (including Split Bill participants).'}
               </p>
@@ -872,11 +988,11 @@ function ShareTransactionContent() {
   }, [debt, debtCurrency, isPurged, calc.currentBalance]);
 
   const copyLink = async (url: string, type: 'participant' | 'global') => {
-    try {
-      await navigator.clipboard.writeText(url);
+    const copied = await copyTextToClipboard(url);
+    if (copied) {
       setCopiedType(type);
       setTimeout(() => setCopiedType(null), 2500);
-    } catch (_) {}
+    }
   };
 
   const handleNativeShare = async (url: string, type: 'participant' | 'global') => {
@@ -943,6 +1059,39 @@ function ShareTransactionContent() {
 
       {/* Main Content */}
       <main className="flex-1 w-full max-w-3xl mx-auto p-4 md:p-8 space-y-6">
+        {/* Outdated Token Warning for Participant */}
+        {isParticipant && isOutdatedToken && shareMeta?.globalEnabled && shareMeta?.globalToken && (
+          <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-3 text-[var(--on-surface)]">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <span className="material-symbols-outlined text-amber-500 text-[20px] shrink-0 mt-0.5">
+                  info
+                </span>
+                <div>
+                  <h3 className="font-heading font-bold text-xs md:text-sm text-amber-600 dark:text-amber-400">
+                    Notice: You opened this with a rotated link token
+                  </h3>
+                  <p className="text-[11px] text-[var(--on-surface-variant)] mt-0.5 leading-relaxed">
+                    You can view this transaction because you are a verified participant. However, the token in your link (<code className="font-mono bg-[var(--surface-container-high)] px-1 py-0.5 rounded text-[10px]">{token}</code>) was rotated and will not work for public visitors.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => copyLink(globalShareUrl, 'global')}
+                  className="py-2 px-3 rounded-xl bg-amber-500 text-black font-mono text-[11px] font-bold hover:bg-amber-400 flex items-center gap-1.5 cursor-pointer min-h-[38px] transition-colors"
+                >
+                  <span className="material-symbols-outlined text-[14px]">
+                    {copiedType === 'global' ? 'check' : 'content_copy'}
+                  </span>
+                  <span>{copiedType === 'global' ? 'Copied Active Link!' : 'Copy Active Public Link'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Access Mode & Privacy Banner */}
         {isParticipant ? (
           <div className="p-4 rounded-2xl bg-[var(--surface-container-low)] border border-[var(--outline-variant)]/30 space-y-3">

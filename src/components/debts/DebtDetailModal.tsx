@@ -201,13 +201,34 @@ export function DebtDetailModal({
   const handleCopyShareLink = async (type: 'participant' | 'global', customUrl?: string) => {
     const targetUrl = customUrl || (type === 'participant' ? participantShareUrl : globalShareUrl);
     if (!targetUrl) return;
+    let copied = false;
     try {
-      await navigator.clipboard.writeText(targetUrl);
-      setCopiedLinkType(type);
-      setTimeout(() => setCopiedLinkType(null), 2500);
-    } catch (e) {
-      console.error('Copy failed:', e);
+      if (typeof navigator !== 'undefined' && navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(targetUrl);
+        copied = true;
+      }
+    } catch (_) {}
+
+    if (!copied && typeof document !== 'undefined') {
+      try {
+        const textArea = document.createElement('textarea');
+        textArea.value = targetUrl;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        textArea.setAttribute('readonly', '');
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        copied = document.execCommand('copy');
+        textArea.remove();
+      } catch (err) {
+        console.error('Copy fallback failed:', err);
+      }
     }
+
+    setCopiedLinkType(type);
+    setTimeout(() => setCopiedLinkType(null), 2500);
   };
 
   const handleNativeShare = async (type: 'participant' | 'global') => {

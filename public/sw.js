@@ -1,4 +1,4 @@
-const CACHE_NAME = 'debtsync-cache-v7';
+const CACHE_NAME = 'debtsync-cache-v8';
 const PRECACHE_ASSETS = [
   '/',
   '/manifest.json',
@@ -20,9 +20,21 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
-        cacheNames
-          .filter((name) => name !== CACHE_NAME)
-          .map((name) => caches.delete(name))
+        cacheNames.map((name) => {
+          if (name !== CACHE_NAME) {
+            return caches.delete(name);
+          }
+          // Also purge any stale share or accept routes that may have been cached
+          return caches.open(name).then((cache) => {
+            return cache.keys().then((requests) => {
+              return Promise.all(
+                requests
+                  .filter((req) => req.url.includes('/share') || req.url.includes('/accept'))
+                  .map((req) => cache.delete(req))
+              );
+            });
+          });
+        })
       );
     }).then(() => self.clients.claim())
   );
