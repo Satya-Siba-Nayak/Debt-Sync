@@ -257,8 +257,8 @@ export function DebtDetailModal({
 
         const shareText =
           type === 'participant'
-            ? `DebtSync Agreement (${formattedPrincipal} • ${statusLabel}) — Restricted to participating members:`
-            : `DebtSync: ${headline} • ${statusLabel} (${myName} ↔ ${otherName}):`;
+            ? `DebtSync Agreement (${formattedPrincipal} • ${statusLabel}) — Restricted to participating members:\n${targetUrl}`
+            : `DebtSync: ${headline} • ${statusLabel} (${myName} ↔ ${otherName}):\n${targetUrl}`;
 
         await navigator.share({
           title: shareTitle,
@@ -868,6 +868,17 @@ export function DebtDetailModal({
                     </p>
                   </div>
 
+                  <div className="flex items-center gap-1.5 bg-[var(--surface-container)] rounded-lg p-1.5 border border-[var(--outline-variant)]/30">
+                    <input
+                      type="text"
+                      readOnly
+                      value={participantShareUrl}
+                      onClick={(e) => (e.target as HTMLInputElement).select()}
+                      className="flex-1 bg-transparent border-0 outline-none px-1 text-[11px] font-mono text-[var(--on-surface)] truncate select-all"
+                      title="Participant ledger agreement link"
+                    />
+                  </div>
+
                   <div className="flex items-center gap-2 pt-1">
                     <button
                       type="button"
@@ -931,6 +942,16 @@ export function DebtDetailModal({
 
                   {isGlobalShared ? (
                     <div className="space-y-2.5 pt-1">
+                      <div className="flex items-center gap-1.5 bg-[var(--surface-container)] rounded-lg p-1.5 border border-emerald-500/30">
+                        <input
+                          type="text"
+                          readOnly
+                          value={globalShareUrl}
+                          onClick={(e) => (e.target as HTMLInputElement).select()}
+                          className="flex-1 bg-transparent border-0 outline-none px-1 text-[11px] font-mono text-[var(--on-surface)] truncate select-all"
+                          title="Global public ledger link"
+                        />
+                      </div>
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <button
                           type="button"

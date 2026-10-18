@@ -435,10 +435,14 @@ async function sendEmail(to: Profile, msg: Message, ghost: boolean, event: strin
     ? `You don't have a DebtSync account yet. Sign up with ${to.email} and this record will appear in your ledger automatically.`
     : '';
 
+  const relativeDebtUrl = msg.url.startsWith('http')
+    ? new URL(msg.url).pathname + new URL(msg.url).search
+    : msg.url;
+
   const ghostInfo = ghost && to.email ? {
     email: to.email,
-    signupUrl: `${APP_URL}/signup?email=${encodeURIComponent(to.email)}&next=${encodeURIComponent(msg.url)}`,
-    loginUrl: `${APP_URL}/login?email=${encodeURIComponent(to.email)}&next=${encodeURIComponent(msg.url)}`,
+    signupUrl: `${APP_URL}/signup?email=${encodeURIComponent(to.email)}&next=${encodeURIComponent(relativeDebtUrl)}`,
+    loginUrl: `${APP_URL}/login?email=${encodeURIComponent(to.email)}&next=${encodeURIComponent(relativeDebtUrl)}`,
   } : null;
 
   const unsubUrl = await createUnsubscribeUrl(to.id);

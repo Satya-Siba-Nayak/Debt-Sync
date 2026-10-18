@@ -10,10 +10,34 @@ import { ERROR_CODES, formatErrorWithCode, parseAuthError } from '@/lib/constant
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { BrandLogo } from '@/components/ui/BrandLogo';
 
+function sanitizeRedirectDest(raw: string | null | undefined): string {
+  if (!raw) return '/';
+  let target = raw.trim();
+  try {
+    if (target.includes('%2F') || target.includes('%2f')) {
+      target = decodeURIComponent(target);
+    }
+  } catch (_) {}
+
+  if (target.startsWith('http://') || target.startsWith('https://')) {
+    try {
+      const parsed = new URL(target);
+      return `${parsed.pathname}${parsed.search}${parsed.hash}` || '/';
+    } catch (_) {
+      return '/';
+    }
+  }
+
+  if (target.startsWith('/') && !target.startsWith('//')) {
+    return target;
+  }
+  return '/';
+}
+
 function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextUrl = searchParams.get('next') || '/';
+  const nextUrl = sanitizeRedirectDest(searchParams.get('next'));
   const initialEmail = searchParams.get('email') || searchParams.get('identifier') || '';
   const isDeleted = searchParams.get('deleted') === 'true';
 

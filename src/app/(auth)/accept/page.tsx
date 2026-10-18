@@ -180,7 +180,7 @@ function AcceptDebtContent() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        router.push(`/login?next=/accept?token=${debtId}`);
+        router.push(`/login?next=${encodeURIComponent(`/accept?token=${debtId}`)}`);
         return;
       }
 
@@ -253,7 +253,7 @@ function AcceptDebtContent() {
             Please sign in with your email to review and accept this debt agreement.
           </p>
           <Link
-            href={`/login?next=/accept?token=${debtId}`}
+            href={`/login?next=${encodeURIComponent(`/accept?token=${debtId}`)}`}
             className="w-full inline-block py-3 px-4 rounded-xl bg-primary text-on-primary font-mono text-xs font-bold hover:opacity-95 shadow-md transition-all"
           >
             Sign In to Review &amp; Accept
@@ -378,7 +378,7 @@ function AcceptDebtContent() {
               Sign in with your email to claim and verify this transaction
             </p>
             <Link
-              href={`/login?next=/accept?token=${debtId}`}
+              href={`/login?next=${encodeURIComponent(`/accept?token=${debtId}`)}`}
               className="w-full inline-block py-3 px-4 rounded-xl bg-primary text-on-primary font-mono text-xs font-bold hover:opacity-95 shadow-md"
             >
               Sign In to Verify

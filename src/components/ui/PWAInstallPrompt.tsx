@@ -47,8 +47,8 @@ export function PWAInstallPrompt() {
         localStorage.setItem(PWA_DISMISS_COUNT_KEY, '0');
       }
 
-      // 2. Check session dismissal
-      const dismissed = sessionStorage.getItem(PWA_SESSION_DISMISSED_KEY);
+      // 2. Check session and local dismissal
+      const dismissed = sessionStorage.getItem(PWA_SESSION_DISMISSED_KEY) || localStorage.getItem('debtsync_pwa_dismissed');
       setIsDismissed(Boolean(dismissed));
 
       // Check if iOS Safari
@@ -104,6 +104,7 @@ export function PWAInstallPrompt() {
     setIsDismissed(true);
     if (typeof window !== 'undefined') {
       sessionStorage.setItem(PWA_SESSION_DISMISSED_KEY, 'true');
+      localStorage.setItem('debtsync_pwa_dismissed', 'true');
 
       // Count dismissals. If dismissed 3 times, do not show until next month (30 days)
       const currentCount = Number(localStorage.getItem(PWA_DISMISS_COUNT_KEY) || 0) + 1;

@@ -700,7 +700,10 @@ function ShareTransactionContent() {
         setParams((prev) => ({ ...prev, token: '', mode: 'participants' }));
         router.replace(`/share?id=${debt.id}&mode=participants`);
       } else {
-        const origin = typeof window !== 'undefined' ? window.location.origin : '';
+        const origin =
+          typeof window !== 'undefined' && window.location.origin
+            ? window.location.origin
+            : 'https://debt-sync.satya-nayak.dev';
         const newGlobalUrl = `${origin}/share?id=${debt.id}&token=${nextShareMeta.globalToken}`;
         const copied = await copyTextToClipboard(newGlobalUrl);
         if (copied) {
@@ -974,7 +977,10 @@ function ShareTransactionContent() {
       ? debt.borrower?.email
       : maskEmailAddress(debt.borrower?.email);
 
-  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const origin =
+    typeof window !== 'undefined' && window.location.origin
+      ? window.location.origin
+      : 'https://debt-sync.satya-nayak.dev';
   const participantShareUrl = `${origin}/share?id=${debt.id}&mode=participants`;
   const globalShareUrl =
     shareMeta?.globalEnabled && shareMeta?.globalToken
@@ -1010,8 +1016,8 @@ function ShareTransactionContent() {
           : `DebtSync Agreement (${formattedAmt} • ${isPurged ? 'Purged' : debt.status})`;
         const shareText =
           type === 'participant'
-            ? `View our transaction record on DebtSync (Restricted to participating members):`
-            : `View this shared transaction record on DebtSync (${formattedAmt} • ${isPurged ? 'Purged by Admin' : debt.status}):`;
+            ? `View our transaction record on DebtSync (Restricted to participating members):\n${url}`
+            : `View this shared transaction record on DebtSync (${formattedAmt} • ${isPurged ? 'Purged by Admin' : debt.status}):\n${url}`;
 
         await navigator.share({
           title: shareTitle,

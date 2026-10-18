@@ -133,6 +133,7 @@ function TransactionsPageContent() {
   const handleCloseDetailModal = () => {
     if (deepLinkedDebtId) {
       dismissedDeepLinkRef.current = deepLinkedDebtId;
+      setDeepLinkedDebtId(null);
       if (typeof window !== 'undefined') {
         const url = new URL(window.location.href);
         url.searchParams.delete('debt');
@@ -140,7 +141,8 @@ function TransactionsPageContent() {
         url.searchParams.delete('debt_id');
         url.searchParams.delete('debtId');
         url.searchParams.delete('token');
-        window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
+        const cleanPath = url.pathname + (url.search ? url.search : '');
+        window.history.replaceState({}, '', cleanPath);
       }
     }
     setSelectedDebtForDetail(null);

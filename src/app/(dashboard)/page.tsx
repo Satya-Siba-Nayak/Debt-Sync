@@ -34,14 +34,7 @@ export default function GlobalDashboardPage() {
   const [selectedDebtForDetail, setSelectedDebtForDetail] = useState<Debt | null>(null);
   const [showFlowGuide, setShowFlowGuide] = useState(false);
   const [hasCompletedFetch, setHasCompletedFetch] = useState(Boolean(initialCache));
-  const [isFlowGuideDismissed, setIsFlowGuideDismissed] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return true;
-    try {
-      return localStorage.getItem('debtsync_flow_guide_dismissed') === 'true';
-    } catch {
-      return false;
-    }
-  });
+  const [isFlowGuideDismissed, setIsFlowGuideDismissed] = useState<boolean>(true);
 
   useEffect(() => {
     try {

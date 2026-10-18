@@ -407,6 +407,7 @@ export function PersonRepaymentModal({
             amount: round2(amount),
             currency,
             notes: note.trim() || undefined,
+            debtId: selectedDebtItem?.debt?.id,
           });
         }
       } else {

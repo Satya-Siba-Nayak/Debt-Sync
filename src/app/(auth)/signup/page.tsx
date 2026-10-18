@@ -22,10 +22,34 @@ function maskEmailAddress(email?: string | null): string {
   return `${local[0]}***${local.slice(-1)}@${domain}`;
 }
 
+function sanitizeRedirectDest(raw: string | null | undefined): string {
+  if (!raw) return '/';
+  let target = raw.trim();
+  try {
+    if (target.includes('%2F') || target.includes('%2f')) {
+      target = decodeURIComponent(target);
+    }
+  } catch (_) {}
+
+  if (target.startsWith('http://') || target.startsWith('https://')) {
+    try {
+      const parsed = new URL(target);
+      return `${parsed.pathname}${parsed.search}${parsed.hash}` || '/';
+    } catch (_) {
+      return '/';
+    }
+  }
+
+  if (target.startsWith('/') && !target.startsWith('//')) {
+    return target;
+  }
+  return '/';
+}
+
 function SignupContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextUrl = searchParams.get('next') || '/';
+  const nextUrl = sanitizeRedirectDest(searchParams.get('next'));
   const initialEmail = searchParams.get('email') || '';
   const initialPhone = searchParams.get('phone') || '';
 

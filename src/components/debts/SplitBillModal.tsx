@@ -486,7 +486,9 @@ export function SplitBillModal({
         let debtCreated = false;
 
         const cleanUserNote = notes.trim() || null;
+        const debtId = crypto.randomUUID();
         const debtPayload = {
+          id: debtId,
           created_by: user.id,
           lender_id: user.id,
           borrower_id: p.id,
@@ -540,6 +542,7 @@ export function SplitBillModal({
             notes: `Split: "${title.trim()}" (Total: ${currency.toUpperCase()} ${totalAmount})${
               interestType !== 'none' ? ` • ${interestRate}% ${interestType} APR` : ''
             }`,
+            debtId: debtPayload.id,
           });
         }
       }

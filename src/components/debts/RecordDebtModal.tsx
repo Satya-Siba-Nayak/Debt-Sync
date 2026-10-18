@@ -504,6 +504,8 @@ export function RecordDebtModal({
       }
 
       let targetUserId = selectedPersonId || '';
+      let createdGhostEmail: string | null = null;
+      let createdGhostName: string | null = null;
 
       // If user wants to add a new person inline
       if (isAddingNewPerson) {
@@ -529,6 +531,8 @@ export function RecordDebtModal({
           const shadowId = crypto.randomUUID();
           const fallbackEmail = targetEmail || `${targetPhone.replace(/[^\d]/g, '')}@phone.debtsync.local`;
           const finalName = newPersonName.trim() || (targetEmail ? targetEmail.split('@')[0] : targetPhone);
+          createdGhostEmail = targetEmail || null;
+          createdGhostName = finalName;
           const { error: shadowError } = await supabase.from('profiles').insert({
             id: shadowId,
             email: fallbackEmail,
@@ -538,19 +542,6 @@ export function RecordDebtModal({
           });
           if (shadowError) throw shadowError;
           targetUserId = shadowId;
-
-          // Dispatch rate-limited invitation email if an actual email was provided
-          if (targetEmail && !targetEmail.endsWith('@phone.debtsync.local')) {
-            sendNotificationEmail({
-              type: 'ghost_account_invite',
-              recipientEmail: targetEmail,
-              recipientName: finalName,
-              senderName: user.user_metadata?.full_name || user.email || 'A DebtSync user',
-              amount: round2(Number(principal)),
-              currency,
-              notes: notes.trim() || undefined,
-            });
-          }
         }
       }
 
@@ -608,8 +599,19 @@ export function RecordDebtModal({
           interest_rate: interestRate,
         },
       });
-      // Send debt_recorded email notification to existing counterparty if they have an email
-      if (!isAddingNewPerson && targetUserId) {
+      // Send email notification to counterparty if they have an email
+      if (isAddingNewPerson && createdGhostEmail && !createdGhostEmail.endsWith('@phone.debtsync.local')) {
+        sendNotificationEmail({
+          type: 'ghost_account_invite',
+          recipientEmail: createdGhostEmail,
+          recipientName: createdGhostName || 'New Member',
+          senderName: user.user_metadata?.full_name || user.email || 'A DebtSync user',
+          amount: round2(Number(principal)),
+          currency,
+          notes: notes.trim() || undefined,
+          debtId: debt.id,
+        });
+      } else if (!isAddingNewPerson && targetUserId) {
         const targetPerson = people.find((p) => p.id === targetUserId);
         if (targetPerson?.email && !targetPerson.email.endsWith('@phone.debtsync.local')) {
           sendNotificationEmail({

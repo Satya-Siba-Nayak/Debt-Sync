@@ -5,14 +5,38 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
 
+function sanitizeRedirectDest(raw: string | null | undefined): string {
+  if (!raw) return '/';
+  let target = raw.trim();
+  try {
+    if (target.includes('%2F') || target.includes('%2f')) {
+      target = decodeURIComponent(target);
+    }
+  } catch (_) {}
+
+  if (target.startsWith('http://') || target.startsWith('https://')) {
+    try {
+      const parsed = new URL(target);
+      return `${parsed.pathname}${parsed.search}${parsed.hash}` || '/';
+    } catch (_) {
+      return '/';
+    }
+  }
+
+  if (target.startsWith('/') && !target.startsWith('//')) {
+    return target;
+  }
+  return '/';
+}
+
 function CallbackHandler() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const supabase = createClient();
 
   useEffect(() => {
-    const nextParam = searchParams.get('next');
-    const redirectDest = nextParam && nextParam.startsWith('/') ? nextParam : '/';
+    const rawNext = searchParams.get('next');
+    const redirectDest = sanitizeRedirectDest(rawNext);
     let authSub: { unsubscribe: () => void } | null = null;
     let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -31,7 +55,7 @@ function CallbackHandler() {
         authSub = authListener?.subscription || null;
 
         fallbackTimer = setTimeout(() => {
-          router.replace(nextParam ? `/login?next=${encodeURIComponent(nextParam)}` : '/login');
+          router.replace(rawNext ? `/login?next=${encodeURIComponent(rawNext)}` : '/login');
         }, 3500);
         return;
       }

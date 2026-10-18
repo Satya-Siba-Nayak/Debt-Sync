@@ -1,4 +1,4 @@
-const CACHE_NAME = 'debtsync-cache-v8';
+const CACHE_NAME = 'debtsync-cache-v9';
 const PRECACHE_ASSETS = [
   '/',
   '/manifest.json',

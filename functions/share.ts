@@ -334,6 +334,29 @@ export const onRequest = async (context: {
       }
     }
 
+    // If debtId was omitted but a public token is provided, lookup the debt by globalToken
+    if (!debtId && token) {
+      try {
+        const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+        const supabaseAnonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
+        const res = await fetch(
+          `${supabaseUrl}/rest/v1/debts?notes=ilike.*%22globalToken%22%3A%22${encodeURIComponent(token)}%22*&select=id&limit=1`,
+          {
+            headers: {
+              apikey: supabaseAnonKey,
+              Authorization: `Bearer ${supabaseAnonKey}`,
+            },
+          }
+        );
+        if (res.ok) {
+          const list: any = await res.json();
+          if (Array.isArray(list) && list.length > 0 && list[0]?.id) {
+            debtId = list[0].id;
+          }
+        }
+      } catch (_) {}
+    }
+
     // If request arrived at pathname /share/<uuid>, 302 redirect to canonical /share?id=<uuid>
     // so Next.js static client router receives the canonical query route
     if (pathMatch && url.pathname.startsWith('/share/')) {
@@ -525,8 +548,12 @@ export const onRequest = async (context: {
       }
     }
 
-    const cleanShareUrl = debtId
-      ? `${url.origin}/share?id=${encodeURIComponent(debtId)}${token ? `&token=${encodeURIComponent(token)}` : ''}`
+    const queryParts: string[] = [];
+    if (debtId) queryParts.push(`id=${encodeURIComponent(debtId)}`);
+    if (token) queryParts.push(`token=${encodeURIComponent(token)}`);
+    if (mode) queryParts.push(`mode=${encodeURIComponent(mode)}`);
+    const cleanShareUrl = queryParts.length > 0
+      ? `${url.origin}/share?${queryParts.join('&')}`
       : `${url.origin}/share`;
 
     const enrichedHtml = injectPreviewMetaTags(rawHtml, {
