@@ -62,3 +62,24 @@ All coding agents working on DebtSync MUST adhere strictly to the dual-format UI
   npm run build
   ```
 - Must always compile cleanly with **0 TypeScript errors** and **0 Next.js build warnings/errors** before completing any task.
+
+---
+
+## 5. React Hooks Integrity & Database Schema Invariants
+
+- **Strict Top-Level Hooks Declaration (Zero Conditional Hooks)**:
+  - NEVER declare a React hook (`useState`, `useEffect`, `useCallback`, `useMemo`, `useRef`, etc.) conditionally or after ANY early return statement (`if (loading) return ...`, `if (error) return ...`, `if (!canViewTransaction) return ...`).
+  - All hooks MUST be declared unconditionally at the very top of the component body.
+  - Placing a hook after an early return violates the React Rules of Hooks, causing an uncaught runtime exception (`Rendered more hooks than during the previous render`) that crashes the entire page into Next.js's production error boundary (`"This page couldn't load"`).
+
+- **Database Column & Schema Integrity**:
+  - Always verify column names in `src/lib/types/database.ts` or Supabase schema definitions before writing SQL/RPC queries or Supabase REST queries.
+  - Never query non-existent columns (e.g. `network_score` on `profiles`) which trigger PostgreSQL `42703` errors.
+
+- **Dual Sharing Systems & URL Preservation**:
+  - Always preserve the two distinct sharing systems:
+    1. **Participants-Only Link** (`/share?id=<uuid>&mode=participants`): Restricted to verified members (lender, borrower, split group); unauthenticated visitors see the verification gate.
+    2. **Global Public Link** (`/share?id=<uuid>&token=gsh_<token>`): Viewable by anyone without logging in; sensitive emails are masked (`s***k@domain.com`), private notes are hidden, and participants opening it see their full unmasked controls.
+  - **Mobile Share Sheet Immunity**: When invoking `navigator.share({ title, text, url })`, ALWAYS append `\n${targetUrl}` directly inside the `text` string, because mobile chat apps (such as WhatsApp) discard the `url` property and only copy `text`.
+  - **Redirect Search Param Preservation**: All auth redirection handlers (`/login`, `/signup`, `/accept`, `/auth/callback`) and OpenGraph canonical tags (`<meta property="og:url">`) must sanitize and preserve destination query parameters (`?id=...`, `?token=...`, `?debt=...`).
+
