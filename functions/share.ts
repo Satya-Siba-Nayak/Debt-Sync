@@ -323,9 +323,12 @@ export const onRequest = async (context: {
     // If request arrived at pathname /share/<uuid>, 302 redirect to canonical /share?id=<uuid>
     // so Next.js static client router receives the canonical query route
     if (pathMatch && url.pathname.startsWith('/share/')) {
-      const remainingSearch = url.search ? `&${url.search.replace(/^\?/, '')}` : '';
-      const canonicalTarget = `${url.origin}/share?id=${encodeURIComponent(pathMatch[0])}${token ? `&token=${encodeURIComponent(token)}` : ''}${remainingSearch}`;
-      return Response.redirect(canonicalTarget, 302);
+      const sp = new URLSearchParams(url.search);
+      sp.set('id', pathMatch[0]);
+      if (token && !sp.has('token')) {
+        sp.set('token', token);
+      }
+      return Response.redirect(`${url.origin}/share?${sp.toString()}`, 302);
     }
 
     const iconUrl = `${url.origin}/icons/icon-192.png`;
