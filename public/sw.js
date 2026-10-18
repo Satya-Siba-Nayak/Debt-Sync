@@ -1,4 +1,4 @@
-const CACHE_NAME = 'debtsync-cache-v6';
+const CACHE_NAME = 'debtsync-cache-v7';
 const PRECACHE_ASSETS = [
   '/',
   '/manifest.json',
@@ -31,12 +31,17 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Skip cross-origin requests, Supabase API calls, non-GET requests, and localhost development
+  // Skip cross-origin requests, Supabase API calls, non-GET requests, localhost development,
+  // AND NEVER intercept share links, acceptance links, or API calls!
   if (
     event.request.method !== 'GET' ||
     url.origin !== self.location.origin ||
     url.hostname === 'localhost' ||
-    url.hostname === '127.0.0.1'
+    url.hostname === '127.0.0.1' ||
+    url.pathname.startsWith('/share') ||
+    url.pathname.startsWith('/accept') ||
+    url.pathname.startsWith('/api') ||
+    url.pathname.startsWith('/admin')
   ) {
     return;
   }
@@ -48,18 +53,20 @@ self.addEventListener('fetch', (event) => {
         if (networkResponse && networkResponse.status === 200) {
           const responseClone = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseClone);
-          });
+            cache.put(event.request, responseClone).catch(() => {});
+          }).catch(() => {});
         }
         return networkResponse;
       })
       .catch(async () => {
-        const matched = await caches.match(event.request);
-        if (matched) return matched;
-        if (event.request.mode === 'navigate') {
-          const root = await caches.match('/');
-          if (root) return root;
-        }
+        try {
+          const matched = await caches.match(event.request);
+          if (matched) return matched;
+          if (event.request.mode === 'navigate') {
+            const root = await caches.match('/');
+            if (root) return root;
+          }
+        } catch (_) {}
         return new Response('Offline mode — page unavailable', {
           status: 503,
           statusText: 'Service Unavailable',

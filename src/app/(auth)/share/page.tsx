@@ -37,62 +37,87 @@ function extractShareParams(searchParams: URLSearchParams | null): {
   let token = '';
   let mode = '';
 
+  const scanParams = (p: URLSearchParams) => {
+    if (!debtId) {
+      debtId = (
+        p.get('id') ||
+        p.get('amp;id') ||
+        p.get('debt') ||
+        p.get('amp;debt') ||
+        p.get('debt_id') ||
+        p.get('amp;debt_id') ||
+        p.get('debtId') ||
+        p.get('amp;debtId') ||
+        p.get('transaction_id') ||
+        p.get('amp;transaction_id') ||
+        p.get('transaction') ||
+        ''
+      ).trim();
+    }
+    if (!token) {
+      token = (
+        p.get('token') ||
+        p.get('amp;token') ||
+        p.get('key') ||
+        p.get('amp;key') ||
+        ''
+      ).trim();
+    }
+    if (!mode) {
+      mode = (
+        p.get('mode') ||
+        p.get('amp;mode') ||
+        ''
+      ).trim();
+    }
+  };
+
   // 1. Next.js searchParams
   if (searchParams) {
-    debtId = (
-      searchParams.get('id') ||
-      searchParams.get('debt') ||
-      searchParams.get('debt_id') ||
-      searchParams.get('debtId') ||
-      searchParams.get('transaction_id') ||
-      searchParams.get('transaction') ||
-      ''
-    ).trim();
-    token = (searchParams.get('token') || searchParams.get('key') || '').trim();
-    mode = (searchParams.get('mode') || '').trim();
+    scanParams(searchParams);
   }
 
-  // 2. Client-side browser fallbacks (handles hydration, redirect services, and in-app webviews)
+  // 2. Client-side browser inspection (handles hydration, redirect services, and in-app webviews)
   if (typeof window !== 'undefined') {
+    // 2a. Direct check from window.location.search
+    if (window.location.search) {
+      try {
+        scanParams(new URLSearchParams(window.location.search));
+      } catch (_) {}
+    }
+
+    // 2b. Full decoded window.location.href scan (immune to URL parsing quirks, &amp; or %26 encoding)
     if (!debtId || !token || !mode) {
       try {
-        const urlParams = new URLSearchParams(window.location.search);
+        const fullHref = decodeURIComponent(window.location.href);
+        const urlObj = new URL(fullHref, window.location.origin);
+        scanParams(urlObj.searchParams);
+
         if (!debtId) {
-          debtId = (
-            urlParams.get('id') ||
-            urlParams.get('debt') ||
-            urlParams.get('debt_id') ||
-            urlParams.get('debtId') ||
-            urlParams.get('transaction_id') ||
-            urlParams.get('transaction') ||
-            ''
-          ).trim();
+          const idMatch = fullHref.match(/(?:[?&#]|(?:&amp;))(?:id|debt|debt_id|debtId|transaction_id)=([0-9a-f-]{36}|[a-zA-Z0-9_-]+)/i);
+          if (idMatch) debtId = idMatch[1].trim();
         }
-        if (!token) token = (urlParams.get('token') || urlParams.get('key') || '').trim();
-        if (!mode) mode = (urlParams.get('mode') || '').trim();
+        if (!token) {
+          const tokenMatch = fullHref.match(/(?:[?&#]|(?:&amp;))(?:token|key)=([a-zA-Z0-9_-]+)/i);
+          if (tokenMatch) token = tokenMatch[1].trim();
+        }
+        if (!mode) {
+          const modeMatch = fullHref.match(/(?:[?&#]|(?:&amp;))mode=([a-zA-Z0-9_-]+)/i);
+          if (modeMatch) mode = modeMatch[1].trim();
+        }
       } catch (_) {}
     }
 
-    // 3. Fallback to hash: e.g. #?id=... or #id=...
-    if (!debtId && window.location.hash) {
+    // 2c. Fallback to hash: e.g. #?id=... or #id=... or #/share?id=...
+    if ((!debtId || !token) && window.location.hash) {
       try {
-        const hashStr = window.location.hash.replace(/^[#?]+/, '');
-        const hashParams = new URLSearchParams(hashStr);
-        debtId = (
-          hashParams.get('id') ||
-          hashParams.get('debt') ||
-          hashParams.get('debt_id') ||
-          hashParams.get('debtId') ||
-          hashParams.get('transaction_id') ||
-          hashParams.get('transaction') ||
-          ''
-        ).trim();
-        if (!token) token = (hashParams.get('token') || hashParams.get('key') || '').trim();
-        if (!mode) mode = (hashParams.get('mode') || '').trim();
+        const rawHash = window.location.hash.replace(/^[#?/]+/, '');
+        const hashParams = new URLSearchParams(rawHash.includes('?') ? rawHash.split('?')[1] : rawHash);
+        scanParams(hashParams);
       } catch (_) {}
     }
 
-    // 4. Fallback to pathname UUID: e.g. /share/<uuid>
+    // 2d. Fallback to pathname UUID: e.g. /share/<uuid>
     if (!debtId) {
       const pathMatch = window.location.pathname.match(
         /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
@@ -103,13 +128,66 @@ function extractShareParams(searchParams: URLSearchParams | null): {
     }
   }
 
-  // 5. If token matches a UUID and debtId is empty, token was passed as the debt ID
+  // 3. If token is a UUID and debtId is empty, token was passed as the debt ID
   const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (!debtId && token && UUID_REGEX.test(token)) {
     debtId = token;
     token = '';
   }
 
+  // 4. Sanitize: if debtId swallowed unencoded &token=
+  if (debtId && debtId.includes('&')) {
+    const parts = debtId.split('&');
+    debtId = parts[0];
+    for (const p of parts.slice(1)) {
+      if (p.startsWith('token=') && !token) {
+        token = p.replace('token=', '');
+      }
+    }
+  }
+
+  return { debtId, token, mode };
+}
+
+function parseArbitraryShareInput(input: string): { debtId: string; token: string; mode: string } {
+  const clean = input.trim();
+  const UUID_REGEX = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+  let debtId = '';
+  let token = '';
+  let mode = '';
+
+  try {
+    if (clean.includes('://') || clean.includes('/share')) {
+      const parsedUrl = new URL(clean.startsWith('http') ? clean : `https://example.com/${clean.replace(/^\//, '')}`);
+      debtId = (
+        parsedUrl.searchParams.get('id') ||
+        parsedUrl.searchParams.get('amp;id') ||
+        parsedUrl.searchParams.get('debt') ||
+        parsedUrl.searchParams.get('transaction_id') ||
+        ''
+      ).trim();
+      token = (
+        parsedUrl.searchParams.get('token') ||
+        parsedUrl.searchParams.get('amp;token') ||
+        parsedUrl.searchParams.get('key') ||
+        ''
+      ).trim();
+      mode = (parsedUrl.searchParams.get('mode') || '').trim();
+    }
+  } catch (_) {}
+
+  if (!debtId) {
+    const idMatch = clean.match(/(?:[?&#]|(?:&amp;))(?:id|debt|debt_id|debtId|transaction_id)=([0-9a-f-]{36}|[a-zA-Z0-9_-]+)/i);
+    if (idMatch) debtId = idMatch[1].trim();
+  }
+  if (!token) {
+    const tokMatch = clean.match(/(?:[?&#]|(?:&amp;))(?:token|key)=([a-zA-Z0-9_-]+)/i);
+    if (tokMatch) token = tokMatch[1].trim();
+  }
+  if (!debtId) {
+    const uuidMatch = clean.match(UUID_REGEX);
+    if (uuidMatch) debtId = uuidMatch[0];
+  }
   return { debtId, token, mode };
 }
 
@@ -142,25 +220,39 @@ function ShareTransactionContent() {
     text: string;
   } | null>(null);
   const [error, setError] = useState('');
+  const [manualInput, setManualInput] = useState('');
 
-  const loadSharedTransaction = useCallback(async () => {
-    let effectiveDebtId = debtId;
+  const loadSharedTransaction = useCallback(async (forcedDebtId?: string, forcedToken?: string) => {
+    let effectiveDebtId = forcedDebtId || debtId;
+    let effectiveToken = forcedToken || token;
 
     if (!effectiveDebtId) {
       const live = extractShareParams(searchParams);
       if (live.debtId) {
         effectiveDebtId = live.debtId;
+        effectiveToken = live.token || effectiveToken;
         setParams(live);
       }
     }
 
+    // If still empty during hydration frame 0, delay slightly before giving up
+    if (!effectiveDebtId && !effectiveToken && typeof window !== 'undefined') {
+      await new Promise((r) => setTimeout(r, 120));
+      const liveAgain = extractShareParams(searchParams);
+      if (liveAgain.debtId) {
+        effectiveDebtId = liveAgain.debtId;
+        effectiveToken = liveAgain.token || effectiveToken;
+        setParams(liveAgain);
+      }
+    }
+
     // Fallback: If no debtId was in URL but a global token was provided, attempt to locate debt by token
-    if (!effectiveDebtId && token) {
+    if (!effectiveDebtId && effectiveToken) {
       try {
         const { data: matched } = await supabase
           .from('debts')
           .select('id')
-          .ilike('notes', `%"globalToken":"${token}"%`)
+          .ilike('notes', `%"globalToken":"${effectiveToken}"%`)
           .limit(1);
         if (matched && matched.length > 0 && matched[0].id) {
           effectiveDebtId = matched[0].id;
@@ -563,6 +655,39 @@ function ShareTransactionContent() {
                 ? 'No transaction ID or token was found in this share link. If someone shared this transaction with you, please make sure the full link was copied.'
                 : error || 'This transaction link is invalid or the record has been deleted.'}
             </p>
+            {error?.includes('No transaction ID') && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!manualInput.trim()) return;
+                  const parsed = parseArbitraryShareInput(manualInput.trim());
+                  if (parsed.debtId) {
+                    setParams(parsed);
+                    loadSharedTransaction(parsed.debtId, parsed.token);
+                  }
+                }}
+                className="pt-1 text-left space-y-1.5"
+              >
+                <label className="font-mono text-[11px] text-[var(--on-surface-variant)] block text-center">
+                  Have the share link or transaction ID?
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={manualInput}
+                    onChange={(e) => setManualInput(e.target.value)}
+                    placeholder="Paste link (https://.../share?id=...) or ID"
+                    className="flex-1 bg-[var(--surface-container)] border border-[var(--outline-variant)]/40 rounded-xl px-3 py-2 font-mono text-xs text-[var(--on-surface)] placeholder:text-[var(--on-surface-variant)]/50 focus:outline-none focus:border-[var(--primary)] text-base md:text-xs"
+                  />
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-[var(--primary)] text-[var(--on-primary)] rounded-xl font-mono text-xs font-bold shrink-0 min-h-[44px] cursor-pointer hover:opacity-90 transition-opacity"
+                  >
+                    Open
+                  </button>
+                </div>
+              </form>
+            )}
             <div className="pt-2 flex flex-col sm:flex-row gap-2.5 justify-center">
               <Link
                 href="/transactions"

@@ -15,40 +15,53 @@ import Link from 'next/link';
 
 function extractAcceptDebtId(searchParams: URLSearchParams | null): string {
   let id = '';
-  if (searchParams) {
-    id = (
-      searchParams.get('token') ||
-      searchParams.get('id') ||
-      searchParams.get('debt') ||
-      searchParams.get('debt_id') ||
-      searchParams.get('debtId') ||
-      ''
-    ).trim();
-  }
-  if (!id && typeof window !== 'undefined') {
-    try {
-      const urlParams = new URLSearchParams(window.location.search);
+
+  const scan = (params: URLSearchParams) => {
+    if (!id) {
       id = (
-        urlParams.get('token') ||
-        urlParams.get('id') ||
-        urlParams.get('debt') ||
-        urlParams.get('debt_id') ||
-        urlParams.get('debtId') ||
+        params.get('token') ||
+        params.get('amp;token') ||
+        params.get('id') ||
+        params.get('amp;id') ||
+        params.get('debt') ||
+        params.get('amp;debt') ||
+        params.get('debt_id') ||
+        params.get('amp;debt_id') ||
+        params.get('debtId') ||
+        params.get('amp;debtId') ||
         ''
       ).trim();
-    } catch (_) {}
+    }
+  };
+
+  if (searchParams) {
+    scan(searchParams);
+  }
+
+  if (!id && typeof window !== 'undefined') {
+    if (window.location.search) {
+      try {
+        scan(new URLSearchParams(window.location.search));
+      } catch (_) {}
+    }
+
+    if (!id) {
+      try {
+        const fullHref = decodeURIComponent(window.location.href);
+        const urlObj = new URL(fullHref, window.location.origin);
+        scan(urlObj.searchParams);
+
+        if (!id) {
+          const match = fullHref.match(/(?:[?&#]|(?:&amp;))(?:token|id|debt|debt_id|debtId)=([0-9a-f-]{36}|[a-zA-Z0-9_-]+)/i);
+          if (match) id = match[1].trim();
+        }
+      } catch (_) {}
+    }
 
     if (!id && window.location.hash) {
       try {
         const hashParams = new URLSearchParams(window.location.hash.replace(/^[#?]+/, ''));
-        id = (
-          hashParams.get('token') ||
-          hashParams.get('id') ||
-          hashParams.get('debt') ||
-          hashParams.get('debt_id') ||
-          hashParams.get('debtId') ||
-          ''
-        ).trim();
+        scan(hashParams);
       } catch (_) {}
     }
 
@@ -59,6 +72,7 @@ function extractAcceptDebtId(searchParams: URLSearchParams | null): string {
       if (match) id = match[0];
     }
   }
+
   return id;
 }
 

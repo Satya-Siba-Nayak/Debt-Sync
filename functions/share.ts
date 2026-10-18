@@ -262,214 +262,262 @@ export const onRequest = async (context: {
     return context.next();
   }
 
-  const url = new URL(request.url);
-  let debtId = (
-    url.searchParams.get('id') ||
-    url.searchParams.get('debt') ||
-    url.searchParams.get('debt_id') ||
-    url.searchParams.get('debtId') ||
-    url.searchParams.get('transaction_id') ||
-    ''
-  ).trim();
-  let token = (url.searchParams.get('token') || '').trim();
+  try {
+    const url = new URL(request.url);
 
-  // If token is a UUID and debtId is empty, token was passed as the debt ID
-  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (!debtId && UUID_REGEX.test(token)) {
-    debtId = token;
-    token = '';
-  }
+    // Extract debtId with support for standard query params, amp-escaped params, and aliases
+    let debtId = (
+      url.searchParams.get('id') ||
+      url.searchParams.get('amp;id') ||
+      url.searchParams.get('debt') ||
+      url.searchParams.get('amp;debt') ||
+      url.searchParams.get('debt_id') ||
+      url.searchParams.get('amp;debt_id') ||
+      url.searchParams.get('debtId') ||
+      url.searchParams.get('amp;debtId') ||
+      url.searchParams.get('transaction_id') ||
+      url.searchParams.get('amp;transaction_id') ||
+      url.searchParams.get('transaction') ||
+      ''
+    ).trim();
 
-  // Also check pathname for UUID fallback: e.g. /share/uuid
-  if (!debtId) {
+    // Extract token with support for standard query params and amp-escaped params
+    let token = (
+      url.searchParams.get('token') ||
+      url.searchParams.get('amp;token') ||
+      url.searchParams.get('key') ||
+      url.searchParams.get('amp;key') ||
+      ''
+    ).trim();
+
+    // Fallback: search regex across raw url search & href
+    if (!debtId || !token) {
+      try {
+        const rawSearch = decodeURIComponent(url.search || '');
+        if (!debtId) {
+          const idMatch = rawSearch.match(/(?:[?&]|(?:&amp;))(?:id|debt|debt_id|debtId|transaction_id)=([0-9a-f-]{36}|[a-zA-Z0-9_-]+)/i);
+          if (idMatch) debtId = idMatch[1].trim();
+        }
+        if (!token) {
+          const tokMatch = rawSearch.match(/(?:[?&]|(?:&amp;))(?:token|key)=([a-zA-Z0-9_-]+)/i);
+          if (tokMatch) token = tokMatch[1].trim();
+        }
+      } catch (_) {}
+    }
+
+    // If token is a UUID and debtId is empty, token was passed as the debt ID
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!debtId && UUID_REGEX.test(token)) {
+      debtId = token;
+      token = '';
+    }
+
+    // Also check pathname for UUID fallback: e.g. /share/uuid
     const pathMatch = url.pathname.match(
       /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
     );
-    if (pathMatch) {
+    if (!debtId && pathMatch) {
       debtId = pathMatch[0];
     }
-  }
 
-  const iconUrl = `${url.origin}/icons/icon-192.png`;
-
-  // Fetch the underlying static /share.html asset from Cloudflare Pages ASSETS
-  let baseResponse: Response;
-  try {
-    if (env.ASSETS) {
-      // Direct request for share.html avoids directory redirects or trailing-slash issues
-      baseResponse = await env.ASSETS.fetch(new Request(`${url.origin}/share.html`));
-      if (!baseResponse.ok) {
-        baseResponse = await env.ASSETS.fetch(request);
-      }
-    } else {
-      baseResponse = await context.next();
+    // If request arrived at pathname /share/<uuid>, 302 redirect to canonical /share?id=<uuid>
+    // so Next.js static client router receives the canonical query route
+    if (pathMatch && url.pathname.startsWith('/share/')) {
+      const remainingSearch = url.search ? `&${url.search.replace(/^\?/, '')}` : '';
+      const canonicalTarget = `${url.origin}/share?id=${encodeURIComponent(pathMatch[0])}${token ? `&token=${encodeURIComponent(token)}` : ''}${remainingSearch}`;
+      return Response.redirect(canonicalTarget, 302);
     }
-  } catch {
-    return context.next();
-  }
 
-  const contentType = baseResponse.headers.get('content-type') || '';
-  if (!contentType.includes('text/html')) {
-    return baseResponse;
-  }
+    const iconUrl = `${url.origin}/icons/icon-192.png`;
 
-  const rawHtml = await baseResponse.text();
-
-  // Default preview (when no ID is provided)
-  let previewTitle = 'Shared Transaction Ledger — DebtSync';
-  let previewDescription =
-    'Peer-to-peer ledger record with verified repayment tracking and cryptographic audit history.';
-  let themeColor = '#6366f1';
-  let siteName = 'DebtSync • Peer-to-Peer Ledger';
-
-  if (debtId && !token) {
-    // Participants-Only Private Link: Never expose amounts or status in public link previews
-    previewTitle = '🔒 Protected Ledger Agreement — DebtSync';
-    previewDescription =
-      'Private peer-to-peer transaction link. Restricted to verified participating members.';
-    themeColor = '#6366f1';
-  } else if (debtId && token) {
-    // Public Global Share Link: Verify token against live Supabase debt record
-    const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL || DEFAULT_SUPABASE_URL;
-    const supabaseAnonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
-
+    // Fetch the underlying static /share.html asset from Cloudflare Pages ASSETS
+    let baseResponse: Response;
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3500);
+      if (env.ASSETS) {
+        baseResponse = await env.ASSETS.fetch(new Request(`${url.origin}/share.html${url.search}`));
+        if (!baseResponse.ok) {
+          baseResponse = await env.ASSETS.fetch(new Request(`${url.origin}/share.html`));
+        }
+        if (!baseResponse.ok) {
+          baseResponse = await env.ASSETS.fetch(request);
+        }
+      } else {
+        baseResponse = await context.next();
+      }
+    } catch {
+      return context.next();
+    }
 
-      const rpcRes = await fetch(`${supabaseUrl}/rest/v1/rpc/get_debt_for_acceptance`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: supabaseAnonKey,
-          Authorization: `Bearer ${supabaseAnonKey}`,
-        },
-        body: JSON.stringify({ p_debt_id: debtId }),
-        signal: controller.signal,
-      });
+    const contentType = baseResponse.headers.get('content-type') || '';
+    if (!contentType.includes('text/html')) {
+      return baseResponse;
+    }
 
-      clearTimeout(timeoutId);
+    const rawHtml = await baseResponse.text();
 
-      if (rpcRes.ok) {
-        const rows = await rpcRes.json();
-        const debt = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+    // Default preview (when no ID is provided)
+    let previewTitle = 'Shared Transaction Ledger — DebtSync';
+    let previewDescription =
+      'Peer-to-peer ledger record with verified repayment tracking and cryptographic audit history.';
+    let themeColor = '#6366f1';
+    let siteName = 'DebtSync • Peer-to-Peer Ledger';
 
-        if (!debt) {
-          previewTitle = 'Transaction Not Found — DebtSync';
-          previewDescription = 'This shared transaction record does not exist or has been removed.';
-          themeColor = '#64748b';
-        } else {
-          const shareMeta = parseTagJson<{
-            globalEnabled?: boolean;
-            globalToken?: string | null;
-            snapshot?: { payments?: any[] };
-          }>(debt.notes, '[SHARE:');
+    if (debtId && !token) {
+      // Participants-Only Private Link: Never expose amounts or status in public link previews
+      previewTitle = '🔒 Protected Ledger Agreement — DebtSync';
+      previewDescription =
+        'Private peer-to-peer transaction link. Restricted to verified participating members.';
+      themeColor = '#6366f1';
+    } else if (debtId && token) {
+      // Public Global Share Link: Verify token against live Supabase debt record
+      const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+      const supabaseAnonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
 
-          const isGlobalValid = Boolean(
-            debt.status !== 'declined' &&
-              shareMeta?.globalEnabled === true &&
-              shareMeta?.globalToken &&
-              shareMeta.globalToken === token
-          );
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2200);
 
-          if (!isGlobalValid) {
-            previewTitle = '🔒 Public Link Disabled — DebtSync';
-            previewDescription =
-              'Global public sharing is turned off for this transaction. Only participating members can view it.';
+        const rpcRes = await fetch(`${supabaseUrl}/rest/v1/rpc/get_debt_for_acceptance`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: supabaseAnonKey,
+            Authorization: `Bearer ${supabaseAnonKey}`,
+          },
+          body: JSON.stringify({ p_debt_id: debtId }),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (rpcRes.ok) {
+          const rows = await rpcRes.json();
+          const debt = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+
+          if (!debt) {
+            previewTitle = 'Transaction Not Found — DebtSync';
+            previewDescription = 'This shared transaction record does not exist or has been removed.';
             themeColor = '#64748b';
           } else {
-            const splitMeta = parseTagJson<{
-              title?: string;
-              totalAmount?: number;
-              participants?: any[];
-            }>(debt.notes, '[SPLIT:');
+            const shareMeta = parseTagJson<{
+              globalEnabled?: boolean;
+              globalToken?: string | null;
+              snapshot?: { payments?: any[] };
+            }>(debt.notes, '[SHARE:');
 
-            const snapshotPayments = Array.isArray(shareMeta?.snapshot?.payments)
-              ? shareMeta.snapshot!.payments!
-              : [];
+            const isGlobalValid = Boolean(
+              debt.status !== 'declined' &&
+                shareMeta?.globalEnabled === true &&
+                shareMeta?.globalToken &&
+                shareMeta.globalToken === token
+            );
 
-            const calc = computeSnapshotBalance(debt, snapshotPayments);
-            const currency = debt.currency || 'inr';
-            const formattedPrincipal = formatCurrencyEdge(calc.principal, currency);
-            const formattedBalance = formatCurrencyEdge(calc.currentBalance, currency);
-
-            const lenderDisplay =
-              debt.lender_id === SYSTEM_PURGED_USER_ID
-                ? 'Purged Account'
-                : formatSafeDisplayName(debt.lender_name, debt.lender_email);
-            const borrowerDisplay =
-              debt.borrower_id === SYSTEM_PURGED_USER_ID
-                ? 'Purged Account'
-                : formatSafeDisplayName(debt.borrower_name, debt.borrower_email);
-
-            const splitPrefix = splitMeta?.title ? `[Split: ${splitMeta.title}] ` : '';
-            const interestTag =
-              debt.interest_type && debt.interest_type !== 'none' && Number(debt.interest_rate) > 0
-                ? ` • ${debt.interest_rate}% ${debt.interest_type}`
-                : '';
-            const paidTag =
-              calc.totalPaid > 0
-                ? ` • Paid: ${formatCurrencyEdge(calc.totalPaid, currency)}`
-                : '';
-
-            if (calc.isPurged) {
-              previewTitle = `${formattedPrincipal} • 🛡️ Purged by Admin — DebtSync`;
-              previewDescription = `${splitPrefix}${lenderDisplay} → ${borrowerDisplay} • (Transaction purged by admin) • Support: support@satya-nayak.dev`;
-              themeColor = '#ef4444';
-              siteName = 'DebtSync • Purged Ledger Record';
-            } else if (debt.status === 'settled' || calc.currentBalance <= 0) {
-              previewTitle = `${formattedPrincipal} • 🟢 Settled — DebtSync`;
-              previewDescription = `${splitPrefix}${lenderDisplay} → ${borrowerDisplay} • Balance: ${formatCurrencyEdge(0, currency)} (Fully Settled) • Verified Read-Only Ledger`;
-              themeColor = '#10b981';
-              siteName = 'DebtSync • Settled Agreement';
-            } else if (debt.status === 'pending') {
-              previewTitle = `${formattedPrincipal} • ⏳ Pending Acceptance — DebtSync`;
-              previewDescription = `${splitPrefix}${lenderDisplay} → ${borrowerDisplay} • Principal: ${formattedPrincipal}${interestTag} • Awaiting Counterparty Acceptance`;
-              themeColor = '#f59e0b';
-              siteName = 'DebtSync • Pending Agreement';
+            if (!isGlobalValid) {
+              previewTitle = '🔒 Public Link Disabled — DebtSync';
+              previewDescription =
+                'Global public sharing is turned off for this transaction. Only participating members can view it.';
+              themeColor = '#64748b';
             } else {
-              const amountHeadline =
-                Math.abs(calc.currentBalance - calc.principal) >= 0.01
-                  ? `${formattedBalance} Due (of ${formattedPrincipal})`
-                  : formattedPrincipal;
-              previewTitle = `${amountHeadline} • ⚡ Active — DebtSync`;
-              previewDescription = `${splitPrefix}${lenderDisplay} → ${borrowerDisplay} • Remaining: ${formattedBalance}${paidTag}${interestTag} • Public Read-Only Ledger`;
-              themeColor = '#6366f1';
-              siteName = 'DebtSync • Active Agreement';
+              const splitMeta = parseTagJson<{
+                title?: string;
+                totalAmount?: number;
+                participants?: any[];
+              }>(debt.notes, '[SPLIT:');
+
+              const snapshotPayments = Array.isArray(shareMeta?.snapshot?.payments)
+                ? shareMeta.snapshot!.payments!
+                : [];
+
+              const calc = computeSnapshotBalance(debt, snapshotPayments);
+              const currency = debt.currency || 'inr';
+              const formattedPrincipal = formatCurrencyEdge(calc.principal, currency);
+              const formattedBalance = formatCurrencyEdge(calc.currentBalance, currency);
+
+              const lenderDisplay =
+                debt.lender_id === SYSTEM_PURGED_USER_ID
+                  ? 'Purged Account'
+                  : formatSafeDisplayName(debt.lender_name, debt.lender_email);
+              const borrowerDisplay =
+                debt.borrower_id === SYSTEM_PURGED_USER_ID
+                  ? 'Purged Account'
+                  : formatSafeDisplayName(debt.borrower_name, debt.borrower_email);
+
+              const splitPrefix = splitMeta?.title ? `[Split: ${splitMeta.title}] ` : '';
+              const interestTag =
+                debt.interest_type && debt.interest_type !== 'none' && Number(debt.interest_rate) > 0
+                  ? ` • ${debt.interest_rate}% ${debt.interest_type}`
+                  : '';
+              const paidTag =
+                calc.totalPaid > 0
+                  ? ` • Paid: ${formatCurrencyEdge(calc.totalPaid, currency)}`
+                  : '';
+
+              if (calc.isPurged) {
+                previewTitle = `${formattedPrincipal} • 🛡️ Purged by Admin — DebtSync`;
+                previewDescription = `${splitPrefix}${lenderDisplay} → ${borrowerDisplay} • (Transaction purged by admin) • Support: support@satya-nayak.dev`;
+                themeColor = '#ef4444';
+                siteName = 'DebtSync • Purged Ledger Record';
+              } else if (debt.status === 'settled' || calc.currentBalance <= 0) {
+                previewTitle = `${formattedPrincipal} • 🟢 Settled — DebtSync`;
+                previewDescription = `${splitPrefix}${lenderDisplay} → ${borrowerDisplay} • Balance: ${formatCurrencyEdge(0, currency)} (Fully Settled) • Verified Read-Only Ledger`;
+                themeColor = '#10b981';
+                siteName = 'DebtSync • Settled Agreement';
+              } else if (debt.status === 'pending') {
+                previewTitle = `${formattedPrincipal} • ⏳ Pending Acceptance — DebtSync`;
+                previewDescription = `${splitPrefix}${lenderDisplay} → ${borrowerDisplay} • Principal: ${formattedPrincipal}${interestTag} • Awaiting Counterparty Acceptance`;
+                themeColor = '#f59e0b';
+                siteName = 'DebtSync • Pending Agreement';
+              } else {
+                const amountHeadline =
+                  Math.abs(calc.currentBalance - calc.principal) >= 0.01
+                    ? `${formattedBalance} Due (of ${formattedPrincipal})`
+                    : formattedPrincipal;
+                previewTitle = `${amountHeadline} • ⚡ Active — DebtSync`;
+                previewDescription = `${splitPrefix}${lenderDisplay} → ${borrowerDisplay} • Remaining: ${formattedBalance}${paidTag}${interestTag} • Public Read-Only Ledger`;
+                themeColor = '#6366f1';
+                siteName = 'DebtSync • Active Agreement';
+              }
             }
           }
         }
+      } catch {
+        // Fallback gracefully if edge fetch times out
+        previewTitle = 'Shared Transaction Summary — DebtSync';
+        previewDescription =
+          'Open this link to view the live debt amount, settlement status, and verified audit trail on DebtSync.';
       }
-    } catch {
-      // Fallback gracefully if edge fetch times out
-      previewTitle = 'Shared Transaction Summary — DebtSync';
-      previewDescription =
-        'Open this link to view the live debt amount, settlement status, and verified audit trail on DebtSync.';
     }
+
+    const cleanShareUrl = debtId
+      ? `${url.origin}/share?id=${encodeURIComponent(debtId)}${token ? `&token=${encodeURIComponent(token)}` : ''}`
+      : `${url.origin}/share`;
+
+    const enrichedHtml = injectPreviewMetaTags(rawHtml, {
+      title: previewTitle,
+      description: previewDescription,
+      url: cleanShareUrl,
+      imageUrl: iconUrl,
+      themeColor,
+      siteName,
+    });
+
+    const headers = new Headers();
+    // Copy safe headers from baseResponse avoiding immutable header errors
+    for (const [key, value] of baseResponse.headers.entries()) {
+      const k = key.toLowerCase();
+      if (k !== 'content-encoding' && k !== 'content-length' && k !== 'etag' && k !== 'location') {
+        headers.set(key, value);
+      }
+    }
+    headers.set('Content-Type', 'text/html; charset=utf-8');
+    headers.set('Cache-Control', 'public, max-age=0, must-revalidate');
+
+    return new Response(request.method === 'HEAD' ? null : enrichedHtml, {
+      status: 200,
+      headers,
+    });
+  } catch (_) {
+    // If anything fails in edge function, fall back directly to static asset so the page always renders!
+    return context.next();
   }
-
-  const enrichedHtml = injectPreviewMetaTags(rawHtml, {
-    title: previewTitle,
-    description: previewDescription,
-    url: url.toString(),
-    imageUrl: iconUrl,
-    themeColor,
-    siteName,
-  });
-
-  const headers = new Headers(baseResponse.headers);
-  // CRITICAL: Since rawHtml was decompressed with .text() and enriched,
-  // we MUST delete compression & length headers to prevent browser ERR_CONTENT_DECODING_FAILED
-  // and Cloudflare 520 / 1101 proxy errors!
-  headers.delete('content-encoding');
-  headers.delete('content-length');
-  headers.delete('etag');
-  headers.delete('location');
-  headers.set('Content-Type', 'text/html; charset=utf-8');
-  headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
-
-  return new Response(request.method === 'HEAD' ? null : enrichedHtml, {
-    status: 200,
-    headers,
-  });
 };
