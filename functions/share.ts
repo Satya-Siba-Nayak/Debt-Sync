@@ -290,6 +290,12 @@ export const onRequest = async (context: {
       ''
     ).trim();
 
+    let mode = (
+      url.searchParams.get('mode') ||
+      url.searchParams.get('amp;mode') ||
+      ''
+    ).trim();
+
     // Fallback: search regex across raw url search & href
     if (!debtId || !token) {
       try {
@@ -423,7 +429,22 @@ export const onRequest = async (context: {
                 shareMeta.globalToken === token
             );
 
-            if (!isGlobalValid) {
+            const isParticipantLink = !token || mode === 'participants';
+
+            if (isParticipantLink) {
+              const splitMeta = parseTagJson<{
+                title?: string;
+                totalAmount?: number;
+                participants?: any[];
+              }>(debt.notes, '[SPLIT:');
+              previewTitle = splitMeta?.title
+                ? `🔒 Private Split Bill: ${splitMeta.title} • Participants Only — DebtSync`
+                : `🔒 Private Ledger Agreement • Participants Only — DebtSync`;
+              previewDescription =
+                'Confidential transaction agreement on DebtSync restricted to participating members. Sign in on DebtSync to review, verify payments, and manage terms.';
+              themeColor = '#6366f1';
+              siteName = 'DebtSync • Participants-Only Ledger';
+            } else if (!isGlobalValid) {
               const isRotatedOrExpired = Boolean(token && shareMeta?.globalToken && shareMeta.globalToken !== token);
               previewTitle = isRotatedOrExpired
                 ? '🔒 Public Link Expired or Rotated — DebtSync'
@@ -432,6 +453,7 @@ export const onRequest = async (context: {
                 ? 'This public link contains an expired or previously rotated token. Participating members can log in on DebtSync to view the active agreement.'
                 : 'Global public sharing is turned off for this transaction. Only participating members can view it.';
               themeColor = '#64748b';
+              siteName = 'DebtSync • Access Restricted';
             } else {
               const splitMeta = parseTagJson<{
                 title?: string;

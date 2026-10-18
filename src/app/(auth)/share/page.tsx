@@ -550,7 +550,9 @@ function ShareTransactionContent() {
       currentUser &&
       (debt.lender_id === currentUser.id ||
         debt.borrower_id === currentUser.id ||
-        debt.created_by === currentUser.id)
+        debt.created_by === currentUser.id ||
+        (debt.lender?.email && currentUser.email && debt.lender.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+        (debt.borrower?.email && currentUser.email && debt.borrower.email.toLowerCase() === currentUser.email.toLowerCase()))
   );
 
   const isGlobalAccessValid = Boolean(
@@ -695,6 +697,8 @@ function ShareTransactionContent() {
           type: 'info',
           text: 'Global public link has been turned OFF. Anyone with the public link can no longer view this transaction.',
         });
+        setParams((prev) => ({ ...prev, token: '', mode: 'participants' }));
+        router.replace(`/share?id=${debt.id}&mode=participants`);
       } else {
         const origin = typeof window !== 'undefined' ? window.location.origin : '';
         const newGlobalUrl = `${origin}/share?id=${debt.id}&token=${nextShareMeta.globalToken}`;
@@ -710,6 +714,7 @@ function ShareTransactionContent() {
               ? 'Global public link enabled and copied to clipboard!'
               : 'Global link rotated! Previous public links are now invalidated.',
         });
+        setParams((prev) => ({ ...prev, token: nextShareMeta.globalToken || '', mode: '' }));
         router.replace(`/share?id=${debt.id}&token=${nextShareMeta.globalToken}`);
       }
     } catch (err: any) {
