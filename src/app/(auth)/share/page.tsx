@@ -357,8 +357,8 @@ function ShareTransactionContent() {
           .select(
             `
             *,
-            lender:profiles!debts_lender_id_fkey(id, email, full_name, avatar_url, network_score),
-            borrower:profiles!debts_borrower_id_fkey(id, email, full_name, avatar_url, network_score)
+            lender:profiles!debts_lender_id_fkey(id, email, full_name, avatar_url),
+            borrower:profiles!debts_borrower_id_fkey(id, email, full_name, avatar_url)
           `
           )
           .eq('id', effectiveDebtId)
@@ -538,6 +538,32 @@ function ShareTransactionContent() {
       supabase.removeChannel(channel);
     };
   }, [debtId, supabase]);
+
+  // Synchronize document title at top-level (always runs before early returns)
+  useEffect(() => {
+    if (!debt) return;
+    try {
+      const debtCurrency = debt.currency || 'inr';
+      const calc = calculateDebtBalance(debt, payments);
+      const isPurged =
+        debt.status === 'purged' ||
+        debt.lender_id === '00000000-0000-0000-0000-000000000001' ||
+        debt.borrower_id === '00000000-0000-0000-0000-000000000001' ||
+        (typeof debt.notes === 'string' &&
+          (debt.notes.includes('[TRANSACTION PURGED BY ADMIN') ||
+            debt.notes.includes('[ADMIN_PURGED:'))) ||
+        Boolean(debt.lender?.is_purged) ||
+        Boolean(debt.borrower?.is_purged);
+
+      const formattedAmt = formatCurrency(debt.principal, debtCurrency);
+      let statusText = 'Agreement';
+      if (isPurged) statusText = 'Purged by Admin';
+      else if (debt.status === 'settled' || calc.currentBalance <= 0) statusText = 'Settled';
+      else if (debt.status === 'pending') statusText = 'Pending';
+      else if (debt.status === 'active') statusText = 'Active';
+      document.title = `${formattedAmt} • ${statusText} — DebtSync`;
+    } catch (_) {}
+  }, [debt, payments]);
 
   const isParticipant = Boolean(
     debt &&
@@ -986,17 +1012,6 @@ function ShareTransactionContent() {
     shareMeta?.globalEnabled && shareMeta?.globalToken
       ? `${origin}/share?id=${debt.id}&token=${shareMeta.globalToken}`
       : '';
-
-  useEffect(() => {
-    if (!debt) return;
-    const formattedAmt = formatCurrency(debt.principal, debtCurrency);
-    let statusText = 'Agreement';
-    if (isPurged) statusText = 'Purged by Admin';
-    else if (debt.status === 'settled' || calc.currentBalance <= 0) statusText = 'Settled';
-    else if (debt.status === 'pending') statusText = 'Pending';
-    else if (debt.status === 'active') statusText = 'Active';
-    document.title = `${formattedAmt} • ${statusText} — DebtSync`;
-  }, [debt, debtCurrency, isPurged, calc.currentBalance]);
 
   const copyLink = async (url: string, type: 'participant' | 'global') => {
     const copied = await copyTextToClipboard(url);
