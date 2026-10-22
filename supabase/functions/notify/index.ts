@@ -235,6 +235,30 @@ function buildMessage(
         tag: `debt-${tagBase}-reminder`,
         cta: recipientIsGhost ? 'Sign Up to Review & Accept' : 'Review Agreement',
       };
+    case 'payment_reminder':
+      return {
+        title: `Payment Reminder: ${eventAmount} to ${actorName}`,
+        body: recipientIsGhost
+          ? `${actorName} sent a friendly payment reminder for ${eventAmount} on DebtSync.`
+          : `${actorName} sent a friendly payment reminder regarding the outstanding balance of ${eventAmount} on your shared ledger.`,
+        amountLine: eventAmount,
+        url: debtUrl,
+        tag: `debt-${tagBase}-payment-reminder`,
+        cta: recipientIsGhost ? 'Sign Up to Repay' : 'View & Submit Repayment',
+      };
+    case 'due_date_reminder': {
+      const dueStr = debt?.due_date
+        ? new Date(debt.due_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+        : 'tomorrow';
+      return {
+        title: `Payment Due Tomorrow (${debtAmount})`,
+        body: `Friendly reminder: Your payment of ${debtAmount} to ${actorName} is due tomorrow (${dueStr}).`,
+        amountLine: debtAmount,
+        url: debtUrl,
+        tag: `debt-${tagBase}-due-date-reminder`,
+        cta: 'View & Submit Repayment',
+      };
+    }
     default:
       return {
         title: `Ledger update from ${actorName}`,
@@ -672,14 +696,18 @@ Deno.serve(async (req: Request) => {
       const ghost = Boolean(recipient.is_shadow);
       const msg = buildMessage(event, actorName, debt, details, ghost);
 
-      if (!ghost) {
+      const channel = (details.channel || 'both').toLowerCase();
+      const allowEmail = channel === 'email' || channel === 'both';
+      const allowPush = channel === 'push' || channel === 'both';
+
+      if (!ghost && (event !== 'payment_reminder' || allowPush)) {
         pushTargets.push(rid);
         pushMessage = pushMessage ?? msg;
       }
 
       // Stop sending emails when borrower accepts a debt to conserve Brevo email quota.
-      // Web push notification will still be dispatched if enabled.
-      if (event !== 'debt_accepted') {
+      // For payment_reminder, only send if email was selected.
+      if (event !== 'debt_accepted' && (event !== 'payment_reminder' || allowEmail)) {
         try {
           if (await sendEmail(recipient, msg, ghost, event)) emailsSent++;
         } catch (err) {

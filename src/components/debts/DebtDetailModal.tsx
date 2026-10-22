@@ -65,6 +65,14 @@ export function DebtDetailModal({
   const [reminderLoading, setReminderLoading] = useState(false);
   const [reminderFeedback, setReminderFeedback] = useState<string | null>(null);
 
+  // Active debt payment reminders (Email max 2/wk, Push max 3/wk)
+  const [paymentReminderLoading, setPaymentReminderLoading] = useState(false);
+  const [paymentReminderFeedback, setPaymentReminderFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
+  const [isPaymentReminderExpanded, setIsPaymentReminderExpanded] = useState(false);
+
   const prevDebtIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -668,6 +676,203 @@ export function DebtDetailModal({
       alert(err.message || 'Failed to send reminder.');
     } finally {
       setReminderLoading(false);
+    }
+  };
+
+  // Active Debt Payment Reminders (Lender reminding Borrower of remaining balance)
+  // Quota rules: Email (max 2/week), Push Notification (max 3/week)
+  const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+  const paymentReminderLogs = activityLogs.filter(
+    (l) => l.action === 'payment_reminder' && nowMs - new Date(l.created_at).getTime() <= SEVEN_DAYS_MS
+  );
+
+  const emailRemindersSentThisWeek = paymentReminderLogs.filter(
+    (l) => l.details?.channel === 'email' || l.details?.channel === 'both'
+  ).length;
+
+  const pushRemindersSentThisWeek = paymentReminderLogs.filter(
+    (l) => l.details?.channel === 'push' || l.details?.channel === 'both'
+  ).length;
+
+  const maxEmailReminders = 2;
+  const maxPushReminders = 3;
+
+  const emailQuotaRemaining = Math.max(0, maxEmailReminders - emailRemindersSentThisWeek);
+  const pushQuotaRemaining = Math.max(0, maxPushReminders - pushRemindersSentThisWeek);
+
+  const borrowerHasEmail = Boolean(otherPerson?.email && !otherPerson.email.endsWith('@phone.debtsync.local'));
+  const canSendEmailReminder = emailQuotaRemaining > 0 && borrowerHasEmail;
+  const canSendPushReminder = pushQuotaRemaining > 0;
+  const canSendBothReminder = canSendEmailReminder && canSendPushReminder;
+
+  // Calculate days until weekly quota resets
+  const oldestEmailLog = paymentReminderLogs
+    .filter((l) => l.details?.channel === 'email' || l.details?.channel === 'both')
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())[0];
+  const emailResetDays = oldestEmailLog
+    ? Math.max(1, Math.ceil((new Date(oldestEmailLog.created_at).getTime() + SEVEN_DAYS_MS - nowMs) / (24 * 3600 * 1000)))
+    : 7;
+
+  const oldestPushLog = paymentReminderLogs
+    .filter((l) => l.details?.channel === 'push' || l.details?.channel === 'both')
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())[0];
+  const pushResetDays = oldestPushLog
+    ? Math.max(1, Math.ceil((new Date(oldestPushLog.created_at).getTime() + SEVEN_DAYS_MS - nowMs) / (24 * 3600 * 1000)))
+    : 7;
+
+  // Check 1-day automated due date reminder log
+  const dueDateReminderLog = activityLogs.find((l) => l.action === 'due_date_reminder');
+  const isDueDateReminderSent = Boolean(dueDateReminderLog);
+
+  // Due date calculations
+  const dueDateObj = debt?.due_date ? new Date(debt.due_date) : null;
+  const dueDateDiffDays = dueDateObj
+    ? Math.round(
+        (new Date(dueDateObj.getFullYear(), dueDateObj.getMonth(), dueDateObj.getDate()).getTime() -
+          new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime()) /
+          (1000 * 60 * 60 * 24)
+      )
+    : null;
+
+  // Most recent payment reminder sent by lender
+  const recentPaymentReminder =
+    paymentReminderLogs.length > 0
+      ? [...paymentReminderLogs].sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        )[0]
+      : null;
+
+  const handleSendPaymentReminder = async (channel: 'both' | 'email' | 'push') => {
+    if (!debt || paymentReminderLoading || !isLender) return;
+    if (channel === 'email' && !canSendEmailReminder) return;
+    if (channel === 'push' && !canSendPushReminder) return;
+    if (channel === 'both' && !canSendEmailReminder && !canSendPushReminder) return;
+
+    const actualChannel =
+      channel === 'both'
+        ? canSendEmailReminder && canSendPushReminder
+          ? 'both'
+          : canSendEmailReminder
+          ? 'email'
+          : canSendPushReminder
+          ? 'push'
+          : null
+        : channel;
+
+    if (!actualChannel) return;
+
+    setPaymentReminderLoading(true);
+    setPaymentReminderFeedback(null);
+
+    try {
+      let rpcSucceeded = false;
+      try {
+        const { data, error } = await supabase.rpc('send_payment_reminder', {
+          p_debt_id: debt.id,
+          p_channel: actualChannel,
+        });
+        if (!error && data?.success) {
+          rpcSucceeded = true;
+        } else if (error && !error.message.includes('function') && !error.message.includes('does not exist')) {
+          throw new Error(data?.error || error?.message || 'Could not send payment reminder');
+        }
+      } catch (rpcErr: any) {
+        if (rpcErr.message && !rpcErr.message.includes('function') && !rpcErr.message.includes('does not exist')) {
+          throw rpcErr;
+        }
+      }
+
+      const nowIso = new Date().toISOString();
+
+      if (!rpcSucceeded) {
+        await supabase.from('activity_log').insert({
+          user_id: currentUserId,
+          debt_id: debt.id,
+          action: 'payment_reminder',
+          details: {
+            channel: actualChannel,
+            amount: calc.currentBalance,
+            currency: debtCurrency,
+            borrower_id: debt.borrower_id,
+            lender_id: debt.lender_id,
+            borrower_name: otherName,
+            lender_name: myName,
+            timestamp: nowIso,
+          },
+        });
+      }
+
+      const channelLabel =
+        actualChannel === 'both'
+          ? 'Email & Push Notification'
+          : actualChannel === 'email'
+          ? 'Email'
+          : 'Push Notification';
+
+      // 1. Send Email if included
+      if (actualChannel === 'email' || actualChannel === 'both') {
+        const borrowerEmail = otherPerson?.email;
+        if (borrowerEmail && !borrowerEmail.endsWith('@phone.debtsync.local')) {
+          try {
+            await fetch('/api/notifications/email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                type: 'payment_reminder',
+                recipientEmail: borrowerEmail,
+                recipientName: otherName,
+                senderName: myName,
+                amount: calc.currentBalance,
+                currency: debtCurrency,
+                debtId: debt.id,
+                notes: debt.notes ? getCleanDebtNotes(debt.notes) : undefined,
+              }),
+            });
+          } catch (_) {}
+        }
+      }
+
+      // 2. Dispatch via notify Edge Function
+      try {
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+        const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+        await fetch(`${supabaseUrl}/functions/v1/notify`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${supabaseAnonKey}`,
+            apikey: supabaseAnonKey,
+          },
+          body: JSON.stringify({
+            event: 'payment_reminder',
+            debt_id: debt.id,
+            actor_id: currentUserId,
+            details: {
+              channel: actualChannel,
+              amount: calc.currentBalance,
+              currency: debtCurrency,
+              borrower_id: debt.borrower_id,
+              lender_id: debt.lender_id,
+            },
+          }),
+        });
+      } catch (_) {}
+
+      setPaymentReminderFeedback({
+        type: 'success',
+        message: `Payment reminder successfully sent to ${otherName} via ${channelLabel}!`,
+      });
+      setTimeout(() => setPaymentReminderFeedback(null), 5000);
+
+      await fetchDebtDetails();
+      onDebtUpdated?.();
+    } catch (err: any) {
+      setPaymentReminderFeedback({
+        type: 'error',
+        message: err.message || 'Failed to send payment reminder.',
+      });
+    } finally {
+      setPaymentReminderLoading(false);
     }
   };
 
@@ -1302,6 +1507,265 @@ export function DebtDetailModal({
             </div>
           )}
 
+          {/* Active Debt: Payment Reminders & Due Date Status */}
+          {debt.status === 'active' && calc.currentBalance > 0 && (
+            <div className="p-4 rounded-xl border border-[var(--outline-variant)]/30 bg-[var(--surface-container-low)] space-y-3.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[20px] text-blue-500">
+                    notification_important
+                  </span>
+                  <div>
+                    <span className="font-heading text-sm font-bold text-[var(--on-surface)] block">
+                      {isLender ? 'Payment Reminders & Schedule' : 'Payment Status & Schedule'}
+                    </span>
+                    <span className="font-mono text-[11px] text-[var(--on-surface-variant)]">
+                      Outstanding balance:{' '}
+                      <strong className="text-[var(--on-surface)]">
+                        {formatCurrency(calc.currentBalance, debtCurrency, { showDecimals: true })}
+                      </strong>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Due Date & Automated Reminder Badge */}
+                {debt.due_date && (
+                  <div className="flex items-center gap-1.5 self-start sm:self-auto flex-wrap">
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold flex items-center gap-1 border ${
+                        dueDateDiffDays !== null && dueDateDiffDays <= 0
+                          ? 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30'
+                          : dueDateDiffDays === 1
+                          ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                          : 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[12px]">event</span>
+                      <span>
+                        {dueDateDiffDays !== null && dueDateDiffDays < 0
+                          ? `Overdue by ${Math.abs(dueDateDiffDays)}d`
+                          : dueDateDiffDays === 0
+                          ? 'Due Today'
+                          : dueDateDiffDays === 1
+                          ? 'Due Tomorrow'
+                          : `Due in ${dueDateDiffDays}d`}
+                      </span>
+                    </span>
+
+                    {/* Automated 1-Day Alert Status */}
+                    {isDueDateReminderSent ? (
+                      <span
+                        className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1"
+                        title="Automated 1-day reminder dispatched via email and push"
+                      >
+                        <span className="material-symbols-outlined text-[12px]">check_circle</span>
+                        <span>1-Day Alert Sent</span>
+                      </span>
+                    ) : (
+                      <span
+                        className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] border border-[var(--outline-variant)]/30 flex items-center gap-1"
+                        title="Automatically dispatched 1 day prior to due date"
+                      >
+                        <span className="material-symbols-outlined text-[12px]">alarm</span>
+                        <span>Auto-Alert 1d Prior</span>
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Feedback Alert Banner */}
+              {paymentReminderFeedback && (
+                <div
+                  className={`p-3 rounded-lg text-xs font-mono font-semibold flex items-center gap-2 border ${
+                    paymentReminderFeedback.type === 'success'
+                      ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
+                      : 'bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/30'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[16px] shrink-0">
+                    {paymentReminderFeedback.type === 'success' ? 'check_circle' : 'error'}
+                  </span>
+                  <span>{paymentReminderFeedback.message}</span>
+                </div>
+              )}
+
+              {/* Lender Controls & Rate-Limit Quotas */}
+              {isLender ? (
+                <div className="space-y-3 pt-1">
+                  {/* Quota meters */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    {/* Email Quota */}
+                    <div className="p-2.5 rounded-lg bg-[var(--surface-container)] border border-[var(--outline-variant)]/20 flex items-center justify-between">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="material-symbols-outlined text-[18px] text-blue-500 shrink-0">
+                          mail
+                        </span>
+                        <div className="min-w-0">
+                          <span className="font-heading font-semibold text-[var(--on-surface)] block text-[11px]">
+                            Email Reminders
+                          </span>
+                          <span className="font-mono text-[10px] text-[var(--on-surface-variant)] block truncate">
+                            {borrowerHasEmail
+                              ? `${emailQuotaRemaining} of ${maxEmailReminders} left this week`
+                              : 'No borrower email on file'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="shrink-0 font-mono text-[11px] font-bold">
+                        <span
+                          className={`px-2 py-0.5 rounded-full border ${
+                            emailQuotaRemaining > 0 && borrowerHasEmail
+                              ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30'
+                              : 'bg-neutral-500/10 text-neutral-500 border-neutral-500/20'
+                          }`}
+                        >
+                          {emailRemindersSentThisWeek}/{maxEmailReminders}/wk
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Push Quota */}
+                    <div className="p-2.5 rounded-lg bg-[var(--surface-container)] border border-[var(--outline-variant)]/20 flex items-center justify-between">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="material-symbols-outlined text-[18px] text-purple-500 shrink-0">
+                          notifications_active
+                        </span>
+                        <div className="min-w-0">
+                          <span className="font-heading font-semibold text-[var(--on-surface)] block text-[11px]">
+                            Push Notifications
+                          </span>
+                          <span className="font-mono text-[10px] text-[var(--on-surface-variant)] block truncate">
+                            {`${pushQuotaRemaining} of ${maxPushReminders} left this week`}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="shrink-0 font-mono text-[11px] font-bold">
+                        <span
+                          className={`px-2 py-0.5 rounded-full border ${
+                            pushQuotaRemaining > 0
+                              ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/30'
+                              : 'bg-neutral-500/10 text-neutral-500 border-neutral-500/20'
+                          }`}
+                        >
+                          {pushRemindersSentThisWeek}/{maxPushReminders}/wk
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Limits reached reset helper note */}
+                  {(emailQuotaRemaining === 0 || pushQuotaRemaining === 0) && (
+                    <div className="text-[11px] font-mono text-[var(--on-surface-variant)] flex items-center gap-1.5 px-1">
+                      <span className="material-symbols-outlined text-[14px] text-amber-500">info</span>
+                      <span>
+                        {emailQuotaRemaining === 0 && pushQuotaRemaining === 0
+                          ? `Weekly quota reached. Resets in ${Math.min(emailResetDays, pushResetDays)}d.`
+                          : emailQuotaRemaining === 0
+                          ? `Email quota reached (2/wk). Resets in ${emailResetDays}d.`
+                          : `Push quota reached (3/wk). Resets in ${pushResetDays}d.`}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Action Buttons */}
+                  <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                    {/* Primary Button: Send Both (or best available) */}
+                    <button
+                      type="button"
+                      disabled={paymentReminderLoading || (!canSendEmailReminder && !canSendPushReminder)}
+                      onClick={() =>
+                        handleSendPaymentReminder(
+                          canSendBothReminder ? 'both' : canSendEmailReminder ? 'email' : 'push'
+                        )
+                      }
+                      className={`min-h-[44px] px-3.5 py-2 rounded-xl font-mono text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${
+                        canSendBothReminder || canSendEmailReminder || canSendPushReminder
+                          ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                          : 'bg-[var(--surface-container-high)] text-[var(--outline)] border border-[var(--outline-variant)]/30'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[16px]">
+                        {paymentReminderLoading ? 'sync' : 'send_time_extension'}
+                      </span>
+                      <span>
+                        {paymentReminderLoading
+                          ? 'Dispatching Reminder...'
+                          : canSendBothReminder
+                          ? 'Send Reminder (Email + Push)'
+                          : canSendEmailReminder
+                          ? 'Send Email Reminder'
+                          : canSendPushReminder
+                          ? 'Send Push Reminder'
+                          : 'Weekly Limit Reached'}
+                      </span>
+                    </button>
+
+                    {/* Email Only (if both are available and lender wants email only) */}
+                    {canSendBothReminder && (
+                      <button
+                        type="button"
+                        disabled={paymentReminderLoading}
+                        onClick={() => handleSendPaymentReminder('email')}
+                        className="min-h-[44px] px-3 py-2 rounded-xl font-mono text-xs font-semibold bg-[var(--surface-container-high)] hover:bg-[var(--surface-container-highest)] text-[var(--on-surface)] border border-[var(--outline-variant)]/30 flex items-center gap-1.5 transition-colors cursor-pointer"
+                        title="Send via Email only (counts toward 2/week quota)"
+                      >
+                        <span className="material-symbols-outlined text-[15px] text-blue-500">mail</span>
+                        <span>Email Only</span>
+                      </button>
+                    )}
+
+                    {/* Push Only (if both are available and lender wants push only) */}
+                    {canSendBothReminder && (
+                      <button
+                        type="button"
+                        disabled={paymentReminderLoading}
+                        onClick={() => handleSendPaymentReminder('push')}
+                        className="min-h-[44px] px-3 py-2 rounded-xl font-mono text-xs font-semibold bg-[var(--surface-container-high)] hover:bg-[var(--surface-container-highest)] text-[var(--on-surface)] border border-[var(--outline-variant)]/30 flex items-center gap-1.5 transition-colors cursor-pointer"
+                        title="Send via Push Notification only (counts toward 3/week quota)"
+                      >
+                        <span className="material-symbols-outlined text-[15px] text-purple-500">
+                          notifications_active
+                        </span>
+                        <span>Push Only</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                /* Debtor (Borrower) View */
+                <div className="p-2.5 rounded-lg bg-[var(--surface-container)] border border-[var(--outline-variant)]/20 text-xs text-[var(--on-surface-variant)] space-y-1">
+                  {recentPaymentReminder ? (
+                    <div className="flex items-start gap-2">
+                      <span className="material-symbols-outlined text-[16px] text-blue-500 shrink-0 mt-0.5">
+                        info
+                      </span>
+                      <div>
+                        <strong className="text-[var(--on-surface)]">Friendly Payment Reminder:</strong>{' '}
+                        <span>
+                          {otherName} sent a payment reminder on{' '}
+                          {new Date(recentPaymentReminder.created_at).toLocaleDateString()} for the outstanding balance
+                          of {formatCurrency(calc.currentBalance, debtCurrency, { showDecimals: true })}.
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[16px] text-emerald-500 shrink-0">
+                        schedule
+                      </span>
+                      <span>
+                        {debt.due_date
+                          ? `Payment is due on ${new Date(debt.due_date).toLocaleDateString()}. DebtSync will automatically dispatch an alert 1 day prior.`
+                          : 'No due date set for this agreement. Keep payments on schedule.'}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Split Bill Group Card */}
           {(() => {
             const split = parseSplitDetails(debt);
@@ -1656,13 +2120,41 @@ export function DebtDetailModal({
               )}
 
               {!isPurged && debt.status === 'active' && calc.currentBalance > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setIsPaymentModalOpen(true)}
-                  className="py-2 px-3.5 rounded-xl bg-[var(--secondary)] text-[var(--on-secondary)] font-mono text-xs font-bold hover:opacity-95 shadow-xs cursor-pointer min-h-[40px]"
-                >
-                  {isLender ? 'Record Payment' : 'Report Repayment'}
-                </button>
+                <div className="flex items-center gap-2">
+                  {isLender && (
+                    <button
+                      type="button"
+                      disabled={paymentReminderLoading || (!canSendEmailReminder && !canSendPushReminder)}
+                      onClick={() =>
+                        handleSendPaymentReminder(
+                          canSendBothReminder ? 'both' : canSendEmailReminder ? 'email' : 'push'
+                        )
+                      }
+                      className="min-h-[40px] py-2 px-3.5 rounded-xl border border-blue-500/40 bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 font-mono text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      title={
+                        canSendBothReminder
+                          ? 'Send payment reminder via email & push notification'
+                          : canSendEmailReminder
+                          ? 'Send payment reminder via email'
+                          : canSendPushReminder
+                          ? 'Send payment reminder via push notification'
+                          : 'Weekly reminder limit reached'
+                      }
+                    >
+                      <span className="material-symbols-outlined text-[15px]">
+                        {paymentReminderLoading ? 'sync' : 'notification_important'}
+                      </span>
+                      <span>{paymentReminderLoading ? 'Sending...' : 'Remind'}</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setIsPaymentModalOpen(true)}
+                    className="py-2 px-3.5 rounded-xl bg-[var(--secondary)] text-[var(--on-secondary)] font-mono text-xs font-bold hover:opacity-95 shadow-xs cursor-pointer min-h-[40px]"
+                  >
+                    {isLender ? 'Record Payment' : 'Report Repayment'}
+                  </button>
+                </div>
               )}
 
               {debt.status === 'pending' && debt.created_by === currentUserId && (

@@ -110,6 +110,25 @@ function formatTelemetryLog(
       break;
     }
 
+    case 'payment_reminder': {
+      const channel = (l.details as any)?.channel || 'all';
+      const channelLabel =
+        channel === 'both' ? 'Email + Push' : channel === 'email' ? 'Email' : channel === 'push' ? 'Push' : 'Reminder';
+      title = `Payment Reminder Sent (${channelLabel})`;
+      description = `${actorName} reminded ${counterpartyName || 'borrower'}${formattedAmt ? ` for ${formattedAmt}` : ''}`;
+      badgeClass = 'bg-blue-500/15 text-blue-500 border-blue-500/20';
+      icon = 'send_time_extension';
+      break;
+    }
+
+    case 'due_date_reminder': {
+      title = '1-Day Due Date Alert Dispatched';
+      description = `Automated notification sent to ${counterpartyName || 'borrower'}${formattedAmt ? ` for ${formattedAmt}` : ''}`;
+      badgeClass = 'bg-amber-500/15 text-amber-500 border-amber-500/20';
+      icon = 'alarm';
+      break;
+    }
+
     case 'payment_made':
     case 'payment_created':
       title = `Payment Submitted: ${formattedAmt}`;

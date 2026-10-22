@@ -68,6 +68,20 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // Background automated check for 1-day due date reminders (runs every 4 hours per client)
+  useEffect(() => {
+    try {
+      const KEY = 'debtsync_last_due_date_reminder_check';
+      const last = localStorage.getItem(KEY);
+      const FOUR_HOURS = 4 * 60 * 60 * 1000;
+      if (!last || Date.now() - Number(last) > FOUR_HOURS) {
+        localStorage.setItem(KEY, String(Date.now()));
+        supabase.rpc('check_and_send_due_date_reminders').catch(() => {});
+        fetch('/api/reminders/due-date', { method: 'POST' }).catch(() => {});
+      }
+    } catch (_) {}
+  }, [supabase]);
+
   useEffect(() => {
     async function loadUser() {
       // 0ms lookup from persistent session cookie / storage

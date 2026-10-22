@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 interface EmailPayload {
-  type: 'ghost_account_invite' | 'payment_request' | 'debt_recorded' | 'split_bill_request';
+  type: 'ghost_account_invite' | 'payment_request' | 'debt_recorded' | 'split_bill_request' | 'payment_reminder' | 'due_date_reminder';
   recipientEmail: string;
   recipientName?: string;
   senderName: string;
@@ -9,6 +9,7 @@ interface EmailPayload {
   currency: string;
   notes?: string;
   debtId?: string;
+  dueDate?: string;
 }
 
 // In-memory rate limiting map: recipientEmail:type -> timestamp
@@ -57,9 +58,11 @@ export async function POST(request: NextRequest) {
     const cooldownMs =
       type === 'ghost_account_invite'
         ? 60 * 60 * 1000 // 1 hour for ghost account creation
+        : type === 'payment_reminder'
+        ? 30 * 60 * 1000 // 30 minutes cooldown between manual payment reminders
         : 15 * 60 * 1000; // 15 minutes for payment/debt updates
 
-    const rateKey = `${cleanEmail}:${type}`;
+    const rateKey = body.debtId ? `${cleanEmail}:${type}:${body.debtId}` : `${cleanEmail}:${type}`;
     const lastSent = rateLimitMap.get(rateKey);
     const now = Date.now();
 
@@ -75,39 +78,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://debtsync.com').replace(/\/$/, '');
+    const targetNext = body.debtId ? `/transactions?debt=${body.debtId}` : '/transactions';
+    const signupUrl = `${appUrl}/signup?email=${encodeURIComponent(cleanEmail)}&next=${encodeURIComponent(targetNext)}`;
+    const loginUrl = `${appUrl}/login?email=${encodeURIComponent(cleanEmail)}&next=${encodeURIComponent(targetNext)}`;
+    let ctaUrl = body.debtId ? `${appUrl}/transactions?debt=${body.debtId}` : `${appUrl}/transactions`;
+
     // Build subject and HTML template
     const formattedAmount = `${currency.toUpperCase()} ${Number(amount).toLocaleString()}`;
     let subject = '';
     let headline = '';
     let description = '';
     let ctaText = 'Open DebtSync Ledger';
-
-    if (type === 'ghost_account_invite') {
-      subject = `${senderName} logged a transaction of ${formattedAmount} with you on DebtSync`;
-      headline = 'New Peer Ledger Agreement Recorded';
-      description = `<strong>${senderName}</strong> recorded a transaction of <strong>${formattedAmount}</strong> with you. A ledger profile has been reserved for you to review, track live interest, and verify payments.`;
-      ctaText = 'Claim Profile & Review Ledger';
-    } else if (type === 'payment_request') {
-      subject = `Repayment of ${formattedAmount} reported by ${senderName}`;
-      headline = 'Payment Verification Request';
-      description = `<strong>${senderName}</strong> has reported a repayment of <strong>${formattedAmount}</strong> on your shared ledger. Please review and verify the receipt.`;
-      ctaText = 'Verify Repayment Receipt';
-    } else if (type === 'split_bill_request') {
-      subject = `${senderName} split an expense with you: ${formattedAmount}`;
-      headline = 'Group Expense Split Request';
-      description = `<strong>${senderName}</strong> recorded a group expense split on DebtSync. Your share is <strong>${formattedAmount}</strong>.`;
-      ctaText = 'Review & Accept Split';
-    } else {
-      subject = `Ledger update of ${formattedAmount} from ${senderName}`;
-      headline = 'Ledger Agreement Update';
-      description = `<strong>${senderName}</strong> updated a shared transaction agreement for <strong>${formattedAmount}</strong>.`;
-    }
-
-    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://debtsync.com').replace(/\/$/, '');
-    const targetNext = body.debtId ? `/transactions?debt=${body.debtId}` : '/transactions';
-    const signupUrl = `${appUrl}/signup?email=${encodeURIComponent(cleanEmail)}&next=${encodeURIComponent(targetNext)}`;
-    const loginUrl = `${appUrl}/login?email=${encodeURIComponent(cleanEmail)}&next=${encodeURIComponent(targetNext)}`;
-    let ctaUrl = appUrl;
 
     if (type === 'ghost_account_invite') {
       subject = `${senderName} logged a transaction of ${formattedAmount} with you on DebtSync`;
@@ -120,18 +102,28 @@ export async function POST(request: NextRequest) {
       headline = 'Payment Verification Request';
       description = `<strong>${senderName}</strong> has reported a repayment of <strong>${formattedAmount}</strong> on your shared ledger. Please review and verify the receipt.`;
       ctaText = 'Verify Repayment Receipt';
-      ctaUrl = body.debtId ? `${appUrl}/transactions?debt=${body.debtId}` : `${appUrl}/transactions`;
     } else if (type === 'split_bill_request') {
       subject = `${senderName} split an expense with you: ${formattedAmount}`;
       headline = 'Group Expense Split Request';
       description = `<strong>${senderName}</strong> recorded a group expense split on DebtSync. Your share is <strong>${formattedAmount}</strong>.`;
       ctaText = 'Review & Accept Split';
-      ctaUrl = body.debtId ? `${appUrl}/transactions?debt=${body.debtId}` : `${appUrl}/transactions`;
+    } else if (type === 'payment_reminder') {
+      subject = `Payment Reminder: ${formattedAmount} due to ${senderName}`;
+      headline = 'Friendly Payment Reminder';
+      description = `<strong>${senderName}</strong> sent a reminder regarding the outstanding balance of <strong>${formattedAmount}</strong> on your shared ledger. Please review and arrange repayment.`;
+      ctaText = 'View Debt & Repay';
+    } else if (type === 'due_date_reminder') {
+      const dueStr = body.dueDate
+        ? new Date(body.dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+        : 'tomorrow';
+      subject = `Payment Due Tomorrow: ${formattedAmount} to ${senderName}`;
+      headline = 'Upcoming Payment Due Tomorrow';
+      description = `Friendly reminder that your payment of <strong>${formattedAmount}</strong> to <strong>${senderName}</strong> is due tomorrow (${dueStr}). Please review your ledger and submit your repayment receipt.`;
+      ctaText = 'View & Submit Repayment';
     } else {
       subject = `Ledger update of ${formattedAmount} from ${senderName}`;
       headline = 'Ledger Agreement Update';
       description = `<strong>${senderName}</strong> updated a shared transaction agreement for <strong>${formattedAmount}</strong>.`;
-      ctaUrl = body.debtId ? `${appUrl}/transactions?debt=${body.debtId}` : `${appUrl}/transactions`;
     }
 
     const htmlBody = `
