@@ -1,7 +1,12 @@
 interface Env {
   DISCORD_CONTACT_WEBHOOK_URL?: string;
-  DISCORD_WEBHOOK_URL?: string;
+  DISCORD_CONTACT_WEBHOOK_URI?: string;
   DISCORD_BUG_WEBHOOK_URL?: string;
+  DISCORD_BUG_WEBHOOK_URI?: string;
+  DISCORD_WEBHOOK_URL?: string;
+  DISCORD_WEBHOOK_URI?: string;
+  NEXT_PUBLIC_DISCORD_BUG_WEBHOOK_URL?: string;
+  NEXT_PUBLIC_DISCORD_BUG_WEBHOOK_URI?: string;
 }
 
 // Obfuscated fallback to prevent GitHub secret scrapers and bots from discovering webhook URL
@@ -82,8 +87,13 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
 
     const webhookUrl =
       context.env.DISCORD_CONTACT_WEBHOOK_URL ||
-      context.env.DISCORD_WEBHOOK_URL ||
+      context.env.DISCORD_CONTACT_WEBHOOK_URI ||
       context.env.DISCORD_BUG_WEBHOOK_URL ||
+      context.env.DISCORD_BUG_WEBHOOK_URI ||
+      context.env.DISCORD_WEBHOOK_URL ||
+      context.env.DISCORD_WEBHOOK_URI ||
+      context.env.NEXT_PUBLIC_DISCORD_BUG_WEBHOOK_URL ||
+      context.env.NEXT_PUBLIC_DISCORD_BUG_WEBHOOK_URI ||
       getSecureFallbackWebhook();
 
     const fields = [

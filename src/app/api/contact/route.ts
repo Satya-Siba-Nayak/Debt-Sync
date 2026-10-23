@@ -91,8 +91,13 @@ export async function POST(request: NextRequest) {
     // Discord Webhook Dispatch (ONLY Discord, no external emails)
     const webhookUrl =
       process.env.DISCORD_CONTACT_WEBHOOK_URL ||
-      process.env.DISCORD_WEBHOOK_URL ||
+      process.env.DISCORD_CONTACT_WEBHOOK_URI ||
       process.env.DISCORD_BUG_WEBHOOK_URL ||
+      process.env.DISCORD_BUG_WEBHOOK_URI ||
+      process.env.DISCORD_WEBHOOK_URL ||
+      process.env.DISCORD_WEBHOOK_URI ||
+      process.env.NEXT_PUBLIC_DISCORD_BUG_WEBHOOK_URL ||
+      process.env.NEXT_PUBLIC_DISCORD_BUG_WEBHOOK_URI ||
       getSecureFallbackWebhook();
 
     const fields = [
