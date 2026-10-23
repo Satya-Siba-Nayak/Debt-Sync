@@ -1,7 +1,44 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+
+const RATE_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+const MAX_DAILY_INQUIRIES = 2; // Strict 2 per day
+
+function getOrCreateDeviceId(): string {
+  if (typeof window === 'undefined') return '';
+  let id = localStorage.getItem('debtsync_contact_device_id');
+  if (!id) {
+    id = 'dev_' + Math.random().toString(36).substring(2, 12) + Date.now().toString(36);
+    try {
+      localStorage.setItem('debtsync_contact_device_id', id);
+    } catch (_) {}
+  }
+  return id;
+}
+
+function getRecentSubmissionTimestamps(): number[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem('debtsync_contact_inquiries');
+    if (!raw) return [];
+    const timestamps: number[] = JSON.parse(raw);
+    const now = Date.now();
+    return timestamps.filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+  } catch (_) {
+    return [];
+  }
+}
+
+function recordSubmissionTimestamp(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const recent = getRecentSubmissionTimestamps();
+    recent.push(Date.now());
+    localStorage.setItem('debtsync_contact_inquiries', JSON.stringify(recent));
+  } catch (_) {}
+}
 
 export function ContactForm() {
   const [fullName, setFullName] = useState('');
@@ -13,10 +50,34 @@ export function ContactForm() {
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [inquiriesToday, setInquiriesToday] = useState(0);
+
+  useEffect(() => {
+    const recent = getRecentSubmissionTimestamps();
+    setInquiriesToday(recent.length);
+  }, []);
+
+  const remainingDaily = Math.max(0, MAX_DAILY_INQUIRIES - inquiriesToday);
+  const isDailyLimitReached = remainingDaily === 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    if (isDailyLimitReached) {
+      setError('Daily limit reached: You can submit at most 2 inquiries per day from this device.');
+      return;
+    }
+
+    if (!email.trim() || !email.includes('@')) {
+      setError('Please provide a valid email address so we can reply.');
+      return;
+    }
+
+    if (!message.trim()) {
+      setError('Please enter your message.');
+      return;
+    }
 
     if (!optInCommunications) {
       setError('Please check the communication consent box to submit your inquiry.');
@@ -26,15 +87,19 @@ export function ContactForm() {
     setSubmitting(true);
 
     try {
+      const deviceId = getOrCreateDeviceId();
       const res = await fetch('/api/contact', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-device-id': deviceId,
+        },
         body: JSON.stringify({
-          fullName,
-          email,
-          phone,
+          fullName: fullName.trim() || undefined,
+          email: email.trim(),
+          phone: phone.trim() || undefined,
           category,
-          message,
+          message: message.trim(),
           optInCommunications,
         }),
       });
@@ -44,6 +109,8 @@ export function ContactForm() {
         throw new Error(data.error || 'Failed to submit inquiry. Please try again.');
       }
 
+      recordSubmissionTimestamp();
+      setInquiriesToday((prev) => prev + 1);
       setSubmitting(false);
       setSubmitted(true);
     } catch (err: any) {
@@ -59,23 +126,32 @@ export function ContactForm() {
           <span className="material-symbols-outlined text-2xl">check_circle</span>
         </div>
         <h3 className="font-heading text-lg font-bold text-[var(--on-surface)]">
-          Inquiry Successfully Dispatched
+          Inquiry Successfully Dispatched to Discord
         </h3>
         <p className="text-xs text-[var(--on-surface-variant)] max-w-md mx-auto leading-relaxed">
-          Thank you, <strong>{fullName}</strong>. Your message regarding{' '}
-          <span className="text-[var(--primary)] font-bold">{category}</span> has been routed to our technical support team. A confirmation has been logged for <strong>{email}</strong>.
+          Thank you{fullName ? `, ${fullName}` : ''}! Your message regarding{' '}
+          <span className="text-[var(--primary)] font-bold">{category}</span> has been posted directly to our team Discord channel. We will reply to <strong>{email}</strong>.
         </p>
+        <div className="text-[11px] text-[var(--on-surface-variant)]/70">
+          Device daily submissions: {inquiriesToday}/{MAX_DAILY_INQUIRIES} used today.
+        </div>
         <div className="pt-2">
-          <button
-            type="button"
-            onClick={() => {
-              setSubmitted(false);
-              setMessage('');
-            }}
-            className="px-4 py-2 rounded-xl bg-[var(--surface-container-high)] text-[var(--on-surface)] hover:bg-[var(--surface-container-highest)] text-xs font-semibold border border-[var(--outline-variant)]/30 transition-colors cursor-pointer"
-          >
-            Send Another Inquiry
-          </button>
+          {remainingDaily > 0 ? (
+            <button
+              type="button"
+              onClick={() => {
+                setSubmitted(false);
+                setMessage('');
+              }}
+              className="px-4 py-2 rounded-xl bg-[var(--surface-container-high)] text-[var(--on-surface)] hover:bg-[var(--surface-container-highest)] text-xs font-semibold border border-[var(--outline-variant)]/30 transition-colors cursor-pointer"
+            >
+              Send Another Inquiry ({remainingDaily} left today)
+            </button>
+          ) : (
+            <span className="text-xs text-amber-500">
+              Daily quota reached for this device (2/2).
+            </span>
+          )}
         </div>
       </div>
     );
@@ -83,35 +159,56 @@ export function ContactForm() {
 
   return (
     <div className="p-6 sm:p-8 rounded-2xl bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)]/30 shadow-md">
-      <div className="mb-6 space-y-1">
-        <h3 className="font-heading text-lg sm:text-xl font-bold text-[var(--on-surface)] flex items-center gap-2">
-          <span className="material-symbols-outlined text-[20px] text-[var(--primary)]">outgoing_mail</span>
-          <span>Send Us an Inquiry</span>
-        </h3>
-        <p className="font-mono text-xs text-[var(--on-surface-variant)] leading-relaxed">
-          Fill out this form for account assistance, carrier verification proof, or general questions.
-        </p>
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[var(--outline-variant)]/20 pb-4">
+        <div>
+          <h3 className="font-heading text-lg sm:text-xl font-bold text-[var(--on-surface)] flex items-center gap-2">
+            <span className="material-symbols-outlined text-[20px] text-[var(--primary)]">outgoing_mail</span>
+            <span>Send Us an Inquiry</span>
+          </h3>
+          <p className="font-mono text-xs text-[var(--on-surface-variant)] mt-0.5">
+            Messages are routed directly to our developer team Discord.
+          </p>
+        </div>
+
+        {/* Quota Badge */}
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-mono text-[11px] bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 text-[var(--on-surface-variant)] self-start sm:self-center">
+          <span className={`w-2 h-2 rounded-full ${isDailyLimitReached ? 'bg-red-500' : 'bg-emerald-500 animate-pulse'}`} />
+          <span>Device Quota: {remainingDaily}/{MAX_DAILY_INQUIRIES} left today</span>
+        </div>
       </div>
+
+      {isDailyLimitReached && (
+        <div className="mb-5 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 font-mono text-xs flex items-center gap-2.5">
+          <span className="material-symbols-outlined text-[18px] shrink-0">hourglass_top</span>
+          <span>
+            Daily device limit reached (2 submissions per 24 hours). If your inquiry is urgent, please email{' '}
+            <a href="mailto:support@satya-nayak.dev" className="underline font-bold">
+              support@satya-nayak.dev
+            </a>{' '}
+            directly.
+          </span>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-4 font-mono text-xs">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-[11px] uppercase tracking-wider text-[var(--on-surface-variant)] font-bold mb-1.5">
-              Full Name *
+              Full Name <span className="normal-case text-[10px] text-[var(--on-surface-variant)]/70">(optional)</span>
             </label>
             <input
               type="text"
-              required
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               placeholder="e.g. Alex Sharma"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container)] text-[var(--on-surface)] focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] outline-none text-xs"
+              disabled={isDailyLimitReached}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container)] text-[var(--on-surface)] focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] outline-none text-xs disabled:opacity-50"
             />
           </div>
 
           <div>
             <label className="block text-[11px] uppercase tracking-wider text-[var(--on-surface-variant)] font-bold mb-1.5">
-              Email Address *
+              Email Address <span className="text-[var(--primary)]">*</span>
             </label>
             <input
               type="email"
@@ -119,7 +216,8 @@ export function ContactForm() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container)] text-[var(--on-surface)] focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] outline-none text-xs"
+              disabled={isDailyLimitReached}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container)] text-[var(--on-surface)] focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] outline-none text-xs disabled:opacity-50"
             />
           </div>
         </div>
@@ -127,26 +225,27 @@ export function ContactForm() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-[11px] uppercase tracking-wider text-[var(--on-surface-variant)] font-bold mb-1.5">
-              Mobile Phone (with country code) *
+              Mobile Phone <span className="normal-case text-[10px] text-[var(--on-surface-variant)]/70">(optional)</span>
             </label>
             <input
               type="tel"
-              required
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
-              placeholder="+91 98765 43210"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container)] text-[var(--on-surface)] focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] outline-none text-xs"
+              placeholder="+91 98765 43210 (optional)"
+              disabled={isDailyLimitReached}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container)] text-[var(--on-surface)] focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] outline-none text-xs disabled:opacity-50"
             />
           </div>
 
           <div>
             <label className="block text-[11px] uppercase tracking-wider text-[var(--on-surface-variant)] font-bold mb-1.5">
-              Inquiry Subject *
+              Inquiry Subject <span className="text-[var(--primary)]">*</span>
             </label>
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value as any)}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container)] text-[var(--on-surface)] focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] outline-none text-xs"
+              disabled={isDailyLimitReached}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container)] text-[var(--on-surface)] focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] outline-none text-xs disabled:opacity-50"
             >
               <option value="support">Technical &amp; Account Support</option>
               <option value="deletion">Account &amp; Data Deletion Request</option>
@@ -158,19 +257,20 @@ export function ContactForm() {
 
         <div>
           <label className="block text-[11px] uppercase tracking-wider text-[var(--on-surface-variant)] font-bold mb-1.5">
-            Message Details *
+            Message Details <span className="text-[var(--primary)]">*</span>
           </label>
           <textarea
             required
             rows={4}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            placeholder="Please describe your inquiry, transaction ID, or question in detail..."
-            className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container)] text-[var(--on-surface)] focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] outline-none text-xs leading-relaxed"
+            disabled={isDailyLimitReached}
+            placeholder="Please describe your question or issue in detail..."
+            className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container)] text-[var(--on-surface)] focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] outline-none text-xs leading-relaxed disabled:opacity-50"
           />
         </div>
 
-        {/* Mandatory Operator Consent Box */}
+        {/* Carrier Consent Box */}
         <div className={`p-3.5 rounded-xl border transition-colors space-y-2 ${
           optInCommunications
             ? 'bg-[var(--surface-container)] border-[var(--primary)]/40'
@@ -182,14 +282,15 @@ export function ContactForm() {
               required
               checked={optInCommunications}
               onChange={(e) => setOptInCommunications(e.target.checked)}
-              className="mt-0.5 w-4 h-4 rounded border-outline-variant text-[var(--primary)] focus:ring-primary/20 accent-[var(--primary)] shrink-0 cursor-pointer"
+              disabled={isDailyLimitReached}
+              className="mt-0.5 w-4 h-4 rounded border-outline-variant text-[var(--primary)] focus:ring-primary/20 accent-[var(--primary)] shrink-0 cursor-pointer disabled:opacity-50"
             />
             <div className="text-xs leading-relaxed min-w-0 text-[var(--on-surface)]">
               <span className="font-bold block text-[var(--on-surface)]">
                 Carrier &amp; Communication Consent <span className="text-[var(--primary)]">*</span>
               </span>
               <span className="text-[11px] text-[var(--on-surface-variant)] block mt-1 leading-normal font-sans">
-                By clicking Submit, I agree to receive communications from DebtSync via <strong>SMS</strong>, <strong>RCS</strong>, <strong>WhatsApp</strong>, and <strong>Email</strong> for inquiry follow-ups, transaction receipts, and payment verifications.
+                By clicking Submit, I agree to receive communications from DebtSync via <strong>SMS</strong>, <strong>RCS</strong>, <strong>WhatsApp</strong>, and <strong>Email</strong> for service updates, transaction receipts, and verification reminders.
               </span>
               <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block mt-1 font-mono">
                 ✓ Inactive accounts will never receive spam or marketing. Reply STOP anytime to opt-out.
@@ -217,15 +318,17 @@ export function ContactForm() {
 
         <button
           type="submit"
-          disabled={submitting}
+          disabled={submitting || isDailyLimitReached}
           className="w-full py-3 px-5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-bold text-xs hover:opacity-90 active:scale-[0.99] transition-all disabled:opacity-50 shadow-md cursor-pointer flex items-center justify-center gap-2 min-h-[44px]"
         >
           {submitting ? (
-            <span>Sending Inquiry...</span>
+            <span>Sending to Discord...</span>
+          ) : isDailyLimitReached ? (
+            <span>Daily Limit Reached (2/2)</span>
           ) : (
             <>
               <span className="material-symbols-outlined text-[16px]">send</span>
-              <span>Submit Inquiry</span>
+              <span>Submit Inquiry ({remainingDaily}/2 left today)</span>
             </>
           )}
         </button>
