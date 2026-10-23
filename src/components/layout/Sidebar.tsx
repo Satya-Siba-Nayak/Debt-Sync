@@ -161,6 +161,15 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
           <ThemeToggle />
         </div>
 
+        <Link
+          href="/"
+          className="flex items-center gap-3 px-3 py-2 rounded-xl font-mono text-xs text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)]/60 hover:text-[var(--on-surface)] transition-colors text-left w-full"
+          title="Visit public homepage, features, and documentation"
+        >
+          <span className="material-symbols-outlined text-[18px]">public</span>
+          <span>About DebtSync</span>
+        </Link>
+
         <button
           type="button"
           onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_bug_report'))}

@@ -2101,6 +2101,50 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      {/* About & Public Portal Links */}
+      <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 md:p-8 border border-[var(--outline-variant)]/30 shadow-sm space-y-4">
+        <div>
+          <h3 className="font-heading text-base font-bold text-[var(--on-surface)] flex items-center gap-2">
+            <span className="material-symbols-outlined text-[18px] text-[var(--primary)]">public</span>
+            About DebtSync &amp; Public Pages
+          </h3>
+          <p className="text-xs text-[var(--on-surface-variant)] mt-1 font-mono">
+            Explore the public homepage, review privacy compliance policies, terms of service, or view sample share receipts.
+          </p>
+        </div>
+
+        <div className="pt-1 flex flex-wrap items-center gap-2.5 font-mono text-xs">
+          <Link
+            href="/"
+            className="px-4 py-2.5 rounded-xl bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] border border-[var(--outline-variant)]/40 font-bold inline-flex items-center gap-2 transition-all shadow-xs"
+          >
+            <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">home</span>
+            <span>Visit Homepage</span>
+          </Link>
+          <Link
+            href="/privacy"
+            className="px-4 py-2.5 rounded-xl bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] border border-[var(--outline-variant)]/40 font-semibold inline-flex items-center gap-2 transition-all shadow-xs"
+          >
+            <span className="material-symbols-outlined text-[16px] text-emerald-500">shield</span>
+            <span>Privacy Policy</span>
+          </Link>
+          <Link
+            href="/terms"
+            className="px-4 py-2.5 rounded-xl bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] border border-[var(--outline-variant)]/40 font-semibold inline-flex items-center gap-2 transition-all shadow-xs"
+          >
+            <span className="material-symbols-outlined text-[16px] text-blue-500">contract</span>
+            <span>Terms of Service</span>
+          </Link>
+          <Link
+            href="/contact"
+            className="px-4 py-2.5 rounded-xl bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] border border-[var(--outline-variant)]/40 font-semibold inline-flex items-center gap-2 transition-all shadow-xs"
+          >
+            <span className="material-symbols-outlined text-[16px] text-purple-500">mail</span>
+            <span>Support &amp; Contact</span>
+          </Link>
+        </div>
+      </div>
+
       {/* Danger Zone: Restricted Account Deletion */}
       <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 md:p-8 border border-[var(--error)]/30 shadow-sm space-y-4">
         <div className="flex items-center gap-2">

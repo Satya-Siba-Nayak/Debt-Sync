@@ -2,7 +2,6 @@
 
 import React, { useEffect, useState, Suspense } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { PublicNav } from '@/components/layout/PublicNav';
 import { PublicFooter } from '@/components/layout/PublicFooter';
@@ -18,6 +17,7 @@ function LandingPageContent() {
   const stayOnLanding = searchParams.get('stay') === 'true' || searchParams.get('preview') === 'true';
 
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [userProfile, setUserProfile] = useState<{ full_name?: string; email?: string } | null>(null);
   const [activeScreenshotTab, setActiveScreenshotTab] = useState<'dashboard' | 'reminders' | 'share' | 'split' | 'analytics' | 'detail'>('dashboard');
   const [isThemeDark, setIsThemeDark] = useState(true);
 
@@ -34,11 +34,20 @@ function LandingPageContent() {
   }, []);
 
   useEffect(() => {
+    // Detect whether launched inside an installed standalone PWA window
+    const isStandalonePWA =
+      typeof window !== 'undefined' &&
+      (window.matchMedia('(display-mode: standalone)').matches ||
+        (window.navigator as any).standalone === true);
+
     // 0ms cached check
     const cached = getCachedUserProfile();
     if (cached) {
       setIsLoggedIn(true);
-      if (!stayOnLanding) {
+      setUserProfile({ full_name: cached.full_name, email: cached.email });
+
+      // In an installed standalone PWA, take logged-in user straight into the dashboard
+      if (isStandalonePWA && !stayOnLanding) {
         router.replace('/dash');
         return;
       }
@@ -50,7 +59,12 @@ function LandingPageContent() {
       const session = res?.data?.session;
       if (session?.user) {
         setIsLoggedIn(true);
-        if (!stayOnLanding) {
+        setUserProfile({
+          full_name: session.user.user_metadata?.full_name,
+          email: session.user.email,
+        });
+
+        if (isStandalonePWA && !stayOnLanding) {
           router.replace('/dash');
         }
       }
@@ -106,6 +120,25 @@ function LandingPageContent() {
 
   return (
     <div className="min-h-screen bg-[var(--surface)] text-[var(--on-surface)] flex flex-col selection:bg-[var(--primary)] selection:text-[var(--on-primary)] transition-colors">
+      {/* Logged-in Quick Return Banner */}
+      {isLoggedIn && (
+        <div className="bg-gradient-to-r from-[var(--primary)]/15 via-teal-500/10 to-transparent border-b border-[var(--primary)]/20 px-4 py-2 font-mono text-xs flex items-center justify-between gap-3 text-[var(--on-surface)]">
+          <div className="flex items-center gap-2 truncate">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 animate-pulse" />
+            <span className="truncate">
+              Signed in as <strong className="text-[var(--primary)]">{userProfile?.full_name || userProfile?.email || 'User'}</strong>
+            </span>
+          </div>
+          <Link
+            href="/dash"
+            className="px-3.5 py-1.5 rounded-lg bg-[var(--primary)] text-[var(--on-primary)] font-bold shrink-0 hover:opacity-90 active:scale-95 transition-all flex items-center gap-1 text-[11px] shadow-xs cursor-pointer min-h-[32px]"
+          >
+            <span>Open Dashboard</span>
+            <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+          </Link>
+        </div>
+      )}
+
       <PublicNav currentPath="/" />
 
       <main className="flex-1">

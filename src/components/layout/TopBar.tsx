@@ -380,6 +380,15 @@ export function TopBar({
               <span className="material-symbols-outlined text-[18px] text-[var(--primary)]">manage_accounts</span>
               <span>Profile &amp; Preferences</span>
             </Link>
+            <Link
+              href="/"
+              onClick={() => setIsDropdownOpen(false)}
+              className="w-full flex items-center gap-2.5 px-2.5 min-h-[44px] md:min-h-[36px] rounded-xl font-mono text-xs text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors"
+              role="menuitem"
+            >
+              <span className="material-symbols-outlined text-[18px] text-[var(--primary)]">public</span>
+              <span>About DebtSync (Home)</span>
+            </Link>
             <button
               type="button"
               onClick={() => {
