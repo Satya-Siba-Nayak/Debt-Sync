@@ -27,8 +27,6 @@ interface BugReportModalProps {
 
 const MAX_TOTAL_BYTES = 25 * 1024 * 1024; // 25 MB Discord limit
 const MAX_FILE_COUNT = 5;
-const DEFAULT_DISCORD_WEBHOOK =
-  'https://discord.com/api/webhooks/1558604580080586932/j9kPe21iWJaDvVWm_BDlY0q8Xxkxp60DVfNIg94bjUjHRPYS2YolpYtim_2-qfdZH-cz';
 
 export function BugReportModal({
   isOpen,
@@ -240,166 +238,25 @@ export function BugReportModal({
     };
 
     try {
-      let isSuccess = false;
+      const formData = new FormData();
+      formData.append('payload_json', JSON.stringify(payloadData));
 
-      // 1. Primary: Server / Cloudflare Function API route with FormData
-      try {
-        const formData = new FormData();
-        formData.append('payload_json', JSON.stringify(payloadData));
+      attachments.forEach((att, idx) => {
+        formData.append(`files[${idx}]`, att.file, att.name);
+      });
 
-        attachments.forEach((att, idx) => {
-          formData.append(`files[${idx}]`, att.file, att.name);
-        });
+      const res = await fetch('/api/bug-report', {
+        method: 'POST',
+        body: formData,
+      });
 
-        const res = await fetch('/api/bug-report', {
-          method: 'POST',
-          body: formData,
-        });
-
-        if (res.ok) {
-          const data = await res.json().catch(() => ({ success: true }));
-          if (data.success !== false) {
-            isSuccess = true;
-          }
-        }
-      } catch (_) {
-        // Fall through to direct webhook fallback
-      }
-
-      // 2. Direct Webhook Fallback (if hosted as pure static export)
-      if (!isSuccess) {
-        const targetWebhookUrl =
-          process.env.NEXT_PUBLIC_DISCORD_BUG_WEBHOOK_URL ||
-          DEFAULT_DISCORD_WEBHOOK;
-
-        if (targetWebhookUrl) {
-          let color = 0xed4245;
-          let title = '🐛 Bug Report';
-          if (category === 'ui') {
-            color = 0xe67e22;
-            title = '🎨 UI / Visual Glitch';
-          } else if (category === 'idea') {
-            color = 0x1abc9c;
-            title = '💡 Feature Idea & Feedback';
-          }
-
-          const fields: Array<{ name: string; value: string; inline?: boolean }> = [
-            {
-              name: '👤 Reporter',
-              value: userProfile?.name
-                ? `**${userProfile.name}**\n${userProfile.email || 'No email'}`
-                : userProfile?.email
-                ? `**${userProfile.email}**`
-                : 'Anonymous User',
-              inline: true,
-            },
-            {
-              name: '📍 Page Route',
-              value: currentRoute ? `\`${currentRoute}\`` : '`Unknown`',
-              inline: true,
-            },
-          ];
-
-          if (device) {
-            const typeLabel = device.isTablet ? '📱 Tablet' : device.isMobile ? '📱 Mobile' : '💻 Desktop';
-            const specs = [
-              `${typeLabel} • ${device.os || 'Unknown OS'} • ${device.browser || 'Unknown Browser'}`,
-              `Screen: ${device.screenResolution || 'N/A'} | Viewport: ${device.viewportSize || 'N/A'} (${device.pixelRatio || '1x'})`,
-              `Network: ${device.network || 'Online'} | Theme: ${device.theme || 'Dark'}`,
-              device.timezone ? `Timezone: ${device.timezone} • ${device.localTime || ''}` : '',
-              [device.cores, device.memory].filter(Boolean).join(' • '),
-              device.isPWA ? '⚡ Installed PWA Mode' : '',
-            ]
-              .filter(Boolean)
-              .join('\n');
-
-            fields.push({
-              name: '🖥️ System & Environment Diagnostics',
-              value: specs.length > 1000 ? specs.slice(0, 1000) + '...' : specs,
-              inline: false,
-            });
-          }
-
-          if (errorMessage) {
-            const truncated = errorMessage.length > 950 ? errorMessage.substring(0, 950) + '...' : errorMessage;
-            fields.push({
-              name: '⚠️ In-Error Banner Message',
-              value: `\`\`\`${truncated}\`\`\``,
-              inline: false,
-            });
-          }
-
-          if (device?.recentErrors && device.recentErrors.length > 0) {
-            const errorDump = device.recentErrors.join('\n').slice(0, 950);
-            fields.push({
-              name: '📜 Recent Runtime JavaScript Errors',
-              value: `\`\`\`${errorDump}\`\`\``,
-              inline: false,
-            });
-          }
-
-          if (attachments.length > 0) {
-            const fileSummary = attachments
-              .map((a, i) => `#${i + 1} **${a.name}** (${formatFileSize(a.size)} • ${a.isVideo ? 'video' : 'image'})`)
-              .join('\n');
-            fields.push({
-              name: `📎 Attached Media (${attachments.length} file${attachments.length > 1 ? 's' : ''})`,
-              value: fileSummary.slice(0, 1000),
-              inline: false,
-            });
-          }
-
-          // Primary embedded image attachment
-          const firstImage = attachments.find((a) => a.isImage);
-          const embed: any = {
-            title,
-            color,
-            description: `### User Note\n${description.trim()}`,
-            fields,
-            footer: { text: 'DebtSync User Feedback • Live Telemetry' },
-            timestamp: new Date().toISOString(),
-          };
-
-          if (firstImage) {
-            embed.image = { url: `attachment://${firstImage.name}` };
-          }
-
-          const discordPayload = {
-            username: 'DebtSync Telemetry',
-            avatar_url: 'https://raw.githubusercontent.com/Satya-Siba-Nayak/Debt-Sync/main/public/icon.svg',
-            embeds: [embed],
-          };
-
-          let directRes: Response;
-
-          if (attachments.length > 0) {
-            const directFormData = new FormData();
-            directFormData.append('payload_json', JSON.stringify(discordPayload));
-
-            attachments.forEach((a, idx) => {
-              directFormData.append(`files[${idx}]`, a.file, a.name);
-            });
-
-            directRes = await fetch(targetWebhookUrl, {
-              method: 'POST',
-              body: directFormData,
-            });
-          } else {
-            directRes = await fetch(targetWebhookUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(discordPayload),
-            });
-          }
-
-          if (directRes.ok || directRes.status === 204) {
-            isSuccess = true;
-          }
-        }
-      }
-
-      if (!isSuccess) {
-        throw new Error('Could not deliver report to Discord. Please check your network connection.');
+      if (!res.ok) {
+        let errMessage = 'Could not deliver report. Please check your network connection or reach out to support@satya-nayak.dev.';
+        try {
+          const data = await res.json();
+          if (data?.error) errMessage = data.error;
+        } catch (_) {}
+        throw new Error(errMessage);
       }
 
       setSuccess(true);

@@ -5,8 +5,6 @@ import Link from 'next/link';
 
 const RATE_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
 const MAX_DAILY_INQUIRIES = 2; // Strict 2 per day
-const DEFAULT_DISCORD_WEBHOOK =
-  'https://discord.com/api/webhooks/1558604580080586932/j9kPe21iWJaDvVWm_BDlY0q8Xxkxp60DVfNIg94bjUjHRPYS2YolpYtim_2-qfdZH-cz';
 
 function getOrCreateDeviceId(): string {
   if (typeof window === 'undefined') return '';
@@ -90,8 +88,6 @@ export function ContactForm() {
 
     try {
       const deviceId = getOrCreateDeviceId();
-      let isDelivered = false;
-
       const payload = {
         fullName: fullName.trim() || undefined,
         email: email.trim(),
@@ -101,97 +97,23 @@ export function ContactForm() {
         optInCommunications,
       };
 
-      // 1. Try server endpoint first (works if backend/node runtime is active)
-      try {
-        const res = await fetch('/api/contact', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-device-id': deviceId,
-          },
-          body: JSON.stringify(payload),
-        });
+      const res = await fetch('/api/contact', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-device-id': deviceId,
+        },
+        body: JSON.stringify(payload),
+      });
 
-        if (res.ok) {
-          isDelivered = true;
-        } else if (res.status === 429) {
-          let errorMsg = 'Daily limit reached: Maximum 2 inquiries per 24 hours from this device.';
-          try {
-            const text = await res.text();
-            const d = text ? JSON.parse(text) : {};
-            if (d.error) errorMsg = d.error;
-          } catch (_) {}
-          throw new Error(errorMsg);
-        }
-      } catch (srvErr: any) {
-        if (srvErr.message?.includes('Daily limit reached')) {
-          throw srvErr;
-        }
-        // Fall through to direct Discord webhook fallback on static export
-      }
-
-      // 2. Direct Discord webhook dispatch (for static exports where /api routes do not exist)
-      if (!isDelivered) {
-        const webhookUrl =
-          process.env.NEXT_PUBLIC_DISCORD_CONTACT_WEBHOOK_URL ||
-          process.env.NEXT_PUBLIC_DISCORD_BUG_WEBHOOK_URL ||
-          DEFAULT_DISCORD_WEBHOOK;
-
-        const categoryLabels: Record<string, string> = {
-          support: '🛠️ Technical & Account Support',
-          deletion: '🗑️ Account & Data Deletion Request',
-          rcs_sms: '📡 Telecom / Carrier / RCS Inquiry',
-          general: '💬 General Feedback & Partnerships',
-        };
-        const categoryLabel = categoryLabels[category] || 'General Inquiry';
-
-        const embed = {
-          title: `📬 Public Contact Inquiry: ${categoryLabel}`,
-          color: 0x00a896, // DebtSync Teal
-          fields: [
-            {
-              name: '👤 Inquirer',
-              value: `**${fullName.trim() || 'Website Visitor'}**\n📧 \`${email.trim()}\``,
-              inline: true,
-            },
-            {
-              name: '📱 Phone',
-              value: phone.trim() ? `\`${phone.trim()}\`` : '_Not Provided (Email Only)_',
-              inline: true,
-            },
-            {
-              name: '🏷️ Category',
-              value: categoryLabel,
-              inline: false,
-            },
-            {
-              name: '💬 Inquiry Message',
-              value: message.trim().length > 1800 ? message.trim().slice(0, 1800) + '...' : message.trim(),
-              inline: false,
-            },
-            {
-              name: '📜 Telecom / Operator Consent',
-              value: '✅ Consented to communications via SMS, RCS, WhatsApp & Email for service receipts & reminders.',
-              inline: false,
-            },
-          ],
-          footer: {
-            text: `DebtSync Contact • 2/day device limit • ${new Date().toISOString()}`,
-          },
-          timestamp: new Date().toISOString(),
-        };
-
-        const discordRes = await fetch(webhookUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ embeds: [embed] }),
-        });
-
-        // Discord webhook returns 204 No Content on success (empty body)
-        if (!discordRes.ok) {
-          throw new Error(`Discord delivery returned status ${discordRes.status}. Please try again later.`);
-        }
-        isDelivered = true;
+      if (!res.ok) {
+        let errorMsg = 'Failed to submit inquiry. Please try again.';
+        try {
+          const text = await res.text();
+          const d = text ? JSON.parse(text) : {};
+          if (d.error) errorMsg = d.error;
+        } catch (_) {}
+        throw new Error(errorMsg);
       }
 
       recordSubmissionTimestamp();
