@@ -2,6 +2,7 @@ import React from 'react';
 import Link from 'next/link';
 import { PublicNav } from '@/components/layout/PublicNav';
 import { PublicFooter } from '@/components/layout/PublicFooter';
+import { ContactForm } from '@/components/public/ContactForm';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
@@ -120,6 +121,11 @@ export default function ContactPage() {
               </Link>
             </div>
           </div>
+        </div>
+
+        {/* Interactive Contact & Regulatory Inquiries Form */}
+        <div className="mb-14">
+          <ContactForm />
         </div>
 
         {/* Quick Help & FAQ Reference */}

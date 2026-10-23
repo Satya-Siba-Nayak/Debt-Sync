@@ -14,7 +14,11 @@ const SAMPLE_PUBLIC_SHARE_URL =
 function LandingPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const stayOnLanding = searchParams.get('stay') === 'true' || searchParams.get('preview') === 'true';
+  // If the user explicitly navigated to the landing page via "About DebtSync" (?home=true) or preview/stay flags, keep them on the landing page
+  const stayOnLanding =
+    searchParams.get('home') === 'true' ||
+    searchParams.get('stay') === 'true' ||
+    searchParams.get('preview') === 'true';
 
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userProfile, setUserProfile] = useState<{ full_name?: string; email?: string } | null>(null);
@@ -34,20 +38,14 @@ function LandingPageContent() {
   }, []);
 
   useEffect(() => {
-    // Detect whether launched inside an installed standalone PWA window
-    const isStandalonePWA =
-      typeof window !== 'undefined' &&
-      (window.matchMedia('(display-mode: standalone)').matches ||
-        (window.navigator as any).standalone === true);
-
-    // 0ms cached check
+    // 0ms cached session check
     const cached = getCachedUserProfile();
     if (cached) {
       setIsLoggedIn(true);
       setUserProfile({ full_name: cached.full_name, email: cached.email });
 
-      // In an installed standalone PWA, take logged-in user straight into the dashboard
-      if (isStandalonePWA && !stayOnLanding) {
+      // Returning logged-in users visiting the root URL are sent directly to their dashboard
+      if (!stayOnLanding) {
         router.replace('/dash');
         return;
       }
@@ -64,7 +62,7 @@ function LandingPageContent() {
           email: session.user.email,
         });
 
-        if (isStandalonePWA && !stayOnLanding) {
+        if (!stayOnLanding) {
           router.replace('/dash');
         }
       }
@@ -212,10 +210,11 @@ function LandingPageContent() {
                 href={SAMPLE_PUBLIC_SHARE_URL}
                 target="_blank"
                 rel="noopener noreferrer"
+                title="Open a read-only sample of a public share receipt"
                 className="w-full sm:w-auto px-6 py-3.5 rounded-xl border border-[var(--primary)]/30 bg-[var(--primary)]/10 hover:bg-[var(--primary)]/15 text-[var(--primary)] font-mono text-sm font-bold transition-colors flex items-center justify-center gap-2 min-h-[48px]"
               >
-                <span className="material-symbols-outlined text-[18px]">public</span>
-                <span>View Live Share Link Demo</span>
+                <span className="material-symbols-outlined text-[18px]">receipt_long</span>
+                <span>View Sample Public Receipt (Demo)</span>
               </a>
             </div>
 
@@ -434,8 +433,8 @@ function LandingPageContent() {
                       rel="noopener noreferrer"
                       className="px-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container)] font-mono text-xs font-semibold text-[var(--on-surface)] min-h-[44px] inline-flex items-center gap-1.5"
                     >
-                      <span>Test Live Link</span>
-                      <span className="material-symbols-outlined text-[15px]">open_in_new</span>
+                      <span className="material-symbols-outlined text-[15px]">receipt_long</span>
+                      <span>Sample Public Receipt</span>
                     </a>
                   </div>
                 </div>
@@ -520,14 +519,14 @@ function LandingPageContent() {
             <div className="p-8 md:p-12 rounded-3xl bg-gradient-to-br from-[var(--surface-container)] via-[var(--surface-container-low)] to-[var(--surface)] border border-[var(--primary)]/30 shadow-xl space-y-6">
               <div className="max-w-3xl space-y-3">
                 <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-mono font-bold bg-blue-500/15 text-blue-500 border border-blue-500/30">
-                  <span className="material-symbols-outlined text-[13px]">public</span>
-                  <span>Live Interactive Demo</span>
+                  <span className="material-symbols-outlined text-[13px]">receipt_long</span>
+                  <span>Public Share Receipt Example</span>
                 </div>
                 <h2 className="font-heading text-2xl sm:text-3xl md:text-4xl font-extrabold text-[var(--on-surface)]">
-                  Try the Dual Public Sharing System
+                  Inspect a Live Public Share Receipt
                 </h2>
                 <p className="font-mono text-xs sm:text-sm text-[var(--on-surface-variant)] leading-relaxed">
-                  Want to see what someone sees when you send them a public DebtSync link? Open our live sample below. Notice how sensitive emails are masked (<span className="text-[var(--primary)]">s***k@domain.com</span>) and private notes are withheld, while the full verified receipt is publicly audit-safe without requiring any account login.
+                  Notice: this live sample link is specifically a demonstration of a <strong>read-only Public Share Receipt</strong>. It showcases how DebtSync enables lenders and borrowers to provide verified ledger proof to outside parties without compromising account security: sensitive emails are masked (<span className="text-[var(--primary)]">s***k@domain.com</span>), private counterparty notes remain withheld, and transaction controls are disabled.
                 </p>
               </div>
 
@@ -538,19 +537,19 @@ function LandingPageContent() {
                   rel="noopener noreferrer"
                   className="px-6 py-3.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 active:scale-95 transition-all shadow-md flex items-center justify-center gap-2 min-h-[48px]"
                 >
-                  <span className="material-symbols-outlined text-[18px]">open_in_new</span>
-                  <span>Open Live Sample Share Link</span>
+                  <span className="material-symbols-outlined text-[18px]">receipt_long</span>
+                  <span>Open Sample Public Receipt</span>
                 </a>
                 <button
                   type="button"
                   onClick={() => {
                     navigator.clipboard.writeText(SAMPLE_PUBLIC_SHARE_URL);
-                    alert('Sample share link copied to clipboard!');
+                    alert('Sample receipt share link copied to clipboard!');
                   }}
                   className="px-5 py-3.5 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container-high)] font-mono text-xs font-semibold text-[var(--on-surface)] flex items-center justify-center gap-1.5 min-h-[48px] cursor-pointer"
                 >
                   <span className="material-symbols-outlined text-[16px]">content_copy</span>
-                  <span>Copy Demo Link</span>
+                  <span>Copy Receipt Link</span>
                 </button>
               </div>
             </div>

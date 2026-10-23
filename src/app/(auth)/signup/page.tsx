@@ -58,7 +58,9 @@ function SignupContent() {
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState(initialPhone);
   const [showPassword, setShowPassword] = useState(false);
-  const [notifyEmail, setNotifyEmail] = useState(false);
+  const [notifyEmail, setNotifyEmail] = useState(true);
+  const [notifyPush, setNotifyPush] = useState(true);
+  const [optInCommunications, setOptInCommunications] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -102,6 +104,9 @@ function SignupContent() {
           full_name: fullName.trim(),
           phone: cleanPhone || null,
           notify_email: notifyEmail,
+          notify_push: notifyPush,
+          opt_in_communications: optInCommunications,
+          opt_in_sms_rcs: optInCommunications,
           resolve_ghost_id: ghostOptions?.ghostIdToMerge || null,
           resolve_mode: ghostOptions?.resolutionMode || null,
           ghost_email: ghostOptions?.ghostEmail || null,
@@ -148,6 +153,28 @@ function SignupContent() {
     const cleanEmail = email.trim().toLowerCase();
     const cleanPhone = phone.trim();
     const phoneDigits = cleanPhone.replace(/[^\d]/g, '');
+
+    if (!notifyEmail && !notifyPush) {
+      setError(
+        formatErrorWithCode(
+          'Please select at least one notification delivery method (Email Receipts or Device Push Alerts) to proceed.',
+          'NOTIFICATIONS_REQUIRED'
+        )
+      );
+      setLoading(false);
+      return;
+    }
+
+    if (!optInCommunications) {
+      setError(
+        formatErrorWithCode(
+          'Please agree to receive transaction receipts and service communications to create an account.',
+          'CONSENT_REQUIRED'
+        )
+      );
+      setLoading(false);
+      return;
+    }
 
     if (!cleanPhone || phoneDigits.length < 7) {
       setError(
@@ -296,31 +323,113 @@ function SignupContent() {
               />
             </div>
 
-            {/* Email & Notification Preference for New Registrations */}
-            <div className="p-3.5 rounded-xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 space-y-2.5">
+            {/* Notification Delivery Channels (Must select at least one) */}
+            <div className="p-3.5 rounded-xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/30 space-y-3">
+              <div>
+                <span className="font-mono text-xs tracking-wider uppercase text-[var(--on-surface-variant)] block font-bold">
+                  Notification Channels <span className="normal-case text-[var(--primary)] text-[11px] font-semibold">(select at least one)</span>
+                </span>
+                <p className="text-[11px] text-[var(--on-surface-variant)] mt-0.5 font-medium">
+                  Choose how you wish to receive updates when peer agreements or repayments are recorded.
+                </p>
+              </div>
+
+              <div className="space-y-2 pt-1">
+                {/* Email Receipts Checkbox */}
+                <label className="flex items-start gap-2.5 p-2 rounded-lg bg-[var(--surface-container-low)] hover:bg-[var(--surface-container-high)]/60 cursor-pointer select-none transition-colors border border-[var(--outline-variant)]/20">
+                  <input
+                    type="checkbox"
+                    checked={notifyEmail}
+                    onChange={(e) => setNotifyEmail(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 rounded border-outline-variant text-[var(--primary)] focus:ring-primary/20 accent-[var(--primary)] shrink-0 cursor-pointer"
+                  />
+                  <div className="text-xs leading-snug min-w-0">
+                    <span className="font-bold text-[var(--on-surface)] flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-[15px] text-blue-500">mail</span>
+                      <span>Email Receipts &amp; Statements</span>
+                    </span>
+                    <span className="text-[11px] text-[var(--on-surface-variant)] block mt-0.5">
+                      Receive detailed transaction receipts and agreement confirmation links via email.
+                    </span>
+                  </div>
+                </label>
+
+                {/* Device Push Notifications Checkbox */}
+                <label className="flex items-start gap-2.5 p-2 rounded-lg bg-[var(--surface-container-low)] hover:bg-[var(--surface-container-high)]/60 cursor-pointer select-none transition-colors border border-[var(--outline-variant)]/20">
+                  <input
+                    type="checkbox"
+                    checked={notifyPush}
+                    onChange={(e) => setNotifyPush(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 rounded border-outline-variant text-[var(--primary)] focus:ring-primary/20 accent-[var(--primary)] shrink-0 cursor-pointer"
+                  />
+                  <div className="text-xs leading-snug min-w-0">
+                    <span className="font-bold text-[var(--on-surface)] flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-[15px] text-emerald-500">notifications_active</span>
+                      <span>Device Push Notifications</span>
+                    </span>
+                    <span className="text-[11px] text-[var(--on-surface-variant)] block mt-0.5">
+                      Instant mobile &amp; browser alerts for payment requests, repayment verifications, and reminders.
+                    </span>
+                  </div>
+                </label>
+              </div>
+
+              {!notifyEmail && !notifyPush && (
+                <div className="flex items-center gap-1.5 text-[11px] font-mono text-red-500 bg-red-500/10 p-2 rounded-lg border border-red-500/20">
+                  <span className="material-symbols-outlined text-[15px]">warning</span>
+                  <span>Please check at least one delivery channel (Email or Device Push) to continue.</span>
+                </div>
+              )}
+            </div>
+
+            {/* Mandatory Communication & Carrier Consent (Compulsory) */}
+            <div className={`p-3.5 rounded-xl border transition-colors space-y-2.5 ${
+              optInCommunications
+                ? 'bg-[var(--surface-container)] border-[var(--primary)]/40 shadow-xs'
+                : 'bg-[var(--surface-container)] border-amber-500/30'
+            }`}>
               <label className="flex items-start gap-2.5 cursor-pointer select-none">
                 <input
                   type="checkbox"
-                  checked={notifyEmail}
-                  onChange={(e) => setNotifyEmail(e.target.checked)}
+                  checked={optInCommunications}
+                  onChange={(e) => setOptInCommunications(e.target.checked)}
+                  required
                   className="mt-0.5 w-4 h-4 rounded border-outline-variant text-[var(--primary)] focus:ring-primary/20 accent-[var(--primary)] shrink-0 cursor-pointer"
                 />
-                <div className="text-xs leading-relaxed min-w-0">
-                  <span className="font-bold text-[var(--on-surface)] block">
-                    Receive Email Receipts
+                <div className="text-xs leading-relaxed min-w-0 text-[var(--on-surface)]">
+                  <span className="font-bold block text-[var(--on-surface)]">
+                    Consent to Receive Transaction Communications <span className="text-[var(--primary)]">*</span>
                   </span>
-                  <span className="text-[11px] text-[var(--on-surface-variant)] block mt-0.5">
-                    Send email alerts when transactions or payments are recorded with you.
-                    (Off by default to conserve email limits).
+                  <span className="text-[11px] text-[var(--on-surface-variant)] block mt-1 leading-normal font-medium">
+                    I agree to receive communications from DebtSync via <strong>SMS</strong>, <strong>RCS</strong>, <strong>WhatsApp</strong>, and <strong>Email</strong> for transaction receipts, payment verifications, and reminders.
+                  </span>
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block mt-1.5 font-mono font-medium">
+                    ✓ Inactive accounts will never receive spam or marketing. Reply STOP anytime to opt-out.
                   </span>
                 </div>
               </label>
 
-              <div className="pt-2 border-t border-[var(--outline-variant)]/20 flex items-start gap-2 text-[11px] text-[var(--primary)] leading-tight font-medium">
-                <span className="material-symbols-outlined text-[16px] shrink-0 text-[var(--primary)]">notifications_active</span>
+              <div className="pt-2 border-t border-[var(--outline-variant)]/20 text-[10px] font-mono text-[var(--on-surface-variant)] flex items-center justify-between">
                 <span>
-                  💡 <strong>Tip:</strong> Free mobile &amp; desktop push alerts can be activated anytime in Settings—they work even when closed and don&apos;t consume email quotas!
+                  Agreement includes{' '}
+                  <Link href="/terms" target="_blank" className="text-[var(--primary)] underline hover:opacity-80">
+                    Terms
+                  </Link>{' '}
+                  &amp;{' '}
+                  <Link href="/privacy" target="_blank" className="text-[var(--primary)] underline hover:opacity-80">
+                    Privacy Policy
+                  </Link>
                 </span>
+                {optInCommunications ? (
+                  <span className="text-emerald-500 font-bold flex items-center gap-0.5 text-[10px]">
+                    <span className="material-symbols-outlined text-[13px]">check_circle</span>
+                    <span>Agreed</span>
+                  </span>
+                ) : (
+                  <span className="text-amber-500 font-semibold text-[10px]">
+                    Required to sign up
+                  </span>
+                )}
               </div>
             </div>
 

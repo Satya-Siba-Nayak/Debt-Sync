@@ -2101,46 +2101,44 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* About & Public Portal Links */}
-      <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 md:p-8 border border-[var(--outline-variant)]/30 shadow-sm space-y-4">
-        <div>
-          <h3 className="font-heading text-base font-bold text-[var(--on-surface)] flex items-center gap-2">
-            <span className="material-symbols-outlined text-[18px] text-[var(--primary)]">public</span>
-            About DebtSync &amp; Public Pages
-          </h3>
-          <p className="text-xs text-[var(--on-surface-variant)] mt-1 font-mono">
-            Explore the public homepage, review privacy compliance policies, terms of service, or view sample share receipts.
-          </p>
+      {/* About & Public Portal Links (Minimal) */}
+      <div className="bg-[var(--surface-container-low)] rounded-xl p-4 md:p-5 border border-[var(--outline-variant)]/20 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="font-mono text-xs font-semibold text-[var(--on-surface-variant)] flex items-center gap-1.5">
+            <span className="material-symbols-outlined text-[15px] opacity-70">public</span>
+            <span>About DebtSync &amp; Public Policies</span>
+          </span>
+          <span className="font-mono text-[10px] text-[var(--on-surface-variant)]/60">v0.1 OSS</span>
         </div>
 
-        <div className="pt-1 flex flex-wrap items-center gap-2.5 font-mono text-xs">
+        <div className="flex flex-wrap items-center gap-2 font-mono text-[11px]">
           <Link
-            href="/"
-            className="px-4 py-2.5 rounded-xl bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] border border-[var(--outline-variant)]/40 font-bold inline-flex items-center gap-2 transition-all shadow-xs"
+            href="/?home=true"
+            className="px-3 py-1.5 rounded-lg bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] border border-[var(--outline-variant)]/30 font-medium inline-flex items-center gap-1.5 transition-colors"
           >
-            <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">home</span>
-            <span>Visit Homepage</span>
+            <span className="material-symbols-outlined text-[14px] text-[var(--primary)]">home</span>
+            <span>About / Home</span>
           </Link>
           <Link
             href="/privacy"
-            className="px-4 py-2.5 rounded-xl bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] border border-[var(--outline-variant)]/40 font-semibold inline-flex items-center gap-2 transition-all shadow-xs"
+            className="px-3 py-1.5 rounded-lg bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] border border-[var(--outline-variant)]/30 font-medium inline-flex items-center gap-1.5 transition-colors"
           >
-            <span className="material-symbols-outlined text-[16px] text-emerald-500">shield</span>
-            <span>Privacy Policy</span>
+            <span className="material-symbols-outlined text-[14px] text-emerald-500">shield</span>
+            <span>Privacy</span>
           </Link>
           <Link
             href="/terms"
-            className="px-4 py-2.5 rounded-xl bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] border border-[var(--outline-variant)]/40 font-semibold inline-flex items-center gap-2 transition-all shadow-xs"
+            className="px-3 py-1.5 rounded-lg bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] border border-[var(--outline-variant)]/30 font-medium inline-flex items-center gap-1.5 transition-colors"
           >
-            <span className="material-symbols-outlined text-[16px] text-blue-500">contract</span>
-            <span>Terms of Service</span>
+            <span className="material-symbols-outlined text-[14px] text-blue-500">contract</span>
+            <span>Terms</span>
           </Link>
           <Link
             href="/contact"
-            className="px-4 py-2.5 rounded-xl bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] border border-[var(--outline-variant)]/40 font-semibold inline-flex items-center gap-2 transition-all shadow-xs"
+            className="px-3 py-1.5 rounded-lg bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] border border-[var(--outline-variant)]/30 font-medium inline-flex items-center gap-1.5 transition-colors"
           >
-            <span className="material-symbols-outlined text-[16px] text-purple-500">mail</span>
-            <span>Support &amp; Contact</span>
+            <span className="material-symbols-outlined text-[14px] text-purple-500">mail</span>
+            <span>Contact</span>
           </Link>
         </div>
       </div>
