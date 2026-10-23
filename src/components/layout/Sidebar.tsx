@@ -161,23 +161,27 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
           <ThemeToggle />
         </div>
 
-        <Link
-          href="/?home=true"
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg font-mono text-[11px] text-[var(--on-surface-variant)]/70 hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-high)]/40 transition-colors text-left w-full"
-          title="Visit public homepage & documentation"
-        >
-          <span className="material-symbols-outlined text-[15px] opacity-70">public</span>
-          <span>About DebtSync</span>
-        </Link>
+        {/* Side-by-side About & Report pills */}
+        <div className="grid grid-cols-2 gap-1.5 my-1">
+          <Link
+            href="/?home=true"
+            className="flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg font-mono text-[11px] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/20 transition-all text-center"
+            title="Visit public homepage & documentation"
+          >
+            <span className="material-symbols-outlined text-[14px]">public</span>
+            <span>About</span>
+          </Link>
 
-        <button
-          type="button"
-          onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_bug_report'))}
-          className="flex items-center gap-3 px-3 py-2 rounded-xl font-mono text-xs text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)]/60 hover:text-[var(--on-surface)] transition-colors text-left w-full cursor-pointer"
-        >
-          <span className="material-symbols-outlined text-[18px]">warning</span>
-          <span>Report Issue</span>
-        </button>
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_bug_report'))}
+            className="flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg font-mono text-[11px] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/20 transition-all cursor-pointer text-center"
+            title="Report an issue or submit feedback"
+          >
+            <span className="material-symbols-outlined text-[14px]">warning</span>
+            <span>Report</span>
+          </button>
+        </div>
 
         <button
           onClick={handleSignOut}

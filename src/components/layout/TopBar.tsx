@@ -374,33 +374,39 @@ export function TopBar({
             <Link
               href="/settings"
               onClick={() => setIsDropdownOpen(false)}
-              className="w-full flex items-center gap-2.5 px-2.5 min-h-[44px] md:min-h-[36px] rounded-xl font-mono text-xs text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors"
+              className="w-full flex items-center gap-2.5 px-2.5 min-h-[40px] md:min-h-[34px] rounded-xl font-mono text-xs text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors"
               role="menuitem"
             >
               <span className="material-symbols-outlined text-[18px] text-[var(--primary)]">manage_accounts</span>
               <span>Profile &amp; Preferences</span>
             </Link>
-            <Link
-              href="/?home=true"
-              onClick={() => setIsDropdownOpen(false)}
-              className="w-full flex items-center gap-2 px-2.5 min-h-[36px] md:min-h-[32px] rounded-lg font-mono text-[11px] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors"
-              role="menuitem"
-            >
-              <span className="material-symbols-outlined text-[15px] opacity-70">public</span>
-              <span>About DebtSync</span>
-            </Link>
-            <button
-              type="button"
-              onClick={() => {
-                setIsDropdownOpen(false);
-                window.dispatchEvent(new CustomEvent('debtsync:open_bug_report'));
-              }}
-              className="w-full flex items-center gap-2.5 px-2.5 min-h-[44px] md:min-h-[36px] rounded-xl font-mono text-xs text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors cursor-pointer text-left"
-              role="menuitem"
-            >
-              <span className="material-symbols-outlined text-[18px] text-[var(--on-surface-variant)]">warning</span>
-              <span>Report Issue / Feedback</span>
-            </button>
+
+            {/* Side-by-side About & Report pills */}
+            <div className="grid grid-cols-2 gap-1.5 my-0.5">
+              <Link
+                href="/?home=true"
+                onClick={() => setIsDropdownOpen(false)}
+                className="flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg font-mono text-[11px] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/20 transition-all text-center min-h-[34px]"
+                role="menuitem"
+                title="About DebtSync"
+              >
+                <span className="material-symbols-outlined text-[14px]">public</span>
+                <span>About</span>
+              </Link>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsDropdownOpen(false);
+                  window.dispatchEvent(new CustomEvent('debtsync:open_bug_report'));
+                }}
+                className="flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg font-mono text-[11px] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/20 transition-all cursor-pointer text-center min-h-[34px]"
+                role="menuitem"
+                title="Report Issue / Feedback"
+              >
+                <span className="material-symbols-outlined text-[14px]">warning</span>
+                <span>Report</span>
+              </button>
+            </div>
             <button
               type="button"
               onClick={handleSignOut}
