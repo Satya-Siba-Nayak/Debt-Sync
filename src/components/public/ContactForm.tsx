@@ -14,7 +14,7 @@ export function ContactForm() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
@@ -25,11 +25,31 @@ export function ContactForm() {
 
     setSubmitting(true);
 
-    // Simulate reliable dispatch
-    setTimeout(() => {
+    try {
+      const res = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fullName,
+          email,
+          phone,
+          category,
+          message,
+          optInCommunications,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to submit inquiry. Please try again.');
+      }
+
       setSubmitting(false);
       setSubmitted(true);
-    }, 600);
+    } catch (err: any) {
+      setError(err.message || 'An unexpected error occurred while sending your inquiry.');
+      setSubmitting(false);
+    }
   };
 
   if (submitted) {

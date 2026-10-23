@@ -14,8 +14,8 @@ const SAMPLE_PUBLIC_SHARE_URL =
 function LandingPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  // If the user explicitly navigated to the landing page via "About DebtSync" (?home=true) or preview/stay flags, keep them on the landing page
-  const stayOnLanding =
+  // Check if URL has ?home=true, ?stay=true, or ?preview=true
+  const hasHomeParam =
     searchParams.get('home') === 'true' ||
     searchParams.get('stay') === 'true' ||
     searchParams.get('preview') === 'true';
@@ -24,6 +24,15 @@ function LandingPageContent() {
   const [userProfile, setUserProfile] = useState<{ full_name?: string; email?: string } | null>(null);
   const [activeScreenshotTab, setActiveScreenshotTab] = useState<'dashboard' | 'reminders' | 'share' | 'split' | 'analytics' | 'detail'>('dashboard');
   const [isThemeDark, setIsThemeDark] = useState(true);
+
+  // Synchronize sessionStorage public viewing state
+  useEffect(() => {
+    if (hasHomeParam) {
+      try {
+        sessionStorage.setItem('debtsync_viewing_public_site', 'true');
+      } catch (_) {}
+    }
+  }, [hasHomeParam]);
 
   useEffect(() => {
     // Read current theme from DOM
@@ -38,6 +47,10 @@ function LandingPageContent() {
   }, []);
 
   useEffect(() => {
+    const isPublicSession =
+      hasHomeParam ||
+      (typeof window !== 'undefined' && sessionStorage.getItem('debtsync_viewing_public_site') === 'true');
+
     // 0ms cached session check
     const cached = getCachedUserProfile();
     if (cached) {
@@ -45,7 +58,8 @@ function LandingPageContent() {
       setUserProfile({ full_name: cached.full_name, email: cached.email });
 
       // Returning logged-in users visiting the root URL are sent directly to their dashboard
-      if (!stayOnLanding) {
+      // UNLESS they are in public browsing mode (?home=true or active public viewing session)
+      if (!isPublicSession) {
         router.replace('/dash');
         return;
       }
@@ -62,12 +76,18 @@ function LandingPageContent() {
           email: session.user.email,
         });
 
-        if (!stayOnLanding) {
+        if (!isPublicSession) {
           router.replace('/dash');
         }
       }
     });
-  }, [router, stayOnLanding]);
+  }, [router, hasHomeParam]);
+
+  const clearPublicSession = () => {
+    try {
+      sessionStorage.removeItem('debtsync_viewing_public_site');
+    } catch (_) {}
+  };
 
   const screenshots = {
     dashboard: {
@@ -129,6 +149,7 @@ function LandingPageContent() {
           </div>
           <Link
             href="/dash"
+            onClick={clearPublicSession}
             className="px-3.5 py-1.5 rounded-lg bg-[var(--primary)] text-[var(--on-primary)] font-bold shrink-0 hover:opacity-90 active:scale-95 transition-all flex items-center gap-1 text-[11px] shadow-xs cursor-pointer min-h-[32px]"
           >
             <span>Open Dashboard</span>
@@ -183,6 +204,7 @@ function LandingPageContent() {
               {isLoggedIn ? (
                 <Link
                   href="/dash"
+                  onClick={clearPublicSession}
                   className="w-full sm:w-auto px-7 py-3.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-sm font-bold hover:opacity-90 active:scale-95 transition-all shadow-md flex items-center justify-center gap-2 min-h-[48px]"
                 >
                   <span className="material-symbols-outlined text-[18px]">dashboard</span>

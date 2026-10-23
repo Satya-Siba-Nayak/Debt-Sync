@@ -5,13 +5,34 @@ import Link from 'next/link';
 import { BrandLogo } from '@/components/ui/BrandLogo';
 
 export function PublicFooter() {
+  const [shouldKeepHomeQuery, setShouldKeepHomeQuery] = React.useState(false);
+
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const hasHome =
+        params.get('home') === 'true' ||
+        params.get('stay') === 'true' ||
+        params.get('preview') === 'true';
+      const stored = sessionStorage.getItem('debtsync_viewing_public_site') === 'true';
+      if (hasHome || stored) {
+        setShouldKeepHomeQuery(true);
+      }
+    }
+  }, []);
+
+  const homeHref = shouldKeepHomeQuery ? '/?home=true' : '/';
+  const privacyHref = shouldKeepHomeQuery ? '/privacy?home=true' : '/privacy';
+  const termsHref = shouldKeepHomeQuery ? '/terms?home=true' : '/terms';
+  const contactHref = shouldKeepHomeQuery ? '/contact?home=true' : '/contact';
+
   return (
     <footer className="border-t border-[var(--outline-variant)]/20 bg-[var(--surface-container-low)] text-[var(--on-surface-variant)] transition-colors">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8 md:gap-12">
           {/* Brand Info & Mission */}
           <div className="md:col-span-1 space-y-4">
-            <BrandLogo size="md" tagline="Synced Ledgers" href="/" />
+            <BrandLogo size="md" tagline="Synced Ledgers" href={homeHref} />
             <p className="text-xs font-mono leading-relaxed text-[var(--on-surface-variant)]">
               Privacy-first peer-to-peer ledger, interest calculation engine, and collaborative debt management portal. Keep transparent financial agreements with verified repayments and zero awkwardness.
             </p>
@@ -30,32 +51,32 @@ export function PublicFooter() {
             </h4>
             <ul className="space-y-2">
               <li>
-                <Link href="/#features" className="hover:text-[var(--primary)] transition-colors">
+                <Link href={shouldKeepHomeQuery ? '/?home=true#features' : '/#features'} className="hover:text-[var(--primary)] transition-colors">
                   Two-Sided Ledgers
                 </Link>
               </li>
               <li>
-                <Link href="/#features" className="hover:text-[var(--primary)] transition-colors">
+                <Link href={shouldKeepHomeQuery ? '/?home=true#features' : '/#features'} className="hover:text-[var(--primary)] transition-colors">
                   APR Interest Engine
                 </Link>
               </li>
               <li>
-                <Link href="/#features" className="hover:text-[var(--primary)] transition-colors">
+                <Link href={shouldKeepHomeQuery ? '/?home=true#features' : '/#features'} className="hover:text-[var(--primary)] transition-colors">
                   Payment Reminders (Email &amp; Push)
                 </Link>
               </li>
               <li>
-                <Link href="/#live-demo" className="hover:text-[var(--primary)] transition-colors">
+                <Link href={shouldKeepHomeQuery ? '/?home=true#live-demo' : '/#live-demo'} className="hover:text-[var(--primary)] transition-colors">
                   Dual Share System (Public &amp; Private)
                 </Link>
               </li>
               <li>
-                <Link href="/#features" className="hover:text-[var(--primary)] transition-colors">
+                <Link href={shouldKeepHomeQuery ? '/?home=true#features' : '/#features'} className="hover:text-[var(--primary)] transition-colors">
                   Group Split Bills
                 </Link>
               </li>
               <li>
-                <Link href="/#features" className="hover:text-[var(--primary)] transition-colors">
+                <Link href={shouldKeepHomeQuery ? '/?home=true#features' : '/#features'} className="hover:text-[var(--primary)] transition-colors">
                   Progressive Web App (PWA)
                 </Link>
               </li>
@@ -69,27 +90,27 @@ export function PublicFooter() {
             </h4>
             <ul className="space-y-2">
               <li>
-                <Link href="/privacy" className="hover:text-[var(--primary)] transition-colors">
+                <Link href={privacyHref} className="hover:text-[var(--primary)] transition-colors">
                   Privacy Policy
                 </Link>
               </li>
               <li>
-                <Link href="/terms" className="hover:text-[var(--primary)] transition-colors">
+                <Link href={termsHref} className="hover:text-[var(--primary)] transition-colors">
                   Terms of Service
                 </Link>
               </li>
               <li>
-                <Link href="/privacy#dpdp" className="hover:text-[var(--primary)] transition-colors">
+                <Link href={`${privacyHref}#dpdp`} className="hover:text-[var(--primary)] transition-colors">
                   DPDP Act (India) Compliance
                 </Link>
               </li>
               <li>
-                <Link href="/privacy#data-deletion" className="hover:text-[var(--primary)] transition-colors">
+                <Link href={`${privacyHref}#data-deletion`} className="hover:text-[var(--primary)] transition-colors">
                   Data Deletion &amp; Purge Requests
                 </Link>
               </li>
               <li>
-                <Link href="/terms#disclaimer" className="hover:text-[var(--primary)] transition-colors">
+                <Link href={`${termsHref}#disclaimer`} className="hover:text-[var(--primary)] transition-colors">
                   Record-Keeping Disclaimer
                 </Link>
               </li>
@@ -103,7 +124,7 @@ export function PublicFooter() {
             </h4>
             <ul className="space-y-2">
               <li>
-                <Link href="/contact" className="hover:text-[var(--primary)] transition-colors">
+                <Link href={contactHref} className="hover:text-[var(--primary)] transition-colors">
                   Contact Support
                 </Link>
               </li>
