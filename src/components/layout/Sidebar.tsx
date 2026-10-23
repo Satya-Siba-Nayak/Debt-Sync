@@ -42,7 +42,7 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
   ];
 
   const userNavItems: NavItem[] = [
-    { label: 'Dashboard', href: '/', icon: 'dashboard' },
+    { label: 'Dashboard', href: '/dash', icon: 'dashboard' },
     { label: 'Directory', href: '/directory', icon: 'group' },
     { label: 'Transactions', href: '/transactions', icon: 'receipt_long' },
     { label: 'Analytics', href: '/analytics', icon: 'analytics' },
@@ -58,7 +58,7 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
         <BrandLogo
           size="md"
           tagline={inAdminMode ? 'Admin Console' : 'Synced Ledgers'}
-          href="/"
+          href="/dash"
         />
       </div>
 
@@ -95,7 +95,7 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
         </button>
       ) : (
         <Link
-          href="/?action=new"
+          href="/dash?action=new"
           className="bg-[var(--primary)] text-[var(--on-primary)] font-medium py-3 px-4 rounded-xl mb-6 w-full flex justify-center items-center gap-2 hover:opacity-95 active:scale-[0.98] transition-all shadow-sm text-center"
         >
           <span className="material-symbols-outlined text-[20px]">add</span>
@@ -107,10 +107,8 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
       <nav className="flex-1 flex flex-col gap-1.5">
         {navItems.map((item) => {
           const isActive =
-            item.href === '/'
-              ? pathname === '/'
-              : pathname === item.href ||
-                (item.href !== '/' && pathname.startsWith(item.href) && !item.href.includes('?'));
+            pathname === item.href ||
+            (pathname.startsWith(item.href + '/') && !item.href.includes('?'));
 
           return (
             <Link

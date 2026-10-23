@@ -41,7 +41,7 @@ export function BottomNav({ onNewTransaction, isAdmin }: BottomNavProps) {
       const effectiveTarget = targetTab === 'live' ? 'overview' : targetTab;
       return adminTab === effectiveTarget;
     }
-    if (href === '/') return pathname === '/';
+        if (href === '/dash') return pathname === '/dash';
     return pathname === href || pathname.startsWith(href + '/');
   };
 
@@ -65,7 +65,7 @@ export function BottomNav({ onNewTransaction, isAdmin }: BottomNavProps) {
         { label: 'Users', href: '/admin?tab=users', icon: 'manage_accounts' },
       ]
     : [
-        { label: 'Home', href: '/', icon: 'dashboard' },
+        { label: 'Home', href: '/dash', icon: 'dashboard' },
         { label: 'People', href: '/directory', icon: 'group' },
       ];
 

@@ -91,7 +91,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         const currentPath = typeof window !== 'undefined'
           ? window.location.pathname + window.location.search
           : '';
-        const nextQuery = currentPath && currentPath !== '/'
+        const nextQuery = currentPath && currentPath !== '/' && currentPath !== '/dash'
           ? `?next=${encodeURIComponent(currentPath)}`
           : '';
         router.replace(`/login${nextQuery}`);

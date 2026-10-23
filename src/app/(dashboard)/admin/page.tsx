@@ -1205,7 +1205,7 @@ export default function AdminDashboardPage() {
         </div>
 
         <Link
-          href="/"
+          href="/dash"
           className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:brightness-110 transition-all shadow-sm"
         >
           <span className="material-symbols-outlined text-[16px]">arrow_back</span>
@@ -1239,7 +1239,7 @@ export default function AdminDashboardPage() {
 
         <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
           <Link
-            href="/"
+            href="/dash"
             onClick={() => {
               if (typeof window !== 'undefined') {
                 localStorage.setItem('debtsync_view_mode', 'user');

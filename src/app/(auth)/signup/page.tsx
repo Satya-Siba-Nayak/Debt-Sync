@@ -23,7 +23,7 @@ function maskEmailAddress(email?: string | null): string {
 }
 
 function sanitizeRedirectDest(raw: string | null | undefined): string {
-  if (!raw) return '/';
+  if (!raw) return '/dash';
   let target = raw.trim();
   try {
     if (target.includes('%2F') || target.includes('%2f')) {
@@ -34,16 +34,16 @@ function sanitizeRedirectDest(raw: string | null | undefined): string {
   if (target.startsWith('http://') || target.startsWith('https://')) {
     try {
       const parsed = new URL(target);
-      return `${parsed.pathname}${parsed.search}${parsed.hash}` || '/';
+      return `${parsed.pathname}${parsed.search}${parsed.hash}` || '/dash';
     } catch (_) {
-      return '/';
+      return '/dash';
     }
   }
 
   if (target.startsWith('/') && !target.startsWith('//')) {
-    return target;
+    return target === '/' ? '/dash' : target;
   }
-  return '/';
+  return '/dash';
 }
 
 function SignupContent() {
@@ -491,12 +491,30 @@ function SignupContent() {
         <p className="text-center text-sm text-on-surface-variant mt-6">
           Already have an account?{' '}
           <Link
-            href={`/login${nextUrl && nextUrl !== '/' ? `?next=${encodeURIComponent(nextUrl)}` : ''}`}
+            href={`/login${nextUrl && nextUrl !== '/dash' ? `?next=${encodeURIComponent(nextUrl)}` : ''}`}
             className="text-primary font-bold hover:underline"
           >
             Sign In
           </Link>
         </p>
+
+        <div className="mt-8 pt-6 border-t border-[var(--outline-variant)]/20 flex flex-wrap items-center justify-center gap-3 font-mono text-[11px] text-[var(--on-surface-variant)]">
+          <Link href="/" className="hover:text-[var(--primary)] transition-colors">
+            Home
+          </Link>
+          <span>&bull;</span>
+          <Link href="/privacy" className="hover:text-[var(--primary)] transition-colors">
+            Privacy Policy
+          </Link>
+          <span>&bull;</span>
+          <Link href="/terms" className="hover:text-[var(--primary)] transition-colors">
+            Terms
+          </Link>
+          <span>&bull;</span>
+          <Link href="/contact" className="hover:text-[var(--primary)] transition-colors">
+            Contact
+          </Link>
+        </div>
       </div>
     </div>
   );

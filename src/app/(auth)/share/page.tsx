@@ -841,7 +841,7 @@ function ShareTransactionContent() {
                 <span>View Transactions</span>
               </Link>
               <Link
-                href="/"
+                href="/dash"
                 className="px-5 py-2.5 border border-[var(--outline-variant)]/40 text-[var(--on-surface)] rounded-xl font-mono text-xs font-semibold hover:bg-[var(--surface-container)] inline-flex items-center justify-center min-h-[44px]"
               >
                 Go to Dashboard
@@ -938,7 +938,7 @@ function ShareTransactionContent() {
                     Switch Account
                   </button>
                   <Link
-                    href="/"
+                    href="/dash"
                     className="flex-1 py-2.5 px-4 rounded-xl border border-[var(--outline-variant)]/40 font-mono text-xs font-semibold text-[var(--on-surface)] hover:bg-[var(--surface-container)] flex items-center justify-center min-h-[44px]"
                   >
                     Go to Dashboard

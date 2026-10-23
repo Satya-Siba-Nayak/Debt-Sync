@@ -1,6 +1,6 @@
-const CACHE_NAME = 'debtsync-cache-v9';
+const CACHE_NAME = 'debtsync-cache-v10';
 const PRECACHE_ASSETS = [
-  '/',
+  '/dash',
   '/manifest.json',
   '/favicon.png',
   '/icons/icon-192.png',
@@ -75,7 +75,7 @@ self.addEventListener('fetch', (event) => {
           const matched = await caches.match(event.request);
           if (matched) return matched;
           if (event.request.mode === 'navigate') {
-            const root = await caches.match('/');
+            const root = await caches.match('/dash');
             if (root) return root;
           }
         } catch (_) {}

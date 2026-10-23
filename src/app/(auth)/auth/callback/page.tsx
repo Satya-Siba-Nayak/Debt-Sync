@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
 
 function sanitizeRedirectDest(raw: string | null | undefined): string {
-  if (!raw) return '/';
+  if (!raw) return '/dash';
   let target = raw.trim();
   try {
     if (target.includes('%2F') || target.includes('%2f')) {
@@ -17,16 +17,16 @@ function sanitizeRedirectDest(raw: string | null | undefined): string {
   if (target.startsWith('http://') || target.startsWith('https://')) {
     try {
       const parsed = new URL(target);
-      return `${parsed.pathname}${parsed.search}${parsed.hash}` || '/';
+      return `${parsed.pathname}${parsed.search}${parsed.hash}` || '/dash';
     } catch (_) {
-      return '/';
+      return '/dash';
     }
   }
 
   if (target.startsWith('/') && !target.startsWith('//')) {
-    return target;
+    return target === '/' ? '/dash' : target;
   }
-  return '/';
+  return '/dash';
 }
 
 function CallbackHandler() {

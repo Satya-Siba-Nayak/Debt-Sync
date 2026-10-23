@@ -11,7 +11,7 @@ import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { BrandLogo } from '@/components/ui/BrandLogo';
 
 function sanitizeRedirectDest(raw: string | null | undefined): string {
-  if (!raw) return '/';
+  if (!raw) return '/dash';
   let target = raw.trim();
   try {
     if (target.includes('%2F') || target.includes('%2f')) {
@@ -22,16 +22,16 @@ function sanitizeRedirectDest(raw: string | null | undefined): string {
   if (target.startsWith('http://') || target.startsWith('https://')) {
     try {
       const parsed = new URL(target);
-      return `${parsed.pathname}${parsed.search}${parsed.hash}` || '/';
+      return `${parsed.pathname}${parsed.search}${parsed.hash}` || '/dash';
     } catch (_) {
-      return '/';
+      return '/dash';
     }
   }
 
   if (target.startsWith('/') && !target.startsWith('//')) {
-    return target;
+    return target === '/' ? '/dash' : target;
   }
-  return '/';
+  return '/dash';
 }
 
 function LoginContent() {
@@ -388,7 +388,7 @@ function LoginContent() {
                     <p className="text-[11px] text-on-surface-variant leading-relaxed">
                       No DebtSync account is registered to this email.{' '}
                       <Link
-                        href={`/signup${nextUrl && nextUrl !== '/' ? `?next=${encodeURIComponent(nextUrl)}` : ''}`}
+                        href={`/signup${nextUrl && nextUrl !== '/dash' ? `?next=${encodeURIComponent(nextUrl)}` : ''}`}
                         className="text-primary font-bold hover:underline"
                       >
                         Create an account here
@@ -432,7 +432,7 @@ function LoginContent() {
                     <p className="text-[11px] text-on-surface-variant leading-relaxed">
                       A peer has recorded debts with you, but you have not created your DebtSync account yet.{' '}
                       <Link
-                        href={`/signup${nextUrl && nextUrl !== '/' ? `?next=${encodeURIComponent(nextUrl)}` : ''}`}
+                        href={`/signup${nextUrl && nextUrl !== '/dash' ? `?next=${encodeURIComponent(nextUrl)}` : ''}`}
                         className="text-primary font-bold hover:underline"
                       >
                         Sign up to activate your account
@@ -522,12 +522,30 @@ function LoginContent() {
         <p className="text-center text-sm text-on-surface-variant mt-6">
           Don&apos;t have an account?{' '}
           <Link
-            href={`/signup${nextUrl && nextUrl !== '/' ? `?next=${encodeURIComponent(nextUrl)}` : ''}`}
+            href={`/signup${nextUrl && nextUrl !== '/dash' ? `?next=${encodeURIComponent(nextUrl)}` : ''}`}
             className="text-primary font-bold hover:underline"
           >
             Sign Up
           </Link>
         </p>
+
+        <div className="mt-8 pt-6 border-t border-[var(--outline-variant)]/20 flex flex-wrap items-center justify-center gap-3 font-mono text-[11px] text-[var(--on-surface-variant)]">
+          <Link href="/" className="hover:text-[var(--primary)] transition-colors">
+            Home
+          </Link>
+          <span>&bull;</span>
+          <Link href="/privacy" className="hover:text-[var(--primary)] transition-colors">
+            Privacy Policy
+          </Link>
+          <span>&bull;</span>
+          <Link href="/terms" className="hover:text-[var(--primary)] transition-colors">
+            Terms
+          </Link>
+          <span>&bull;</span>
+          <Link href="/contact" className="hover:text-[var(--primary)] transition-colors">
+            Contact
+          </Link>
+        </div>
       </div>
     </div>
   );

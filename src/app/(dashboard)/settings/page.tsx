@@ -297,7 +297,7 @@ export default function SettingsPage() {
 
       // Resolve friendly destination label for UI
       let label = 'another page';
-      if (href === '/') label = 'Dashboard';
+      if (href === '/' || href === '/dash') label = 'Dashboard';
       else if (href.includes('analytics')) label = 'Analytics';
       else if (href.includes('transactions')) label = 'Transactions';
       else if (href.includes('directory')) label = 'Directory';

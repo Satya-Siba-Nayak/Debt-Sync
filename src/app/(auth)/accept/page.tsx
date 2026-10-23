@@ -195,7 +195,7 @@ function AcceptDebtContent() {
       );
 
       setTimeout(() => {
-        router.push('/');
+        router.push('/dash');
       }, 1500);
     } catch (err: any) {
       setError(err.message || 'Action failed');
@@ -229,7 +229,7 @@ function AcceptDebtContent() {
             {error || 'This debt record could not be loaded or may have been deleted.'}
           </p>
           <Link
-            href="/"
+            href="/dash"
             className="px-5 py-2.5 bg-primary text-on-primary rounded-xl font-mono text-xs font-bold inline-block"
           >
             Go to Dashboard
@@ -390,7 +390,7 @@ function AcceptDebtContent() {
               This agreement is already marked as <strong>{debt.status}</strong>.
             </p>
             <Link
-              href="/"
+              href="/dash"
               className="w-full inline-block py-2.5 px-4 rounded-xl bg-surface-container text-on-surface font-mono text-xs font-semibold hover:bg-surface-container-high"
             >
               Go to Dashboard

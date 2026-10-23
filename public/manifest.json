@@ -2,7 +2,7 @@
   "name": "DebtSync — Synced Ledgers. Zero Friction.",
   "short_name": "DebtSync",
   "description": "Smart peer-to-peer ledger, interest engine, and debt management portal",
-  "start_url": "/",
+  "start_url": "/dash",
   "scope": "/",
   "display": "standalone",
   "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
@@ -41,7 +41,7 @@
       "name": "New Transaction",
       "short_name": "Record",
       "description": "Quickly record a new loan or borrowing",
-      "url": "/",
+      "url": "/dash",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     },
     {
