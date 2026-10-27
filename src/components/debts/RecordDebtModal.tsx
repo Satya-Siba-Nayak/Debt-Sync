@@ -11,7 +11,11 @@ import { checkDebtRequestCooldown, sendConnectRequestToUser, invalidateCooldownC
 import { sendNotificationEmail } from '@/lib/utils/email-notifier';
 import { PhoneInput } from '../ui/PhoneInput';
 import { Avatar } from '../ui/Avatar';
-import { calculateTrustScore } from '@/lib/utils/trust-score';
+import {
+  calculateTrustScore,
+  fetchBatchServerTrustScores,
+  getCachedServerTrustScore,
+} from '@/lib/utils/trust-score';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { getLedgerCache, invalidateLedgerCache } from '@/lib/stores/ledger-store';
 
@@ -44,25 +48,38 @@ const platformSearchCache = new Map<string, PersonOption[]>();
 function getInitialPeople(preselected?: PersonOption | null): PersonOption[] {
   const map = new Map<string, PersonOption>();
   if (preselected) {
-    map.set(preselected.id, preselected);
+    const srv = getCachedServerTrustScore(preselected.id);
+    map.set(preselected.id, {
+      ...preselected,
+      trustScore: srv ? srv.score : preselected.trustScore,
+      trustRating: srv ? srv.rating : preselected.trustRating,
+    });
   }
   if (cachedPeopleList.length > 0) {
     for (const p of cachedPeopleList) {
-      if (!map.has(p.id)) map.set(p.id, p);
+      if (!map.has(p.id)) {
+        const srv = getCachedServerTrustScore(p.id);
+        map.set(p.id, {
+          ...p,
+          trustScore: srv ? srv.score : p.trustScore,
+          trustRating: srv ? srv.rating : p.trustRating,
+        });
+      }
     }
   } else {
     const ledger = getLedgerCache();
     if (ledger?.people && ledger.people.length > 0) {
       for (const p of ledger.people) {
         if (!map.has(p.id)) {
+          const srv = getCachedServerTrustScore(p.id);
           map.set(p.id, {
             id: p.id,
             name: p.name || p.full_name || p.email || 'Contact',
             email: p.email || '',
             phone: p.phone || null,
             avatar_url: p.avatarUrl || p.avatar_url || null,
-            trustScore: p.trustScore,
-            trustRating: p.trustRating,
+            trustScore: srv ? srv.score : p.trustScore,
+            trustRating: srv ? srv.rating : p.trustRating,
           });
         }
       }
@@ -243,6 +260,7 @@ export function RecordDebtModal({
       }
 
       const peopleMap = new Map<string, PersonOption>();
+      const profileFlagsMap = new Map<string, { isIsolated?: boolean; isVerified?: boolean }>();
 
       // Fetch contacts and debts concurrently
       const [contactDataRes, debtDataRes] = await Promise.all([
@@ -250,16 +268,16 @@ export function RecordDebtModal({
           .from('contacts')
           .select(`
             contact_id, nickname,
-            profile:profiles!contacts_contact_id_fkey(id, email, full_name, phone, avatar_url)
+            profile:profiles!contacts_contact_id_fkey(id, email, full_name, phone, avatar_url, is_purged, is_isolated, is_verified)
           `)
           .eq('owner_id', user.id),
         supabase
           .from('debts')
           .select(`
-            status,
+            id, status, principal, due_date, settled_at, created_by, notes, purged_by_admin,
             lender_id, borrower_id,
-            lender:profiles!debts_lender_id_fkey(id, email, full_name, phone, avatar_url),
-            borrower:profiles!debts_borrower_id_fkey(id, email, full_name, phone, avatar_url)
+            lender:profiles!debts_lender_id_fkey(id, email, full_name, phone, avatar_url, is_purged, is_isolated, is_verified),
+            borrower:profiles!debts_borrower_id_fkey(id, email, full_name, phone, avatar_url, is_purged, is_isolated, is_verified)
           `)
           .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`)
           .neq('status', 'declined'),
@@ -271,7 +289,15 @@ export function RecordDebtModal({
       // 1. Map contacts
       if (contactData) {
         for (const c of contactData as any[]) {
-          if (c.profile) {
+          if (
+            c.profile &&
+            c.contact_id !== '00000000-0000-0000-0000-000000000001' &&
+            !c.profile.is_purged
+          ) {
+            profileFlagsMap.set(c.contact_id, {
+              isIsolated: Boolean(c.profile.is_isolated),
+              isVerified: Boolean(c.profile.is_verified),
+            });
             peopleMap.set(c.contact_id, {
               id: c.contact_id,
               name: c.nickname || c.profile.full_name || c.profile.email,
@@ -288,14 +314,26 @@ export function RecordDebtModal({
         for (const d of debtData as any[]) {
           const isLender = d.lender_id === user.id;
           const otherParty = isLender ? d.borrower : d.lender;
-          if (otherParty && !peopleMap.has(otherParty.id)) {
-            peopleMap.set(otherParty.id, {
-              id: otherParty.id,
-              name: otherParty.full_name || otherParty.email,
-              email: otherParty.email,
-              phone: otherParty.phone,
-              avatar_url: otherParty.avatar_url,
-            });
+          if (
+            otherParty &&
+            otherParty.id !== '00000000-0000-0000-0000-000000000001' &&
+            !otherParty.is_purged
+          ) {
+            if (!profileFlagsMap.has(otherParty.id)) {
+              profileFlagsMap.set(otherParty.id, {
+                isIsolated: Boolean(otherParty.is_isolated),
+                isVerified: Boolean(otherParty.is_verified),
+              });
+            }
+            if (!peopleMap.has(otherParty.id)) {
+              peopleMap.set(otherParty.id, {
+                id: otherParty.id,
+                name: otherParty.full_name || otherParty.email,
+                email: otherParty.email,
+                phone: otherParty.phone,
+                avatar_url: otherParty.avatar_url,
+              });
+            }
           }
         }
       }
@@ -306,11 +344,15 @@ export function RecordDebtModal({
       } else if (preselectedContactId && !peopleMap.has(preselectedContactId)) {
         const { data: profile } = await supabase
           .from('profiles')
-          .select('id, email, full_name, phone, avatar_url')
+          .select('id, email, full_name, phone, avatar_url, is_isolated, is_verified')
           .eq('id', preselectedContactId)
           .single();
 
         if (profile) {
+          profileFlagsMap.set(profile.id, {
+            isIsolated: Boolean((profile as any).is_isolated),
+            isVerified: Boolean((profile as any).is_verified),
+          });
           peopleMap.set(profile.id, {
             id: profile.id,
             name: profile.full_name || profile.email,
@@ -323,11 +365,37 @@ export function RecordDebtModal({
 
       const peopleList = Array.from(peopleMap.values());
       const allFetchedDebts = (debtData as any[]) || [];
+      const cachedPayments = getLedgerCache()?.payments || [];
+
       for (const p of peopleList) {
-        const pDebts = allFetchedDebts.filter((d: any) => d.lender_id === p.id || d.borrower_id === p.id);
-        const trust = calculateTrustScore(pDebts, [], p.id);
-        p.trustScore = trust.score;
-        p.trustRating = trust.rating;
+        const cachedSrv = getCachedServerTrustScore(p.id);
+        if (cachedSrv) {
+          p.trustScore = cachedSrv.score;
+          p.trustRating = cachedSrv.rating;
+        } else {
+          const pDebts = allFetchedDebts.filter((d: any) => d.lender_id === p.id || d.borrower_id === p.id);
+          const pDebtIds = new Set(pDebts.map((d: any) => d.id));
+          const pPayments = cachedPayments.filter((pm: any) => pDebtIds.has(pm.debt_id));
+          const trust = calculateTrustScore(pDebts, pPayments, p.id, profileFlagsMap.get(p.id));
+          p.trustScore = trust.score;
+          p.trustRating = trust.rating;
+        }
+      }
+
+      // Sync authoritative server-provided global scores in batch
+      if (peopleList.length > 0) {
+        const batchScores = await fetchBatchServerTrustScores(
+          supabase,
+          peopleList.map((p) => p.id),
+          allFetchedDebts as any,
+          cachedPayments
+        );
+        for (const p of peopleList) {
+          if (batchScores[p.id]) {
+            p.trustScore = batchScores[p.id].score;
+            p.trustRating = batchScores[p.id].rating;
+          }
+        }
       }
 
       cachedPeopleList = peopleList;
@@ -400,6 +468,7 @@ export function RecordDebtModal({
         const newResults: PersonOption[] = [];
         for (const p of found) {
           if (!people.some((existing) => existing.id === p.id)) {
+            const cachedSrv = getCachedServerTrustScore(p.id);
             newResults.push({
               id: p.id,
               name: p.full_name || p.email,
@@ -407,7 +476,21 @@ export function RecordDebtModal({
               phone: p.phone,
               avatar_url: p.avatar_url,
               isPlatformUser: true,
+              trustScore: cachedSrv ? cachedSrv.score : undefined,
+              trustRating: cachedSrv ? cachedSrv.rating : undefined,
             });
+          }
+        }
+        if (newResults.length > 0) {
+          const batchScores = await fetchBatchServerTrustScores(
+            supabase,
+            newResults.map((r) => r.id)
+          );
+          for (const r of newResults) {
+            if (batchScores[r.id]) {
+              r.trustScore = batchScores[r.id].score;
+              r.trustRating = batchScores[r.id].rating;
+            }
           }
         }
         platformSearchCache.set(cleanLower, newResults);
@@ -420,7 +503,7 @@ export function RecordDebtModal({
     }, 200);
 
     return () => clearTimeout(timer);
-  }, [personSearch, people]);
+  }, [personSearch, people, supabase]);
 
   // Handlers to eliminate leading-zero typing glitches
   const handlePrincipalChange = (val: string) => {

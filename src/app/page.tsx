@@ -442,13 +442,24 @@ function LandingPageContent() {
                   </p>
 
                   <div className="pt-4 flex flex-wrap items-center gap-3">
-                    <Link
-                      href="/signup"
-                      className="px-5 py-2.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 transition-opacity min-h-[44px] inline-flex items-center gap-1.5 shadow-xs"
-                    >
-                      <span>Try DebtSync Now</span>
-                      <span className="material-symbols-outlined text-[15px]">arrow_forward</span>
-                    </Link>
+                    {isLoggedIn ? (
+                      <Link
+                        href="/dash"
+                        onClick={clearPublicSession}
+                        className="px-5 py-2.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 transition-opacity min-h-[44px] inline-flex items-center gap-1.5 shadow-xs"
+                      >
+                        <span className="material-symbols-outlined text-[15px]">dashboard</span>
+                        <span>Open Your Dashboard</span>
+                      </Link>
+                    ) : (
+                      <Link
+                        href="/signup"
+                        className="px-5 py-2.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 transition-opacity min-h-[44px] inline-flex items-center gap-1.5 shadow-xs"
+                      >
+                        <span>Try DebtSync Now</span>
+                        <span className="material-symbols-outlined text-[15px]">arrow_forward</span>
+                      </Link>
+                    )}
                     <a
                       href={SAMPLE_PUBLIC_SHARE_URL}
                       target="_blank"
@@ -614,7 +625,16 @@ function LandingPageContent() {
                   How does the interest calculation work?
                 </h3>
                 <p className="text-[var(--on-surface-variant)] leading-relaxed">
-                  You can specify 0% interest, Simple Interest, or Compounding Interest (daily compounding). DebtSync calculates accrued interest continuously down to the second, updating live on both parties&apos; dashboards.
+                  You can specify 0% interest, Simple Interest, or Compounding Interest (Daily, Weekly, Monthly, or Yearly compounding). DebtSync calculates accrued interest continuously down to the second, updating live on both parties&apos; dashboards.
+                </p>
+              </div>
+
+              <div className="p-5 rounded-2xl bg-[var(--surface)] border border-[var(--outline-variant)]/30 space-y-2">
+                <h3 className="font-heading text-sm font-bold text-[var(--on-surface)]">
+                  How is the Network Trust Score (300–850) calculated?
+                </h3>
+                <p className="text-[var(--on-surface-variant)] leading-relaxed">
+                  Your Network Trust Score is dynamically computed on the server across 4 calibrated pillars: Repayment Punctuality (38%), Principal Clearance &amp; Capital Velocity (27%), Verified Peer Network Breadth (15%), and Dispute-Free Consensus (20%). Because it is server-calibrated using UTC calendar dates, every counterparty and device sees the exact same score without exposing private individual debt amounts.
                 </p>
               </div>
 
@@ -658,19 +678,32 @@ function LandingPageContent() {
               Join DebtSync for free. Zero ads, zero tracking, and transparent mutual financial consensus.
             </p>
             <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
-              <Link
-                href="/signup"
-                className="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-sm font-bold hover:opacity-90 active:scale-95 transition-all shadow-md min-h-[48px] flex items-center justify-center gap-2"
-              >
-                <span>Get Started Free</span>
-                <span className="material-symbols-outlined text-[18px]">rocket_launch</span>
-              </Link>
-              <Link
-                href="/login"
-                className="w-full sm:w-auto px-6 py-3.5 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container)] font-mono text-sm font-semibold text-[var(--on-surface)] min-h-[48px] flex items-center justify-center"
-              >
-                Sign In
-              </Link>
+              {isLoggedIn ? (
+                <Link
+                  href="/dash"
+                  onClick={clearPublicSession}
+                  className="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-sm font-bold hover:opacity-90 active:scale-95 transition-all shadow-md min-h-[48px] flex items-center justify-center gap-2"
+                >
+                  <span className="material-symbols-outlined text-[18px]">dashboard</span>
+                  <span>Return to Your Dashboard</span>
+                </Link>
+              ) : (
+                <>
+                  <Link
+                    href="/signup"
+                    className="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-sm font-bold hover:opacity-90 active:scale-95 transition-all shadow-md min-h-[48px] flex items-center justify-center gap-2"
+                  >
+                    <span>Get Started Free</span>
+                    <span className="material-symbols-outlined text-[18px]">rocket_launch</span>
+                  </Link>
+                  <Link
+                    href="/login"
+                    className="w-full sm:w-auto px-6 py-3.5 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container)] font-mono text-sm font-semibold text-[var(--on-surface)] min-h-[48px] flex items-center justify-center"
+                  >
+                    Sign In
+                  </Link>
+                </>
+              )}
             </div>
           </div>
         </section>

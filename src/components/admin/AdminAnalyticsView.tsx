@@ -117,8 +117,8 @@ export function AdminAnalyticsView({
         disputedPrincipalVolume += pAmt;
       }
 
-      // Outstanding balance on ongoing non-settled non-declined agreements
-      if (d.status !== 'settled' && d.status !== 'declined') {
+      // Outstanding balance on ongoing active or disputed agreements
+      if (d.status === 'active' || d.status === 'disputed') {
         const dPayments = validPayments.filter((p) => p.debt_id === d.id);
         const calc = calculateDebtBalance(d, dPayments);
         totalOutstandingVolume += calc.currentBalance;
@@ -148,10 +148,11 @@ export function AdminAnalyticsView({
         ? Math.min(100, Math.round((totalRepaymentsVolume / totalPrincipalVolume) * 100))
         : 0;
 
-    // Average Network Trust Score
+    // Average Network Trust Score (300 - 850 scale, -1 when unrated)
     const scores = activeProfiles.map((p) => {
       const uDebts = validDebts.filter((d) => d.lender_id === p.id || d.borrower_id === p.id);
-      const uPayments = validPayments.filter((pm) => pm.paid_by === p.id);
+      const uDebtIds = new Set(uDebts.map((d) => d.id));
+      const uPayments = validPayments.filter((pm) => uDebtIds.has(pm.debt_id));
       return calculateTrustScore(uDebts, uPayments, p.id, {
         isIsolated: p.is_isolated,
         isVerified: p.is_verified,
@@ -161,7 +162,7 @@ export function AdminAnalyticsView({
     const avgTrustScore =
       scoredUsers.length > 0
         ? Math.round(scoredUsers.reduce((a, b) => a + b, 0) / scoredUsers.length)
-        : 85;
+        : -1;
 
     // Average loan ticket size
     const avgLoanSize =
@@ -730,7 +731,14 @@ export function AdminAnalyticsView({
             <span className="material-symbols-outlined text-[18px] text-purple-400">shield</span>
           </div>
           <div className="font-heading text-xl font-bold text-purple-600 dark:text-purple-400">
-            {metrics.avgTrustScore} <span className="text-xs font-normal text-[var(--outline)]">/ 100</span>
+            {metrics.avgTrustScore > 0 ? (
+              <>
+                {metrics.avgTrustScore}{' '}
+                <span className="text-xs font-normal text-[var(--outline)]">/ 850</span>
+              </>
+            ) : (
+              <span className="text-[var(--outline)]">-1 (Unrated)</span>
+            )}
           </div>
           <div className="text-[11px] text-[var(--outline)] font-mono flex items-center justify-between">
             <span>Disputes: {metrics.disputedCount}</span>

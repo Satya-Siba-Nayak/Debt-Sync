@@ -2,6 +2,7 @@
 
 import { Debt, Payment } from '../types/database';
 import { calculateDebtBalance, calculatePortfolioAccrualRates, isDebtPurgedByAdmin, round2 } from '../utils/interest';
+import { invalidateServerTrustCache } from '../utils/trust-score';
 
 export interface LedgerCacheData {
   userId: string;
@@ -22,7 +23,15 @@ export function computeDashboardStats(allDebts: Debt[], allPayments: Payment[], 
   let borrowerInterestSum = 0;
 
   for (const d of allDebts) {
-    if (d.status === 'settled' || d.status === 'declined' || d.status === 'purged' || isDebtPurgedByAdmin(d)) continue;
+    if (
+      d.status === 'settled' ||
+      d.status === 'declined' ||
+      d.status === 'pending' ||
+      d.status === 'purged' ||
+      isDebtPurgedByAdmin(d)
+    ) {
+      continue;
+    }
 
     const debtPayments = allPayments.filter((p) => p.debt_id === d.id);
     const calc = calculateDebtBalance(d, debtPayments);
@@ -96,6 +105,7 @@ export function setLedgerCache(data: LedgerCacheData): void {
 
 export function invalidateLedgerCache(): void {
   memoryCache = null;
+  invalidateServerTrustCache();
   if (typeof window === 'undefined') return;
   try {
     sessionStorage.removeItem(CACHE_KEY);

@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment } from '@/lib/types/database';
-import { calculateDebtBalance, isDebtPurgedByAdmin } from '@/lib/utils/interest';
+import { calculateDebtBalance, isDebtPurgedByAdmin, round2 } from '@/lib/utils/interest';
 import { formatCurrency } from '@/lib/utils/currency';
 import { PersonCard, PersonSummary } from '@/components/directory/PersonCard';
 import { AddPersonModal } from '@/components/directory/AddPersonModal';
@@ -13,7 +13,11 @@ import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { getLedgerCache, setLedgerCache } from '@/lib/stores/ledger-store';
 import { SkeletonDirectoryGrid } from '@/components/ui/Skeleton';
-import { calculateTrustScore } from '@/lib/utils/trust-score';
+import {
+  calculateTrustScore,
+  fetchBatchServerTrustScores,
+  getCachedServerTrustScore,
+} from '@/lib/utils/trust-score';
 import { getCleanDebtNotes, parseSplitDetails } from '@/lib/utils/split-bills';
 
 type SortOption = 'recent' | 'alpha_asc' | 'alpha_desc' | 'balance_desc' | 'trust_score';
@@ -51,15 +55,15 @@ export default function PeopleDirectoryPage() {
           .from('contacts')
           .select(`
             contact_id, nickname,
-            profile:profiles!contacts_contact_id_fkey(id, email, full_name, phone, is_shadow, is_purged, secondary_emails, avatar_url)
+            profile:profiles!contacts_contact_id_fkey(id, email, full_name, phone, is_shadow, is_purged, is_isolated, is_verified, secondary_emails, avatar_url)
           `)
           .eq('owner_id', user.id),
         supabase
           .from('debts')
           .select(`
             *,
-            lender:profiles!debts_lender_id_fkey(id, email, full_name, phone, is_shadow, is_purged, secondary_emails, avatar_url),
-            borrower:profiles!debts_borrower_id_fkey(id, email, full_name, phone, is_shadow, is_purged, secondary_emails, avatar_url)
+            lender:profiles!debts_lender_id_fkey(id, email, full_name, phone, is_shadow, is_purged, is_isolated, is_verified, secondary_emails, avatar_url),
+            borrower:profiles!debts_borrower_id_fkey(id, email, full_name, phone, is_shadow, is_purged, is_isolated, is_verified, secondary_emails, avatar_url)
           `)
           .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`),
       ]);
@@ -81,6 +85,7 @@ export default function PeopleDirectoryPage() {
 
       // Collect all counterparties (from contacts + from debts)
       const peopleMap = new Map<string, PersonSummary>();
+      const profileFlagsMap = new Map<string, { isIsolated?: boolean; isVerified?: boolean }>();
 
       // Initialize from contacts (excluding purged / system tombstone accounts)
       if (contactRows) {
@@ -92,6 +97,10 @@ export default function PeopleDirectoryPage() {
           ) {
             continue;
           }
+          profileFlagsMap.set(c.contact_id, {
+            isIsolated: Boolean(c.profile.is_isolated),
+            isVerified: Boolean(c.profile.is_verified),
+          });
           const contactCreated = c.created_at ? new Date(c.created_at).getTime() : 0;
           peopleMap.set(c.contact_id, {
             id: c.contact_id,
@@ -126,6 +135,13 @@ export default function PeopleDirectoryPage() {
           Boolean((otherParty as any).is_purged)
         ) {
           continue;
+        }
+
+        if (!profileFlagsMap.has(otherParty.id)) {
+          profileFlagsMap.set(otherParty.id, {
+            isIsolated: Boolean((otherParty as any).is_isolated),
+            isVerified: Boolean((otherParty as any).is_verified),
+          });
         }
 
         if (!peopleMap.has(otherParty.id)) {
@@ -180,43 +196,90 @@ export default function PeopleDirectoryPage() {
         }
         const calc = calculateDebtBalance(d, debtPayments);
 
-        if (d.status === 'pending') {
-          person.status = 'pending';
-        } else if (d.status === 'active' && calc.currentBalance > 0) {
+        if (d.status === 'active' && calc.currentBalance > 0) {
           person.status = 'active';
+        } else if (d.status === 'pending' && person.status !== 'active') {
+          person.status = 'pending';
         }
 
-        if (isLender) {
-          // User lent to person -> person owes user
-          person.lentAmount += calc.currentBalance;
-          person.netBalance += calc.currentBalance;
-        } else {
-          // User borrowed from person -> user owes person
-          person.owedAmount += calc.currentBalance;
-          person.netBalance -= calc.currentBalance;
+        // Only confirmed active or disputed obligations contribute to active net balances
+        if (d.status === 'active' || d.status === 'disputed') {
+          if (isLender) {
+            // User lent to person -> person owes user
+            person.lentAmount = round2(person.lentAmount + calc.currentBalance);
+            person.netBalance = round2(person.netBalance + calc.currentBalance);
+          } else {
+            // User borrowed from person -> user owes person
+            person.owedAmount = round2(person.owedAmount + calc.currentBalance);
+            person.netBalance = round2(person.netBalance - calc.currentBalance);
+          }
         }
       }
 
       const updatedPeople = Array.from(peopleMap.values());
       for (const p of updatedPeople) {
-        const personDebts = allDebts.filter((d) => d.lender_id === p.id || d.borrower_id === p.id);
-        const personDebtIds = new Set(personDebts.map((d) => d.id));
-        const personPayments = allPayments.filter((pm) => personDebtIds.has(pm.debt_id));
-        const trust = calculateTrustScore(personDebts, personPayments, p.id);
-        p.trustScore = trust.score;
-        p.trustRating = trust.rating;
+        const cachedSrv = getCachedServerTrustScore(p.id);
+        if (cachedSrv) {
+          p.trustScore = cachedSrv.score;
+          p.trustRating = cachedSrv.rating;
+        } else {
+          const personDebts = allDebts.filter((d) => d.lender_id === p.id || d.borrower_id === p.id);
+          const personDebtIds = new Set(personDebts.map((d) => d.id));
+          const personPayments = allPayments.filter((pm) => personDebtIds.has(pm.debt_id));
+          const trust = calculateTrustScore(
+            personDebts,
+            personPayments,
+            p.id,
+            profileFlagsMap.get(p.id)
+          );
+          p.trustScore = trust.score;
+          p.trustRating = trust.rating;
+        }
       }
       setPeople(updatedPeople);
 
-      const activeCurrency = settingsRes.data?.default_currency || currency;
-      setLedgerCache({
-        userId: user.id,
-        debts: allDebts,
-        payments: allPayments,
-        people: updatedPeople,
-        currency: activeCurrency,
-        timestamp: Date.now(),
-      });
+      // Fetch authoritative server-provided global trust scores for all people in batch
+      const personIds = updatedPeople.map((p) => p.id);
+      if (personIds.length > 0) {
+        const batchScores = await fetchBatchServerTrustScores(
+          supabase,
+          personIds,
+          allDebts,
+          allPayments
+        );
+        const serverSyncedPeople = updatedPeople.map((p) => {
+          const srv = batchScores[p.id];
+          if (srv) {
+            return {
+              ...p,
+              trustScore: srv.score,
+              trustRating: srv.rating,
+            };
+          }
+          return p;
+        });
+        setPeople(serverSyncedPeople);
+
+        const activeCurrency = settingsRes.data?.default_currency || currency;
+        setLedgerCache({
+          userId: user.id,
+          debts: allDebts,
+          payments: allPayments,
+          people: serverSyncedPeople,
+          currency: activeCurrency,
+          timestamp: Date.now(),
+        });
+      } else {
+        const activeCurrency = settingsRes.data?.default_currency || currency;
+        setLedgerCache({
+          userId: user.id,
+          debts: allDebts,
+          payments: allPayments,
+          people: updatedPeople,
+          currency: activeCurrency,
+          timestamp: Date.now(),
+        });
+      }
     } catch (err) {
       console.error('Error loading directory:', err);
     } finally {

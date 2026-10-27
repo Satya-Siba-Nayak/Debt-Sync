@@ -10,7 +10,12 @@ import { CashflowChart } from '@/components/dashboard/CashflowChart';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { getLedgerCache, setLedgerCache } from '@/lib/stores/ledger-store';
 import { SkeletonBalanceCards } from '@/components/ui/Skeleton';
-import { calculateTrustScore } from '@/lib/utils/trust-score';
+import {
+  calculateTrustScore,
+  fetchServerTrustScore,
+  getCachedServerTrustScore,
+  TrustScoreBreakdown,
+} from '@/lib/utils/trust-score';
 import { PAYMENT_METHOD_LABELS, isUPIMethod, PRIMARY_PAYMENT_METHODS } from '@/lib/utils/upi-link';
 import { exportUserDataToCSV } from '@/lib/utils/export-csv';
 
@@ -23,6 +28,10 @@ export default function AnalyticsPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(initialCache?.userId || null);
   const [debts, setDebts] = useState<Debt[]>(initialCache?.debts || []);
   const [payments, setPayments] = useState<Payment[]>(initialCache?.payments || []);
+  const [userFlags, setUserFlags] = useState<{ isIsolated?: boolean; isVerified?: boolean }>({});
+  const [serverTrustBreakdown, setServerTrustBreakdown] = useState<TrustScoreBreakdown | null>(
+    () => getCachedServerTrustScore(initialCache?.userId)
+  );
   const [showTrustDetails, setShowTrustDetails] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
 
@@ -32,24 +41,35 @@ export default function AnalyticsPage() {
       if (!user) return;
       setCurrentUserId(user.id);
 
-      const [settingsRes, debtRowsRes] = await Promise.all([
+      const [settingsRes, profileRes, debtRowsRes] = await Promise.all([
         supabase
           .from('user_settings')
           .select('default_currency')
           .eq('user_id', user.id)
           .single(),
         supabase
+          .from('profiles')
+          .select('is_isolated, is_verified')
+          .eq('id', user.id)
+          .maybeSingle(),
+        supabase
           .from('debts')
           .select(`
             *,
-            lender:profiles!debts_lender_id_fkey(id, email, full_name, avatar_url),
-            borrower:profiles!debts_borrower_id_fkey(id, email, full_name, avatar_url)
+            lender:profiles!debts_lender_id_fkey(id, email, full_name, avatar_url, is_purged),
+            borrower:profiles!debts_borrower_id_fkey(id, email, full_name, avatar_url, is_purged)
           `)
           .or(`lender_id.eq.${user.id},borrower_id.eq.${user.id}`),
       ]);
 
       const activeCurrency = settingsRes.data?.default_currency || currency;
       if (settingsRes.data?.default_currency) setCurrency(settingsRes.data.default_currency);
+
+      const flags = {
+        isIsolated: Boolean(profileRes.data?.is_isolated),
+        isVerified: Boolean(profileRes.data?.is_verified),
+      };
+      setUserFlags(flags);
 
       const allDebts: Debt[] = (debtRowsRes.data as any) || [];
       const debtIds = allDebts.map((d) => d.id);
@@ -73,6 +93,16 @@ export default function AnalyticsPage() {
         currency: activeCurrency,
         timestamp: Date.now(),
       });
+
+      // Fetch authoritative server-provided dynamic network trust score
+      const srvTrust = await fetchServerTrustScore(
+        supabase,
+        user.id,
+        allDebts,
+        allPayments,
+        flags
+      );
+      setServerTrustBreakdown(srvTrust);
     } catch (err) {
       console.error('Error loading analytics:', err);
     } finally {
@@ -228,12 +258,15 @@ export default function AnalyticsPage() {
     ? Math.min(100, Math.round((totalRepaidBothWays / grandObligations) * 100))
     : validDebtIds.size === 0 ? 100 : 0;
 
-  // Comprehensive Network Trust Score Breakdown & Performance Factors
-  const trustBreakdown = calculateTrustScore(debts, payments, currentUserId || undefined);
+  // Comprehensive Server-Provided Network Trust Score Breakdown & Performance Factors
+  const trustBreakdown =
+    serverTrustBreakdown ||
+    calculateTrustScore(debts, payments, currentUserId || undefined, userFlags);
   const trustScore = trustBreakdown.score;
   const trustRating = trustBreakdown.rating;
   const trustRatingColor = trustBreakdown.ratingColor;
   const trustFactors = trustBreakdown.factors;
+  const trustPillars = trustBreakdown.pillars;
 
   // Payment Channel & Methods Distribution (Consolidated under UPI with TPAP app breakdown)
   const channelStats: Record<string, { count: number; volume: number }> = {
@@ -837,9 +870,34 @@ export default function AnalyticsPage() {
 
             <p className="font-mono text-xs text-[var(--on-surface-variant)] leading-relaxed mb-4">
               {trustScore === -1
-                ? 'No transactions recorded on-ledger yet. Your network score will dynamically calibrate (300–850) as soon as your first debt or repayment is recorded.'
-                : `Calculated dynamically from ${settledDebtsCount} settled cycles, ${repaymentVelocityPercent}% repayment velocity, and on-time records.`}
+                ? 'No confirmed agreements on-ledger yet. Your server-calibrated network score (300–850) will dynamically activate as soon as your first agreement is accepted or settled.'
+                : `Server-calibrated across ${settledDebtsCount} settled cycles, ${trustPillars.debtClearance}% obligation clearance, and on-time records.`}
             </p>
+
+            {/* 4-Pillar Mini Bars when rated */}
+            {trustScore !== -1 && (
+              <div className="w-full grid grid-cols-2 gap-2 mb-4 text-left">
+                {[
+                  { label: 'Punctuality', val: trustPillars.paymentHistory },
+                  { label: 'Clearance', val: trustPillars.debtClearance },
+                  { label: 'Peer Breadth', val: trustPillars.networkBreadth },
+                  { label: 'Dispute-Free', val: trustPillars.disputeCleanliness },
+                ].map((pil) => (
+                  <div key={pil.label} className="p-2 rounded-xl bg-[var(--surface-container)] border border-[var(--outline-variant)]/20">
+                    <div className="flex items-center justify-between font-mono text-[10px] mb-1">
+                      <span className="text-[var(--on-surface-variant)]">{pil.label}</span>
+                      <span className="font-bold text-[var(--on-surface)]">{pil.val}%</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-[var(--surface-container-highest)] overflow-hidden">
+                      <div
+                        className="h-full bg-[var(--primary)] rounded-full transition-all duration-500"
+                        style={{ width: `${pil.val}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Factor breakdown toggle button */}
             <button
@@ -901,9 +959,9 @@ export default function AnalyticsPage() {
                     <span>How to Increase Score</span>
                   </div>
                   <ul className="text-[11px] font-mono text-[var(--on-surface)] space-y-1 pl-4 list-disc marker:text-emerald-500">
-                    <li>Settle active debts to earn +25 points per debt.</li>
-                    <li>Settle on or before the due date for a +15 point on-time bonus.</li>
-                    <li>Maintain repayment velocity ≥ 80% to retain the +30 velocity bonus.</li>
+                    <li>Settle dated agreements on or before the due date (+18 pts each) or open agreements (+12 pts).</li>
+                    <li>Maintain obligation clearance ≥ 85% (+30 pts) and active agreements with 0 overdue balances (+15 pts).</li>
+                    <li>Build verified settlements across 3+ distinct counterparties (+25 to +40 network breadth bonus).</li>
                   </ul>
                 </div>
 
@@ -914,9 +972,9 @@ export default function AnalyticsPage() {
                     <span>What Lowers Your Score</span>
                   </div>
                   <ul className="text-[11px] font-mono text-[var(--on-surface)] space-y-1 pl-4 list-disc marker:text-red-500">
-                    <li>Declining debt requests incurs a -40 point penalty each.</li>
-                    <li>Unresolved disputed payments penalize -20 points.</li>
-                    <li>Settling past the agreed due date costs -10 points.</li>
+                    <li>Active overdue debts incur graduated delinquency deductions (-25 to -65 pts per overdue debt).</li>
+                    <li>Contested or disputed transactions deduct -40 points until resolved.</li>
+                    <li>Settling past the agreed due date (-12 pts) or repeated rejected outbound proposals (-20 pts).</li>
                   </ul>
                 </div>
               </div>

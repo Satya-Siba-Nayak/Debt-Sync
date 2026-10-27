@@ -571,7 +571,7 @@ export default function AdminDashboardPage() {
       else if (d.status === 'pending') pendingDebtsCount++;
       else if (d.status === 'disputed') disputedCount++;
 
-      if (d.status !== 'settled' && d.status !== 'declined') {
+      if (d.status === 'active' || d.status === 'disputed') {
         const debtPayments = validPayments.filter((p) => p.debt_id === d.id);
         const calc = calculateDebtBalance(d, debtPayments);
         totalOutstandingVolume += calc.currentBalance;
@@ -589,7 +589,8 @@ export default function AdminDashboardPage() {
     // Average trust score across platform using enhanced algorithm (filtering unscored users)
     const userScores = regularProfiles.map((p) => {
       const uDebts = validDebts.filter((d) => d.lender_id === p.id || d.borrower_id === p.id);
-      const uPayments = validPayments.filter((pm) => pm.paid_by === p.id);
+      const uDebtIds = new Set(uDebts.map((d) => d.id));
+      const uPayments = validPayments.filter((pm) => uDebtIds.has(pm.debt_id));
       return calculateTrustScore(uDebts, uPayments, p.id, {
         isIsolated: p.is_isolated,
         isVerified: p.is_verified,
@@ -621,20 +622,21 @@ export default function AdminDashboardPage() {
   const usersWithMetrics = useMemo(() => {
     return allProfiles.map((profile) => {
       const userDebts = validDebts.filter((d) => d.lender_id === profile.id || d.borrower_id === profile.id);
+      const userDebtIds = new Set(userDebts.map((d) => d.id));
       const userLentDebts = validDebts.filter((d) => d.lender_id === profile.id && d.status !== 'declined');
       const userBorrowDebts = validDebts.filter((d) => d.borrower_id === profile.id && d.status !== 'declined');
-      const userPayments = validPayments.filter((p) => p.paid_by === profile.id);
+      const userPayments = validPayments.filter((p) => userDebtIds.has(p.debt_id));
 
       let totalLentBalance = 0;
       for (const d of userLentDebts) {
-        if (d.status === 'settled') continue;
+        if (d.status !== 'active' && d.status !== 'disputed') continue;
         const dPayments = validPayments.filter((p) => p.debt_id === d.id);
         totalLentBalance += calculateDebtBalance(d, dPayments).currentBalance;
       }
 
       let totalOwedBalance = 0;
       for (const d of userBorrowDebts) {
-        if (d.status === 'settled') continue;
+        if (d.status !== 'active' && d.status !== 'disputed') continue;
         const dPayments = validPayments.filter((p) => p.debt_id === d.id);
         totalOwedBalance += calculateDebtBalance(d, dPayments).currentBalance;
       }

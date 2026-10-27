@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment, ActivityLogEntry, Profile } from '@/lib/types/database';
-import { calculateDebtBalance, round2, sortDebtsActiveFirst, sortPaymentsPendingFirst } from '@/lib/utils/interest';
+import { calculateDebtBalance, isDebtPurgedByAdmin, round2, sortDebtsActiveFirst, sortPaymentsPendingFirst } from '@/lib/utils/interest';
 import { formatCurrency } from '@/lib/utils/currency';
 import { Chip } from '@/components/ui/Chip';
 import { Avatar } from '@/components/ui/Avatar';
@@ -18,7 +18,12 @@ import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
 import { PersonAnalyticsChart } from '@/components/directory/PersonAnalyticsChart';
 import { SkeletonBalanceCards, SkeletonTableRows } from '@/components/ui/Skeleton';
-import { calculateTrustScore } from '@/lib/utils/trust-score';
+import {
+  calculateTrustScore,
+  fetchServerTrustScore,
+  getCachedServerTrustScore,
+  TrustScoreBreakdown,
+} from '@/lib/utils/trust-score';
 import { detectUPIApp, formatPaymentMethodDisplay } from '@/lib/utils/upi-link';
 import { getLedgerCache, invalidateLedgerCache } from '@/lib/stores/ledger-store';
 import { parseSplitDetails, parseShareMetadata, getCleanDebtNotes } from '@/lib/utils/split-bills';
@@ -66,6 +71,9 @@ function PersonDebtDetailContent() {
   const [payments, setPayments] = useState<Payment[]>(cachedPayments);
   const [activityLogs, setActivityLogs] = useState<ActivityLogEntry[]>([]);
   const [currency, setCurrency] = useState(initialCache?.currency || 'inr');
+  const [serverTrustBreakdown, setServerTrustBreakdown] = useState<TrustScoreBreakdown | null>(
+    () => getCachedServerTrustScore(personId)
+  );
 
   // Search, Directional filter & Modals
   const [searchQuery, setSearchQuery] = useState('');
@@ -155,13 +163,14 @@ function PersonDebtDetailContent() {
       setDebts(allDebts);
 
       const debtIds = allDebts.map((d) => d.id);
+      let loadedPayments: Payment[] = [];
 
       if (debtIds.length > 0) {
         const [paymentRes, logRes] = await Promise.all([
           supabase.from('payments').select('*').in('debt_id', debtIds).order('created_at', { ascending: false }),
           supabase.from('activity_log').select('*').in('debt_id', debtIds).order('created_at', { ascending: false }),
         ]);
-        const loadedPayments: Payment[] = (paymentRes.data as any) || [];
+        loadedPayments = (paymentRes.data as any) || [];
         setPayments(loadedPayments);
         setActivityLogs(logRes.data || []);
 
@@ -181,6 +190,21 @@ function PersonDebtDetailContent() {
       } else {
         setPayments([]);
         setActivityLogs([]);
+      }
+
+      // Fetch authoritative server-provided global network score for this person
+      if (resolvedPersonId) {
+        const srvTrust = await fetchServerTrustScore(
+          supabase,
+          resolvedPersonId,
+          allDebts,
+          loadedPayments,
+          {
+            isIsolated: Boolean((targetProfile as any)?.is_isolated),
+            isVerified: Boolean((targetProfile as any)?.is_verified),
+          }
+        );
+        setServerTrustBreakdown(srvTrust);
       }
     } catch (err) {
       console.error('Error fetching debt details:', err);
@@ -353,33 +377,50 @@ function PersonDebtDetailContent() {
     };
   }, [fetchDetails, personId, supabase]);
 
-  // Calculations across all debts with this person
+  // Calculations across all active/disputed debts with this person
   let totalOutstandingLent = 0;
   let totalOutstandingBorrowed = 0;
   let totalPrincipal = 0;
   let totalAccruedInterest = 0;
 
   for (const d of debts) {
-    if (d.status === 'settled' || d.status === 'declined') continue;
+    if (
+      d.status === 'settled' ||
+      d.status === 'declined' ||
+      d.status === 'pending' ||
+      d.status === 'purged' ||
+      isDebtPurgedByAdmin(d)
+    ) {
+      continue;
+    }
     const debtPayments = payments.filter((p) => p.debt_id === d.id);
     const calc = calculateDebtBalance(d, debtPayments);
 
-    totalPrincipal += calc.principal;
-    totalAccruedInterest += calc.totalAccruedInterest;
+    totalPrincipal = round2(totalPrincipal + calc.principal);
+    totalAccruedInterest = round2(totalAccruedInterest + calc.totalAccruedInterest);
 
     if (d.lender_id === currentUserId) {
-      totalOutstandingLent += calc.currentBalance;
+      totalOutstandingLent = round2(totalOutstandingLent + calc.currentBalance);
     } else {
-      totalOutstandingBorrowed += calc.currentBalance;
+      totalOutstandingBorrowed = round2(totalOutstandingBorrowed + calc.currentBalance);
     }
   }
 
-  const netBalance = totalOutstandingLent - totalOutstandingBorrowed;
+  const netBalance = round2(totalOutstandingLent - totalOutstandingBorrowed);
   const isNetPositive = netBalance > 0;
-  const contactTrust = calculateTrustScore(debts, payments, person?.id);
+  const contactTrust =
+    serverTrustBreakdown ||
+    calculateTrustScore(debts, payments, person?.id, {
+      isIsolated: Boolean((person as any)?.is_isolated),
+      isVerified: Boolean((person as any)?.is_verified),
+    });
 
   // 3-way Financial Breakdown: Remaining Principal vs Accrued Interest vs Repaid
-  const totalPaid = round2(payments.reduce((s, p) => s + (Number(p.amount) || 0), 0));
+  const totalPaid = round2(
+    payments
+      .filter((p) => p.is_verified && !(typeof p.note === 'string' && p.note.includes('[DISPUTED]')))
+      .reduce((s, p) => s + (Number(p.amount) || 0), 0)
+  );
   const totalOutstanding = Math.abs(netBalance) <= 0.005 ? 0 : round2(Math.abs(netBalance));
   const remainingPrincipal = Math.max(0, Math.min(round2(totalPrincipal), totalOutstanding));
   const accruedInterest = Math.max(0, round2(totalOutstanding - remainingPrincipal));
@@ -420,18 +461,26 @@ function PersonDebtDetailContent() {
 
   let filteredBalance = 0;
   for (const d of displayDebts) {
-    if (d.status === 'settled' || d.status === 'declined') continue;
+    if (
+      d.status === 'settled' ||
+      d.status === 'declined' ||
+      d.status === 'pending' ||
+      d.status === 'purged' ||
+      isDebtPurgedByAdmin(d)
+    ) {
+      continue;
+    }
     const debtPayments = payments.filter((p) => p.debt_id === d.id);
     const calc = calculateDebtBalance(d, debtPayments);
     if (filterDirection === 'they_owe') {
-      filteredBalance += calc.currentBalance;
+      filteredBalance = round2(filteredBalance + calc.currentBalance);
     } else if (filterDirection === 'you_owe') {
-      filteredBalance += calc.currentBalance;
+      filteredBalance = round2(filteredBalance + calc.currentBalance);
     } else {
       if (d.lender_id === currentUserId) {
-        filteredBalance += calc.currentBalance;
+        filteredBalance = round2(filteredBalance + calc.currentBalance);
       } else {
-        filteredBalance -= calc.currentBalance;
+        filteredBalance = round2(filteredBalance - calc.currentBalance);
       }
     }
   }

@@ -263,15 +263,18 @@ function AcceptDebtContent() {
     );
   }
 
-  const lenderName = debt.lender?.full_name || debt.lender?.email || 'Counterparty';
+  const isBorrowerCreator = Boolean(debt.created_by && debt.created_by === debt.borrower_id);
+  const creatorParty = isBorrowerCreator ? debt.borrower : debt.lender;
+  const creatorName = creatorParty?.full_name || creatorParty?.email || 'Counterparty';
+  const isCurrentUserCreator = Boolean(currentUser && debt.created_by && debt.created_by === currentUser.id);
 
   return (
     <div className="min-h-screen bg-surface flex items-center justify-center p-4 md:p-6">
       <div className="w-full max-w-lg bg-surface-container-lowest rounded-2xl p-6 md:p-8 border border-outline-variant/30 shadow-xl">
         <div className="text-center mb-6">
           <Avatar
-            src={debt.lender?.avatar_url}
-            name={lenderName}
+            src={creatorParty?.avatar_url}
+            name={creatorName}
             size="lg"
             className="mx-auto mb-3 shadow-md"
           />
@@ -279,7 +282,13 @@ function AcceptDebtContent() {
             Review Debt Agreement
           </h1>
           <p className="font-mono text-xs text-on-surface-variant mt-1">
-            <strong>{lenderName}</strong> recorded a financial transaction with you
+            {isCurrentUserCreator ? (
+              <span>You recorded this financial agreement and are awaiting counterparty confirmation</span>
+            ) : (
+              <span>
+                <strong>{creatorName}</strong> recorded a financial transaction with you
+              </span>
+            )}
           </p>
         </div>
 
@@ -303,7 +312,11 @@ function AcceptDebtContent() {
             <div className="flex justify-between">
               <span className="text-on-surface-variant">Interest Engine</span>
               <span className="font-bold uppercase text-on-surface">
-                {debt.interest_type === 'none' ? '0% (Interest-Free)' : `${debt.interest_type} (${debt.compound_freq || 'monthly'})`}
+                {debt.interest_type === 'none'
+                  ? '0% (Interest-Free)'
+                  : debt.interest_type === 'simple'
+                  ? 'Simple APR'
+                  : `Compound (${debt.compound_freq || 'monthly'})`}
               </span>
             </div>
 
@@ -394,6 +407,18 @@ function AcceptDebtContent() {
               className="w-full inline-block py-2.5 px-4 rounded-xl bg-surface-container text-on-surface font-mono text-xs font-semibold hover:bg-surface-container-high"
             >
               Go to Dashboard
+            </Link>
+          </div>
+        ) : isCurrentUserCreator ? (
+          <div className="text-center space-y-3">
+            <p className="font-mono text-xs text-on-surface-variant">
+              Awaiting counterparty acceptance. You can edit or manage this pending request from your dashboard.
+            </p>
+            <Link
+              href="/dash"
+              className="w-full inline-block py-2.5 px-4 rounded-xl bg-primary text-on-primary font-mono text-xs font-bold hover:opacity-95 shadow-md"
+            >
+              View on Dashboard
             </Link>
           </div>
         ) : (
