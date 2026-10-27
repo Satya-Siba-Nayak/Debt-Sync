@@ -108,11 +108,14 @@ Implemented in `src/app/share/page.tsx` and transaction detail drawers:
 
 ## 5. Public Website, Legal Pages & Session-Aware Browsing (`?home=true`)
 
-### Public Routes
+### Public Routes & Sitemap (`public/sitemap.xml` & `public/robots.txt`)
 - **`/` (`src/app/page.tsx`)**: Full product landing page with interactive Desktop & Mobile screenshot showcase (`public/screenshots/`), 3-step workflow guide, live Public Share Receipt demo, FAQ, and theme toggle.
+- **`/signup` & `/login` (`src/app/(auth)/`)**: Passwordless Magic Link, Google OAuth, and credential authentication with redirect query parameter preservation.
+- **`/share` & `/accept`**: Public receipt verification portal (including the live sample receipt `/share?id=81d9115e-d237-49eb-8be5-16bb3a9ea408&token=gsh_hitjra5bqn7dy2tsdf`) and bilateral agreement acceptance portal.
 - **`/terms` (`src/app/terms/page.tsx`)**: Comprehensive Terms of Service covering P2P ledger consensus, informational non-custodial nature, and user conduct.
 - **`/privacy` (`src/app/privacy/page.tsx`)**: Digital Personal Data Protection (DPDP) Act compliant Privacy Policy detailing RLS isolation, public link masking, and 48-hour account/data deletion rights.
 - **`/contact` (`src/app/contact/page.tsx`)**: Support & Inquiry center with dynamic category routing (`General Website Inquiry`, `Account & Login Support`, `Privacy / Data Deletion Request`, `Bug / Security Report`, `Feedback & Feature Request`).
+- **SEO Sitemap & Crawler Rules**: `public/sitemap.xml` indexes all public routes and product showcase images (`xmlns:image`), while `public/robots.txt` explicitly allows public pages/screenshots and disallows private authenticated workspace routes (`/dash`, `/transactions`, `/directory`, `/analytics`, `/settings`, `/admin`, `/api/`).
 
 ### Session-Aware Website Browsing for Logged-In Users
 - **First-Visit Dashboard Redirect**: When an authenticated user opens the app fresh (`/`), they are automatically directed to `/dash` so the PWA opens straight into their workspace.

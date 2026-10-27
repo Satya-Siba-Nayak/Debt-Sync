@@ -1,39 +1,97 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset
+  xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+  xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"
+>
+  <!-- Primary Public Landing Page & Product Showcase -->
   <url>
     <loc>https://debt-sync.satya-nayak.dev/</loc>
-    <lastmod>2026-10-23</lastmod>
+    <lastmod>2026-10-27</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
+    <image:image>
+      <image:loc>https://debt-sync.satya-nayak.dev/screenshots/dashboard-desktop.png</image:loc>
+      <image:title>DebtSync — Peer-to-Peer Ledger &amp; Live Interest Dashboard</image:title>
+      <image:caption>Real-time peer-to-peer debt ledger, live APR interest ticker, and net position command center.</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://debt-sync.satya-nayak.dev/screenshots/analytics-desktop-scrollup.png</image:loc>
+      <image:title>DebtSync — Server-Calibrated Network Trust Score (300–850) &amp; Analytics</image:title>
+      <image:caption>4-pillar server-calibrated Network Trust Score, 6-month liquidity forecast, and repayment velocity.</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://debt-sync.satya-nayak.dev/screenshots/directory-desktop.png</image:loc>
+      <image:title>DebtSync — Counterparty Directory &amp; Peer Trust Profiles</image:title>
+      <image:caption>Peer network directory with verified badges, shadow profile merging, and per-contact net balances.</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://debt-sync.satya-nayak.dev/screenshots/debt-detail-upscroll-desktop.png</image:loc>
+      <image:title>DebtSync — Bilateral Agreement Detail &amp; Verified Repayment History</image:title>
+      <image:caption>Detailed ledger view with continuous interest accrual, verified repayment receipts, and QR settlement.</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://debt-sync.satya-nayak.dev/screenshots/split-bill-mobile.png</image:loc>
+      <image:title>DebtSync — Equal &amp; Custom Group Split Bills</image:title>
+      <image:caption>Split group bills across multiple peers with automatic per-member ledger generation.</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://debt-sync.satya-nayak.dev/screenshots/share-public-mobile.png</image:loc>
+      <image:title>DebtSync — Read-Only Public Share Receipt with Privacy Masking</image:title>
+      <image:caption>Cryptographic public share receipt with masked emails and verified ledger proof.</image:caption>
+    </image:image>
+  </url>
+
+  <!-- Authentication & Onboarding -->
+  <url>
+    <loc>https://debt-sync.satya-nayak.dev/signup</loc>
+    <lastmod>2026-10-27</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://debt-sync.satya-nayak.dev/login</loc>
+    <lastmod>2026-10-27</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+
+  <!-- Live Sample Public Share Receipt & Verification Portal -->
+  <url>
+    <loc>https://debt-sync.satya-nayak.dev/share?id=81d9115e-d237-49eb-8be5-16bb3a9ea408&amp;token=gsh_hitjra5bqn7dy2tsdf</loc>
+    <lastmod>2026-10-27</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://debt-sync.satya-nayak.dev/share</loc>
+    <lastmod>2026-10-27</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://debt-sync.satya-nayak.dev/accept</loc>
+    <lastmod>2026-10-27</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.6</priority>
+  </url>
+
+  <!-- Support, Legal & DPDP Compliance Pages -->
+  <url>
+    <loc>https://debt-sync.satya-nayak.dev/contact</loc>
+    <lastmod>2026-10-27</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
   </url>
   <url>
     <loc>https://debt-sync.satya-nayak.dev/privacy</loc>
-    <lastmod>2026-10-23</lastmod>
+    <lastmod>2026-10-27</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://debt-sync.satya-nayak.dev/terms</loc>
-    <lastmod>2026-10-23</lastmod>
+    <lastmod>2026-10-27</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://debt-sync.satya-nayak.dev/contact</loc>
-    <lastmod>2026-10-23</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://debt-sync.satya-nayak.dev/login</loc>
-    <lastmod>2026-10-23</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.5</priority>
-  </url>
-  <url>
-    <loc>https://debt-sync.satya-nayak.dev/signup</loc>
-    <lastmod>2026-10-23</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
   </url>
 </urlset>

@@ -1,16 +1,21 @@
 # https://www.robotstxt.org/robotstxt.html
 User-agent: *
 Allow: /
+Allow: /signup
+Allow: /login
 Allow: /privacy
 Allow: /terms
 Allow: /contact
 Allow: /share
+Allow: /accept
+Allow: /screenshots/
 Disallow: /dash
 Disallow: /admin
 Disallow: /settings
 Disallow: /transactions
 Disallow: /directory
 Disallow: /analytics
+Disallow: /auth/
 Disallow: /api/
 
 Sitemap: https://debt-sync.satya-nayak.dev/sitemap.xml
