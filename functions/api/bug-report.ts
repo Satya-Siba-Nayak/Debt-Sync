@@ -9,8 +9,61 @@ interface Env {
   DISCORD_CONTACT_WEBHOOK_URI?: string;
 }
 
+// Rate limiting for Cloudflare Worker instance: max 5 reports per hour per IP / identifier
+const rateLimitMap = new Map<string, number[]>();
+const RATE_LIMIT_WINDOW = 60 * 60 * 1000; // 1 hour
+const MAX_REPORTS_PER_WINDOW = 5;
+const MAX_FILES = 5;
+const MAX_TOTAL_BYTES = 25 * 1024 * 1024; // 25 MB
+
+function sanitizeDiscordText(input: string, maxLen = 1500): string {
+  const cleaned = input
+    .replace(/@everyone/gi, '@\u200beveryone')
+    .replace(/@here/gi, '@\u200bhere')
+    .replace(/<@&\d+>/g, '@role')
+    .trim();
+  return cleaned.length > maxLen ? `${cleaned.slice(0, maxLen)}...` : cleaned;
+}
+
+function isMultiKeyRateLimited(keys: string[]): boolean {
+  const now = Date.now();
+  const validKeys = Array.from(new Set(keys.filter(Boolean)));
+
+  for (const key of validKeys) {
+    const timestamps = (rateLimitMap.get(key) || []).filter((t) => now - t < RATE_LIMIT_WINDOW);
+    if (timestamps.length >= MAX_REPORTS_PER_WINDOW) {
+      rateLimitMap.set(key, timestamps);
+      return true;
+    }
+  }
+
+  for (const key of validKeys) {
+    const timestamps = (rateLimitMap.get(key) || []).filter((t) => now - t < RATE_LIMIT_WINDOW);
+    timestamps.push(now);
+    rateLimitMap.set(key, timestamps);
+  }
+
+  return false;
+}
+
 export const onRequestPost = async (context: { request: Request; env: Env }) => {
   try {
+    // Same-origin / Referer verification against external cross-site spam bots
+    const origin = context.request.headers.get('origin') || '';
+    const referer = context.request.headers.get('referer') || '';
+    if (origin && !origin.includes('satya-nayak.dev') && !origin.includes('pages.dev') && !origin.includes('localhost')) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Forbidden origin.' }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    if (!origin && referer && !referer.includes('satya-nayak.dev') && !referer.includes('pages.dev') && !referer.includes('localhost')) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Forbidden referer.' }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
     const contentType = context.request.headers.get('content-type') || '';
     let reportData: Record<string, unknown>;
     const uploadedFiles: File[] = [];
@@ -49,6 +102,21 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       reportData = await context.request.json();
     }
 
+    if (uploadedFiles.length > MAX_FILES) {
+      return new Response(
+        JSON.stringify({ success: false, error: `Maximum ${MAX_FILES} attachments allowed per report.` }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const totalSize = uploadedFiles.reduce((acc, f) => acc + (f.size || 0), 0);
+    if (totalSize > MAX_TOTAL_BYTES) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Total attachment size exceeds 25 MB limit.' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
     const category = String(reportData.category || 'bug');
     const description = String(reportData.description || '');
     const errorMessage = reportData.errorMessage as string | null | undefined;
@@ -56,11 +124,32 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
     const device = reportData.device as Record<string, unknown> | undefined;
     const userName = String(reportData.userName || '');
     const userEmail = String(reportData.userEmail || '');
+    const userId = String(reportData.userId || '');
 
     if (!description?.trim()) {
       return new Response(
         JSON.stringify({ success: false, error: 'Please provide a brief description of what happened.' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const ip =
+      context.request.headers.get('cf-connecting-ip') ||
+      context.request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+      'anon';
+    const rateKeys = [
+      ip !== 'anon' ? `ip:${ip}` : '',
+      userId ? `uid:${userId.slice(0, 64)}` : '',
+      userEmail ? `email:${userEmail.toLowerCase().trim().slice(0, 120)}` : '',
+    ];
+
+    if (isMultiKeyRateLimited(rateKeys)) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'You have reached the hourly report limit. Please wait a while before sending more reports.',
+        }),
+        { status: 429, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
@@ -85,15 +174,23 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       title = '💡 Feature Idea & Feedback';
     }
 
+    const safeUserName = sanitizeDiscordText(userName, 100);
+    const safeUserEmail = sanitizeDiscordText(userEmail, 120);
+    const safeRoute = sanitizeDiscordText(route, 200);
+
     const fields: Array<{ name: string; value: string; inline?: boolean }> = [
       {
         name: '👤 Reporter',
-        value: userName ? `**${userName}**\n${userEmail || 'No email'}` : userEmail ? `**${userEmail}**` : 'Anonymous User',
+        value: safeUserName
+          ? `**${safeUserName}**\n${safeUserEmail || 'No email'}`
+          : safeUserEmail
+          ? `**${safeUserEmail}**`
+          : 'Anonymous User',
         inline: true,
       },
       {
         name: '📍 Page Route',
-        value: route ? `\`${route}\`` : '`Unknown`',
+        value: safeRoute ? `\`${safeRoute}\`` : '`Unknown`',
         inline: true,
       },
     ];
@@ -113,13 +210,13 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
 
       fields.push({
         name: '🖥️ System & Environment Diagnostics',
-        value: specs.length > 1000 ? specs.slice(0, 1000) + '...' : specs,
+        value: sanitizeDiscordText(specs, 1000),
         inline: false,
       });
     }
 
     if (errorMessage?.trim()) {
-      const truncated = errorMessage.length > 950 ? errorMessage.slice(0, 950) + '...' : errorMessage;
+      const truncated = sanitizeDiscordText(errorMessage, 950);
       fields.push({
         name: '⚠️ In-Error Banner Message',
         value: `\`\`\`${truncated}\`\`\``,
@@ -128,7 +225,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
     }
 
     if (Array.isArray(device?.recentErrors) && device.recentErrors.length > 0) {
-      const errorDump = (device.recentErrors as string[]).join('\n').slice(0, 950);
+      const errorDump = sanitizeDiscordText((device.recentErrors as string[]).join('\n'), 950);
       fields.push({
         name: '📜 Recent Runtime JavaScript Errors',
         value: `\`\`\`${errorDump}\`\`\``,
@@ -138,7 +235,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
 
     if (uploadedFiles.length > 0) {
       const fileSummary = uploadedFiles
-        .map((f, i) => `#${i + 1} **${f.name}** (${(f.size / (1024 * 1024)).toFixed(2)} MB • ${f.type || 'file'})`)
+        .map((f, i) => `#${i + 1} **${sanitizeDiscordText(f.name, 80)}** (${(f.size / (1024 * 1024)).toFixed(2)} MB • ${f.type || 'file'})`)
         .join('\n');
       fields.push({
         name: `📎 Attached Media (${uploadedFiles.length} file${uploadedFiles.length > 1 ? 's' : ''})`,
@@ -156,7 +253,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
     const embed: Record<string, unknown> = {
       title,
       color,
-      description: `### User Note\n${description.trim()}`,
+      description: `### User Note\n${sanitizeDiscordText(description, 1800)}`,
       fields,
       footer: {
         text: 'DebtSync Cloudflare Edge • Live Telemetry',
@@ -172,6 +269,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       username: 'DebtSync Telemetry',
       avatar_url: 'https://raw.githubusercontent.com/Satya-Siba-Nayak/Debt-Sync/main/public/icon.svg',
       embeds: [embed],
+      allowed_mentions: { parse: [] },
     };
 
     let discordRes: Response;

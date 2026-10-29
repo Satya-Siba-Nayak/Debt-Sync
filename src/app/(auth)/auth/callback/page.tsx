@@ -7,9 +7,9 @@ import { claimUserProfile } from '@/lib/utils/claim-profile';
 
 function sanitizeRedirectDest(raw: string | null | undefined): string {
   if (!raw) return '/dash';
-  let target = raw.trim();
+  let target = raw.trim().replace(/[\u0000-\u001F\u007F]/g, '');
   try {
-    if (target.includes('%2F') || target.includes('%2f')) {
+    if (target.includes('%2F') || target.includes('%2f') || target.includes('%5C') || target.includes('%5c')) {
       target = decodeURIComponent(target);
     }
   } catch (_) {}
@@ -17,13 +17,17 @@ function sanitizeRedirectDest(raw: string | null | undefined): string {
   if (target.startsWith('http://') || target.startsWith('https://')) {
     try {
       const parsed = new URL(target);
-      return `${parsed.pathname}${parsed.search}${parsed.hash}` || '/dash';
+      const rel = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+      if (rel.startsWith('/') && !rel.startsWith('//') && !rel.startsWith('/\\')) {
+        return rel === '/' ? '/dash' : rel;
+      }
+      return '/dash';
     } catch (_) {
       return '/dash';
     }
   }
 
-  if (target.startsWith('/') && !target.startsWith('//')) {
+  if (target.startsWith('/') && !target.startsWith('//') && !target.startsWith('/\\')) {
     return target === '/' ? '/dash' : target;
   }
   return '/dash';

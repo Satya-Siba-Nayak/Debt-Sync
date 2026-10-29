@@ -101,7 +101,7 @@ EMAIL_FROM=DebtSync <notifications@debt-sync.satya-nayak.dev>
 ```
 
 ### 3. Apply Supabase Migrations
-Run the SQL migrations in `supabase/migrations/` (`001_initial_schema.sql` through `027_server_dynamic_network_score.sql`) in your **Supabase Dashboard → SQL Editor**.
+Run the SQL migrations in `supabase/migrations/` (`001_initial_schema.sql` through `028_security_hardening_and_loophole_fixes.sql`) in your **Supabase Dashboard → SQL Editor**.
 
 ### 4. Run Development Server & Verify Build
 ```bash
@@ -124,7 +124,7 @@ Debt-Sync/
 │   ├── screenshots/         # Product showcase screenshots (Desktop & Mobile)
 │   └── sw.js                # Web Push & PWA Service Worker
 ├── supabase/
-│   └── migrations/          # PostgreSQL schema, RLS policies & RPC migrations (001–027)
+│   └── migrations/          # PostgreSQL schema, RLS policies & RPC migrations (001–028)
 └── src/
     ├── app/
     │   ├── (auth)/          # /login, /signup, /accept

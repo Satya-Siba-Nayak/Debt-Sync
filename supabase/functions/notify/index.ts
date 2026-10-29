@@ -72,9 +72,13 @@ function timingSafeEqual(a: string, b: string): boolean {
 
 async function getUnsubscribeHmac(userId: string): Promise<string> {
   const encoder = new TextEncoder();
+  const secretMaterial = WEBHOOK_SECRET || SERVICE_KEY;
+  if (!secretMaterial) {
+    throw new Error('Missing cryptographic secret for unsubscribe HMAC.');
+  }
   const key = await crypto.subtle.importKey(
     'raw',
-    encoder.encode(WEBHOOK_SECRET || 'debtsync_notif_secret_2026_prod'),
+    encoder.encode(secretMaterial),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign']

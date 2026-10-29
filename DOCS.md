@@ -155,8 +155,9 @@ Implemented in `src/app/(auth)/signup/page.tsx`, `src/app/(auth)/login/page.tsx`
 
 To prevent webhook URL harvesting when the repository is public on GitHub:
 - **Zero Client / Repo Exposure**:
-  - Webhook URLs are never hardcoded in source files or prefixed with `NEXT_PUBLIC_`.
-  - Both `/api/contact` (`src/app/api/contact/route.ts`) and `/api/bug-report` (`src/app/api/bug-report/route.ts`) read `process.env.DISCORD_WEBHOOK_URL || process.env.DISCORD_BUG_WEBHOOK_URL` exclusively on the server.
+  - Webhook URLs are **never** hardcoded in source files, `wrangler.toml`, or prefixed with `NEXT_PUBLIC_`. (Automated GitHub bots such as `FriendlyScanner` scrape public repositories and immediately revoke exposed Discord webhooks.)
+  - Instead, `DISCORD_WEBHOOK_URL` is stored exclusively as an **Encrypted Secret** in Cloudflare Pages (`npx wrangler pages secret put DISCORD_WEBHOOK_URL --project-name=debt-sync` or Cloudflare Dashboard → Settings → Variables and Secrets) and in `.env.local` / `.dev.vars` (gitignored) for local development.
+  - Both `/api/contact` (`functions/api/contact.ts` & `src/app/api/contact/route.ts`) and `/api/bug-report` (`functions/api/bug-report.ts` & `src/app/api/bug-report/route.ts`) read `DISCORD_WEBHOOK_URL` exclusively at the server/edge runtime, enforce `allowed_mentions: { parse: [] }`, and strip `@everyone` / `@here` role pings.
 - **Public Contact Inquiry Routing (`/api/contact`)**:
   - Routes website inquiries directly to the server-side Discord webhook embed.
   - **Conditional Field Requirements**: For general inquiries (`general_inquiry` / `feedback`), phone number and additional metadata are **optional**—only `email`, `name`, and `message` are required.
@@ -194,7 +195,7 @@ All components adhere to the strict responsive standards in [`AGENTS.md`](file:/
 
 ---
 
-## 11. Supabase Database Schema & Migrations (`001` – `027`)
+## 11. Supabase Database Schema & Migrations (`001` – `028`)
 
 All SQL migrations are stored sequentially in `supabase/migrations/`:
 
@@ -209,6 +210,7 @@ All SQL migrations are stored sequentially in `supabase/migrations/`:
 | `018` – `022` | Auto-connect on accept, anti-spam guards, admin purge tombstones, ghost profile resolution |
 | `023` – `026` | Web Push subscriptions, notification preferences, pending debt & due-date reminder RPCs |
 | `027_server_dynamic_network_score.sql` | **Server-calibrated dynamic Network Trust Score (`300–850`) RPCs** (`calculate_user_trust_score` & `get_batch_trust_scores`) |
+| `028_security_hardening_and_loophole_fixes.sql` | **Full-system RLS, Trigger & RPC security hardening** (profile privilege escalation guard, debt state & self-accept guard, payment verification integrity trigger, ghost profile phone ownership guard, and anonymous RPC email/note redaction) |
 
 ---
 

@@ -9,27 +9,61 @@ interface Env {
   DISCORD_WEBHOOK_URI?: string;
 }
 
-// Rate limit memory for Cloudflare Worker instance: 2 per 24 hours
+// Rate limit memory for Cloudflare Worker instance: 2 per 24 hours across IP, Device ID, and Email
 const rateLimitMap = new Map<string, number[]>();
 const RATE_LIMIT_WINDOW = 24 * 60 * 60 * 1000;
 const MAX_INQUIRIES_PER_WINDOW = 2;
 
-function isRateLimited(identifier: string): boolean {
-  const now = Date.now();
-  const timestamps = rateLimitMap.get(identifier) || [];
-  const validTimestamps = timestamps.filter((t) => now - t < RATE_LIMIT_WINDOW);
+function sanitizeDiscordText(input: string, maxLen = 1800): string {
+  const cleaned = input
+    .replace(/@everyone/gi, '@\u200beveryone')
+    .replace(/@here/gi, '@\u200bhere')
+    .replace(/<@&\d+>/g, '@role')
+    .trim();
+  return cleaned.length > maxLen ? `${cleaned.slice(0, maxLen)}...` : cleaned;
+}
 
-  if (validTimestamps.length >= MAX_INQUIRIES_PER_WINDOW) {
-    return true;
+function isMultiKeyRateLimited(keys: string[]): boolean {
+  const now = Date.now();
+  const validKeys = Array.from(new Set(keys.filter(Boolean)));
+
+  // 1. Check if ANY of the keys (IP, Device ID, Email, Cookie) has reached the 2/24h limit
+  for (const key of validKeys) {
+    const timestamps = (rateLimitMap.get(key) || []).filter((t) => now - t < RATE_LIMIT_WINDOW);
+    if (timestamps.length >= MAX_INQUIRIES_PER_WINDOW) {
+      rateLimitMap.set(key, timestamps);
+      return true;
+    }
   }
 
-  validTimestamps.push(now);
-  rateLimitMap.set(identifier, validTimestamps);
+  // 2. Record the attempt against all keys
+  for (const key of validKeys) {
+    const timestamps = (rateLimitMap.get(key) || []).filter((t) => now - t < RATE_LIMIT_WINDOW);
+    timestamps.push(now);
+    rateLimitMap.set(key, timestamps);
+  }
+
   return false;
 }
 
 export const onRequestPost = async (context: { request: Request; env: Env }) => {
   try {
+    // Same-origin / Referer verification against external cross-site spam bots
+    const origin = context.request.headers.get('origin') || '';
+    const referer = context.request.headers.get('referer') || '';
+    if (origin && !origin.includes('satya-nayak.dev') && !origin.includes('pages.dev') && !origin.includes('localhost')) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Forbidden origin.' }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    if (!origin && referer && !referer.includes('satya-nayak.dev') && !referer.includes('pages.dev') && !referer.includes('localhost')) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Forbidden referer.' }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
     const body: Record<string, unknown> = await context.request.json().catch(() => ({}));
     const fullName = body.fullName as string | undefined;
     const email = body.email as string | undefined;
@@ -38,7 +72,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
     const message = body.message as string | undefined;
     const optInCommunications = body.optInCommunications as boolean | undefined;
 
-    if (!email?.trim() || !email.includes('@') || !message?.trim()) {
+    if (!email?.trim() || !email.includes('@') || email.length > 254 || !message?.trim()) {
       return new Response(
         JSON.stringify({ success: false, error: 'Please provide a valid email address and your message.' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
@@ -52,12 +86,35 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       );
     }
 
-    const deviceId = context.request.headers.get('x-device-id') || '';
-    const ip = context.request.headers.get('cf-connecting-ip') || context.request.headers.get('x-forwarded-for') || 'anon';
+    const deviceId = (context.request.headers.get('x-device-id') || '').slice(0, 128);
+    const ip =
+      context.request.headers.get('cf-connecting-ip') ||
+      context.request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+      'anon';
     const cleanEmail = email.toLowerCase().trim();
-    const rateKey = deviceId ? `dev:${deviceId}` : `ip:${ip}:${cleanEmail}`;
 
-    if (isRateLimited(rateKey)) {
+    // Parse HttpOnly quota cookie if present
+    const cookieHeader = context.request.headers.get('cookie') || '';
+    const cookieMatch = cookieHeader.match(/(?:^|;\s*)ds_contact_q=(\d+):(\d+)/);
+    const now = Date.now();
+    let cookieCount = 0;
+    let cookieWindowStart = now;
+    if (cookieMatch) {
+      const parsedCount = Number(cookieMatch[1]);
+      const parsedStart = Number(cookieMatch[2]);
+      if (Number.isFinite(parsedCount) && Number.isFinite(parsedStart) && now - parsedStart < RATE_LIMIT_WINDOW) {
+        cookieCount = parsedCount;
+        cookieWindowStart = parsedStart;
+      }
+    }
+
+    const rateKeys = [
+      ip !== 'anon' ? `ip:${ip}` : '',
+      deviceId ? `dev:${deviceId}` : '',
+      `email:${cleanEmail}`,
+    ];
+
+    if (cookieCount >= MAX_INQUIRIES_PER_WINDOW || isMultiKeyRateLimited(rateKeys)) {
       return new Response(
         JSON.stringify({
           success: false,
@@ -73,7 +130,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       rcs_sms: '📡 Telecom / Carrier / RCS Inquiry',
       general: '💬 General Feedback & Partnerships',
     };
-    const categoryLabel = categoryLabels[category || ''] || category || 'General Inquiry';
+    const categoryLabel = categoryLabels[category || ''] || sanitizeDiscordText(String(category || 'General Inquiry'), 80);
 
     const webhookUrl = resolveDiscordWebhookUrl(context.env as Record<string, string | undefined>, 'contact');
     if (!webhookUrl) {
@@ -86,15 +143,20 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       );
     }
 
+    const safeName = sanitizeDiscordText(fullName?.trim() || 'Website Visitor', 120);
+    const safeEmail = sanitizeDiscordText(cleanEmail, 160);
+    const safePhone = phone?.trim() ? `\`${sanitizeDiscordText(phone.trim(), 40)}\`` : '_Not Provided (Email Only)_';
+    const safeMessage = sanitizeDiscordText(message.trim(), 1800);
+
     const fields = [
       {
         name: '👤 Inquirer',
-        value: `**${fullName?.trim() || 'Website Visitor'}**\n📧 \`${cleanEmail}\``,
+        value: `**${safeName}**\n📧 \`${safeEmail}\``,
         inline: true,
       },
       {
         name: '📱 Phone',
-        value: phone?.trim() ? `\`${phone.trim()}\`` : '_Not Provided (Email Only)_',
+        value: safePhone,
         inline: true,
       },
       {
@@ -104,7 +166,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       },
       {
         name: '💬 Inquiry Message',
-        value: message.trim().length > 1800 ? message.trim().slice(0, 1800) + '...' : message.trim(),
+        value: safeMessage,
         inline: false,
       },
       {
@@ -127,7 +189,10 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
     const discordRes = await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ embeds: [embed] }),
+      body: JSON.stringify({
+        embeds: [embed],
+        allowed_mentions: { parse: [] },
+      }),
     });
 
     if (!discordRes.ok && discordRes.status !== 204) {
@@ -141,9 +206,16 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       );
     }
 
+    const nextCookieVal = `${cookieCount + 1}:${cookieWindowStart}`;
     return new Response(
       JSON.stringify({ success: true, message: 'Inquiry successfully delivered to Discord.' }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } }
+      {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Set-Cookie': `ds_contact_q=${nextCookieVal}; Max-Age=86400; Path=/; HttpOnly; SameSite=Lax; Secure`,
+        },
+      }
     );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'An error occurred while submitting inquiry.';

@@ -10,22 +10,38 @@ interface ContactInquiryData {
   optInCommunications: boolean;
 }
 
-// Rate limiting: strict 2 inquiries per 24 hours (86,400,000 ms) per device / IP / email
+// Rate limiting: strict 2 inquiries per 24 hours (86,400,000 ms) per device, IP, AND email
 const rateLimitMap = new Map<string, number[]>();
 const RATE_LIMIT_WINDOW = 24 * 60 * 60 * 1000; // 24 hours
 const MAX_INQUIRIES_PER_WINDOW = 2; // max 2 per day
 
-function isRateLimited(identifier: string): boolean {
-  const now = Date.now();
-  const timestamps = rateLimitMap.get(identifier) || [];
-  const validTimestamps = timestamps.filter((t) => now - t < RATE_LIMIT_WINDOW);
+function sanitizeDiscordText(input: string, maxLen = 1800): string {
+  const cleaned = input
+    .replace(/@everyone/gi, '@\u200beveryone')
+    .replace(/@here/gi, '@\u200bhere')
+    .replace(/<@&\d+>/g, '@role')
+    .trim();
+  return cleaned.length > maxLen ? `${cleaned.slice(0, maxLen)}...` : cleaned;
+}
 
-  if (validTimestamps.length >= MAX_INQUIRIES_PER_WINDOW) {
-    return true;
+function isMultiKeyRateLimited(keys: string[]): boolean {
+  const now = Date.now();
+  const validKeys = Array.from(new Set(keys.filter(Boolean)));
+
+  for (const key of validKeys) {
+    const timestamps = (rateLimitMap.get(key) || []).filter((t) => now - t < RATE_LIMIT_WINDOW);
+    if (timestamps.length >= MAX_INQUIRIES_PER_WINDOW) {
+      rateLimitMap.set(key, timestamps);
+      return true;
+    }
   }
 
-  validTimestamps.push(now);
-  rateLimitMap.set(identifier, validTimestamps);
+  for (const key of validKeys) {
+    const timestamps = (rateLimitMap.get(key) || []).filter((t) => now - t < RATE_LIMIT_WINDOW);
+    timestamps.push(now);
+    rateLimitMap.set(key, timestamps);
+  }
+
   return false;
 }
 
@@ -35,7 +51,7 @@ export async function POST(request: NextRequest) {
     const { fullName, email, phone, category, message, optInCommunications } = body;
 
     // Only email and message are compulsory
-    if (!email?.trim() || !email.includes('@') || !message?.trim()) {
+    if (!email?.trim() || !email.includes('@') || email.length > 254 || !message?.trim()) {
       return NextResponse.json(
         { success: false, error: 'Please provide a valid email address and your message.' },
         { status: 400 }
@@ -49,14 +65,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const deviceId = request.headers.get('x-device-id') || '';
-    const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'anon';
+    const deviceId = (request.headers.get('x-device-id') || '').slice(0, 128);
+    const ip =
+      request.headers.get('cf-connecting-ip') ||
+      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+      request.headers.get('x-real-ip') ||
+      'anon';
     const cleanEmail = email.toLowerCase().trim();
 
-    // Key by device ID if present, else fallback to IP + email
-    const rateKey = deviceId ? `dev:${deviceId}` : `ip:${ip}:${cleanEmail}`;
+    const rateKeys = [
+      ip !== 'anon' ? `ip:${ip}` : '',
+      deviceId ? `dev:${deviceId}` : '',
+      `email:${cleanEmail}`,
+    ];
 
-    if (isRateLimited(rateKey)) {
+    if (isMultiKeyRateLimited(rateKeys)) {
       return NextResponse.json(
         {
           success: false,
@@ -73,11 +96,11 @@ export async function POST(request: NextRequest) {
       rcs_sms: '📡 Telecom / Carrier / RCS Inquiry',
       general: '💬 General Feedback & Partnerships',
     };
-    const categoryLabel = categoryLabels[category] || category || 'General Inquiry';
+    const categoryLabel = categoryLabels[category] || sanitizeDiscordText(String(category || 'General Inquiry'), 80);
 
     const webhookUrl = resolveDiscordWebhookFromProcess('contact');
     if (!webhookUrl) {
-      console.error('[Contact Route] Discord webhook is not configured (set DISCORD_WEBHOOK_URL or DISCORD_BUG_WEBHOOK_URI on the server).');
+      console.error('[Contact Route] Discord webhook is not configured (set DISCORD_WEBHOOK_URL on the server).');
       return NextResponse.json(
         {
           success: false,
@@ -87,15 +110,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const safeName = sanitizeDiscordText(fullName?.trim() || 'Website Visitor', 120);
+    const safeEmail = sanitizeDiscordText(cleanEmail, 160);
+    const safePhone = phone?.trim() ? `\`${sanitizeDiscordText(phone.trim(), 40)}\`` : '_Not Provided (Email Only)_';
+    const safeMessage = sanitizeDiscordText(message.trim(), 1800);
+
     const fields = [
       {
         name: '👤 Inquirer',
-        value: `**${fullName?.trim() || 'Website Visitor'}**\n📧 \`${cleanEmail}\``,
+        value: `**${safeName}**\n📧 \`${safeEmail}\``,
         inline: true,
       },
       {
         name: '📱 Phone',
-        value: phone?.trim() ? `\`${phone.trim()}\`` : '_Not Provided (Email Only)_',
+        value: safePhone,
         inline: true,
       },
       {
@@ -105,7 +133,7 @@ export async function POST(request: NextRequest) {
       },
       {
         name: '💬 Inquiry Message',
-        value: message.trim().length > 1800 ? message.trim().slice(0, 1800) + '...' : message.trim(),
+        value: safeMessage,
         inline: false,
       },
       {
@@ -129,7 +157,10 @@ export async function POST(request: NextRequest) {
       await fetch(webhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ embeds: [embed] }),
+        body: JSON.stringify({
+          embeds: [embed],
+          allowed_mentions: { parse: [] },
+        }),
       });
     } catch (discordErr) {
       console.warn('[Contact Route] Discord webhook dispatch warning:', discordErr);

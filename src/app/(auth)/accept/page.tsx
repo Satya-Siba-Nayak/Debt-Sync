@@ -10,7 +10,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { BrandLogo } from '@/components/ui/BrandLogo';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { respondToDebtAgreement } from '@/lib/utils/debt-acceptance';
-import { parseSplitDetails, getCleanDebtNotes } from '@/lib/utils/split-bills';
+import { parseSplitDetails, getCleanDebtNotes, isUserParticipantInDebt } from '@/lib/utils/split-bills';
 import Link from 'next/link';
 
 function extractAcceptDebtId(searchParams: URLSearchParams | null): string {
@@ -92,6 +92,8 @@ function AcceptDebtContent() {
   const [actionLoading, setActionLoading] = useState(false);
   const [debt, setDebt] = useState<any>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [secondaryEmails, setSecondaryEmails] = useState<string[]>([]);
+  const [isAdminUser, setIsAdminUser] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -110,6 +112,15 @@ function AcceptDebtContent() {
 
         if (user) {
           await claimUserProfile(user);
+          const { data: profileRow } = await supabase
+            .from('profiles')
+            .select('secondary_emails, is_admin, is_super_admin')
+            .eq('id', user.id)
+            .maybeSingle();
+          if (profileRow) {
+            setSecondaryEmails(profileRow.secondary_emails || []);
+            setIsAdminUser(Boolean(profileRow.is_admin || profileRow.is_super_admin));
+          }
         }
 
         // 1. Try secure RPC function (works even if user is not yet logged in)
@@ -239,7 +250,7 @@ function AcceptDebtContent() {
     );
   }
 
-  if (!currentUser && !debt) {
+  if (!currentUser) {
     return (
       <div className="min-h-screen bg-surface flex items-center justify-center p-4 md:p-6">
         <div className="w-full max-w-md bg-surface-container-lowest rounded-2xl p-6 md:p-8 border border-outline-variant/30 shadow-xl text-center space-y-4">
@@ -250,7 +261,7 @@ function AcceptDebtContent() {
             Sign In to Verify Agreement
           </h2>
           <p className="text-xs font-mono text-on-surface-variant">
-            Please sign in with your email to review and accept this debt agreement.
+            This agreement link is protected. Please sign in with your participating email address to review terms and accept or decline.
           </p>
           <Link
             href={`/login?next=${encodeURIComponent(`/accept?token=${debtId}`)}`}
@@ -258,6 +269,44 @@ function AcceptDebtContent() {
           >
             Sign In to Review &amp; Accept
           </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const isParticipant =
+    isAdminUser ||
+    isUserParticipantInDebt(debt, currentUser, secondaryEmails).isParticipant;
+
+  if (!isParticipant) {
+    return (
+      <div className="min-h-screen bg-surface flex items-center justify-center p-4 md:p-6">
+        <div className="w-full max-w-md bg-surface-container-lowest rounded-2xl p-6 md:p-8 border border-outline-variant/30 shadow-xl text-center space-y-4">
+          <span className="material-symbols-outlined text-4xl text-error">lock</span>
+          <h2 className="font-heading text-xl font-bold text-on-surface">
+            Participant Access Only
+          </h2>
+          <p className="text-xs font-mono text-on-surface-variant leading-relaxed">
+            You are signed in as <strong>{currentUser.email}</strong>, which is not a participating party on this agreement.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-2.5 pt-2">
+            <button
+              type="button"
+              onClick={async () => {
+                await supabase.auth.signOut();
+                router.push(`/login?next=${encodeURIComponent(`/accept?token=${debtId}`)}`);
+              }}
+              className="flex-1 py-2.5 px-4 rounded-xl bg-primary text-on-primary font-mono text-xs font-bold hover:opacity-95 cursor-pointer"
+            >
+              Switch Account
+            </button>
+            <Link
+              href="/dash"
+              className="flex-1 py-2.5 px-4 rounded-xl border border-outline-variant/40 text-on-surface font-mono text-xs font-semibold hover:bg-surface-container flex items-center justify-center"
+            >
+              Dashboard
+            </Link>
+          </div>
         </div>
       </div>
     );

@@ -36,20 +36,38 @@ interface BugReportData {
 
 // In-memory rate limiting map: identifier -> timestamp array
 const rateLimitMap = new Map<string, number[]>();
-const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
-const MAX_REPORTS_PER_WINDOW = 6;
+const RATE_LIMIT_WINDOW = 60 * 60 * 1000; // 1 hour
+const MAX_REPORTS_PER_WINDOW = 5;
+const MAX_FILES = 5;
+const MAX_TOTAL_BYTES = 25 * 1024 * 1024; // 25 MB
 
-function isRateLimited(identifier: string): boolean {
+function sanitizeDiscordText(input: string, maxLen = 1500): string {
+  const cleaned = input
+    .replace(/@everyone/gi, '@\u200beveryone')
+    .replace(/@here/gi, '@\u200bhere')
+    .replace(/<@&\d+>/g, '@role')
+    .trim();
+  return cleaned.length > maxLen ? `${cleaned.slice(0, maxLen)}...` : cleaned;
+}
+
+function isMultiKeyRateLimited(keys: string[]): boolean {
   const now = Date.now();
-  const timestamps = rateLimitMap.get(identifier) || [];
-  const validTimestamps = timestamps.filter((t) => now - t < RATE_LIMIT_WINDOW);
+  const validKeys = Array.from(new Set(keys.filter(Boolean)));
 
-  if (validTimestamps.length >= MAX_REPORTS_PER_WINDOW) {
-    return true;
+  for (const key of validKeys) {
+    const timestamps = (rateLimitMap.get(key) || []).filter((t) => now - t < RATE_LIMIT_WINDOW);
+    if (timestamps.length >= MAX_REPORTS_PER_WINDOW) {
+      rateLimitMap.set(key, timestamps);
+      return true;
+    }
   }
 
-  validTimestamps.push(now);
-  rateLimitMap.set(identifier, validTimestamps);
+  for (const key of validKeys) {
+    const timestamps = (rateLimitMap.get(key) || []).filter((t) => now - t < RATE_LIMIT_WINDOW);
+    timestamps.push(now);
+    rateLimitMap.set(key, timestamps);
+  }
+
   return false;
 }
 
@@ -92,6 +110,21 @@ export async function POST(request: NextRequest) {
       reportData = await request.json();
     }
 
+    if (uploadedFiles.length > MAX_FILES) {
+      return NextResponse.json(
+        { success: false, error: `Maximum ${MAX_FILES} attachments allowed per report.` },
+        { status: 400 }
+      );
+    }
+
+    const totalSize = uploadedFiles.reduce((acc, f) => acc + (f.size || 0), 0);
+    if (totalSize > MAX_TOTAL_BYTES) {
+      return NextResponse.json(
+        { success: false, error: 'Total attachment size exceeds 25 MB limit.' },
+        { status: 400 }
+      );
+    }
+
     const { category, description, errorMessage, route, device, userName, userEmail, userId } = reportData;
 
     if (!description?.trim()) {
@@ -101,10 +134,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const rateKey = userEmail || userId || request.headers.get('x-forwarded-for') || 'anon';
-    if (isRateLimited(rateKey)) {
+    const ip =
+      request.headers.get('cf-connecting-ip') ||
+      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+      request.headers.get('x-real-ip') ||
+      'anon';
+    const rateKeys = [
+      ip !== 'anon' ? `ip:${ip}` : '',
+      userId ? `uid:${userId.slice(0, 64)}` : '',
+      userEmail ? `email:${userEmail.toLowerCase().trim().slice(0, 120)}` : '',
+    ];
+
+    if (isMultiKeyRateLimited(rateKeys)) {
       return NextResponse.json(
-        { success: false, error: 'You are submitting reports too quickly. Please wait a moment.' },
+        { success: false, error: 'You have reached the hourly report limit. Please wait a moment before sending more reports.' },
         { status: 429 }
       );
     }
@@ -132,16 +175,24 @@ export async function POST(request: NextRequest) {
       title = '💡 Feature Idea & Feedback';
     }
 
+    const safeUserName = sanitizeDiscordText(userName || '', 100);
+    const safeUserEmail = sanitizeDiscordText(userEmail || '', 120);
+    const safeRoute = sanitizeDiscordText(route || '', 200);
+
     // Build rich fields
     const fields: Array<{ name: string; value: string; inline?: boolean }> = [
       {
         name: '👤 Reporter',
-        value: userName ? `**${userName}**\n${userEmail || 'No email'}` : userEmail ? `**${userEmail}**` : 'Anonymous User',
+        value: safeUserName
+          ? `**${safeUserName}**\n${safeUserEmail || 'No email'}`
+          : safeUserEmail
+          ? `**${safeUserEmail}**`
+          : 'Anonymous User',
         inline: true,
       },
       {
         name: '📍 Page Route',
-        value: route ? `\`${route}\`` : '`Unknown`',
+        value: safeRoute ? `\`${safeRoute}\`` : '`Unknown`',
         inline: true,
       },
     ];
@@ -161,13 +212,13 @@ export async function POST(request: NextRequest) {
 
       fields.push({
         name: '🖥️ System & Environment Diagnostics',
-        value: specs.length > 1000 ? specs.slice(0, 1000) + '...' : specs,
+        value: sanitizeDiscordText(specs, 1000),
         inline: false,
       });
     }
 
     if (errorMessage?.trim()) {
-      const truncated = errorMessage.length > 950 ? errorMessage.slice(0, 950) + '...' : errorMessage;
+      const truncated = sanitizeDiscordText(errorMessage, 950);
       fields.push({
         name: '⚠️ In-Error Banner Message',
         value: `\`\`\`${truncated}\`\`\``,
@@ -176,7 +227,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (device?.recentErrors && device.recentErrors.length > 0) {
-      const errorDump = device.recentErrors.join('\n').slice(0, 950);
+      const errorDump = sanitizeDiscordText(device.recentErrors.join('\n'), 950);
       fields.push({
         name: '📜 Recent Runtime JavaScript Errors',
         value: `\`\`\`${errorDump}\`\`\``,
@@ -186,7 +237,7 @@ export async function POST(request: NextRequest) {
 
     if (uploadedFiles.length > 0) {
       const fileSummary = uploadedFiles
-        .map((f, i) => `#${i + 1} **${f.name}** (${(f.size / (1024 * 1024)).toFixed(2)} MB • ${f.type || 'file'})`)
+        .map((f, i) => `#${i + 1} **${sanitizeDiscordText(f.name, 80)}** (${(f.size / (1024 * 1024)).toFixed(2)} MB • ${f.type || 'file'})`)
         .join('\n');
       fields.push({
         name: `📎 Attached Media (${uploadedFiles.length} file${uploadedFiles.length > 1 ? 's' : ''})`,
@@ -205,7 +256,7 @@ export async function POST(request: NextRequest) {
     const embed: any = {
       title,
       color,
-      description: `### User Note\n${description.trim()}`,
+      description: `### User Note\n${sanitizeDiscordText(description, 1800)}`,
       fields,
       footer: {
         text: 'DebtSync Live Telemetry & User Feedback',
@@ -221,6 +272,7 @@ export async function POST(request: NextRequest) {
       username: 'DebtSync Telemetry',
       avatar_url: 'https://raw.githubusercontent.com/Satya-Siba-Nayak/Debt-Sync/main/public/icon.svg',
       embeds: [embed],
+      allowed_mentions: { parse: [] },
     };
 
     let discordRes: Response;
