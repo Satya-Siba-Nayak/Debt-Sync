@@ -1,0 +1,7 @@
+name = "debtsync-reminders-cron"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+
+# Daily 03:30 UTC = 09:00 IST
+[triggers]
+crons = ["30 3 * * *"]

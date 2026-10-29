@@ -1,16 +1,16 @@
 /**
- * Cloudflare Pages scheduled handler — daily due-date reminder job.
- * Configure cron in wrangler.toml. Requires SUPABASE_SERVICE_ROLE_KEY + NEXT_PUBLIC_SUPABASE_URL on Pages.
+ * Standalone Cloudflare Worker — daily due-date reminders.
+ * Deploy: npm run deploy:cron (set secrets in Cloudflare first; see workers/debtsync-reminders-cron/README.md)
  */
 
-interface ScheduledEnv {
+export interface Env {
   NEXT_PUBLIC_SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
   DEBTSYNC_INTERNAL_API_SECRET?: string;
   NEXT_PUBLIC_APP_URL?: string;
 }
 
-async function runDueDateRemindersViaSupabase(env: ScheduledEnv): Promise<{ ok: boolean; detail: string }> {
+async function runDueDateRemindersViaSupabase(env: Env): Promise<{ ok: boolean; detail: string }> {
   const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL?.trim();
   const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY?.trim();
 
@@ -36,7 +36,7 @@ async function runDueDateRemindersViaSupabase(env: ScheduledEnv): Promise<{ ok: 
   return { ok: true, detail: text.slice(0, 500) };
 }
 
-async function runDueDateRemindersViaHttp(env: ScheduledEnv): Promise<{ ok: boolean; detail: string }> {
+async function runDueDateRemindersViaHttp(env: Env): Promise<{ ok: boolean; detail: string }> {
   const secret = env.DEBTSYNC_INTERNAL_API_SECRET?.trim();
   const appUrl = (env.NEXT_PUBLIC_APP_URL || 'https://debt-sync.satya-nayak.dev').replace(/\/$/, '');
 
@@ -59,26 +59,19 @@ async function runDueDateRemindersViaHttp(env: ScheduledEnv): Promise<{ ok: bool
   return { ok: true, detail: text.slice(0, 500) };
 }
 
-export async function onSchedule(context: { env: ScheduledEnv; cron: string }) {
-  const { env, cron } = context;
+export default {
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    let result = await runDueDateRemindersViaSupabase(env);
+    if (!result.ok) {
+      console.warn('[DebtSync cron] Supabase RPC failed:', result.detail);
+      result = await runDueDateRemindersViaHttp(env);
+    }
 
-  let result = await runDueDateRemindersViaSupabase(env);
-  if (!result.ok) {
-    console.warn('[DebtSync cron] Supabase RPC path failed:', result.detail);
-    result = await runDueDateRemindersViaHttp(env);
-  }
+    if (!result.ok) {
+      console.error('[DebtSync cron] Failed:', controller.cron, result.detail);
+      throw new Error(result.detail);
+    }
 
-  if (!result.ok) {
-    console.error('[DebtSync cron] Due-date reminders failed:', cron, result.detail);
-    return new Response(JSON.stringify({ success: false, error: result.detail }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  console.log('[DebtSync cron] Due-date reminders OK:', cron, result.detail);
-  return new Response(JSON.stringify({ success: true, cron, detail: result.detail }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
+    console.log('[DebtSync cron] OK:', controller.cron, result.detail);
+  },
+};

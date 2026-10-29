@@ -1,9 +1,5 @@
-# Cloudflare Pages — build output + daily due-date reminder cron (IST-friendly).
-# After deploy: Workers & Pages → Debt-Sync → Settings → verify Cron Triggers list appears.
+# Cloudflare Pages — static export directory only (Pages does NOT support [triggers] here).
+# Daily due-date cron runs on the separate Worker in workers/debtsync-reminders-cron/
 name = "debt-sync"
 compatibility_date = "2024-09-23"
 pages_build_output_dir = "out"
-
-# Daily at 03:30 UTC = 09:00 AM India (IST, UTC+5:30)
-[triggers]
-crons = ["30 3 * * *"]
