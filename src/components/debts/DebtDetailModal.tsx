@@ -809,54 +809,33 @@ export function DebtDetailModal({
           ? 'Email'
           : 'Push Notification';
 
-      // 1. Send Email if included
-      if (actualChannel === 'email' || actualChannel === 'both') {
-        const borrowerEmail = otherPerson?.email;
-        if (borrowerEmail && !borrowerEmail.endsWith('@phone.debtsync.local')) {
-          try {
-            await fetch('/api/notifications/email', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                type: 'payment_reminder',
-                recipientEmail: borrowerEmail,
-                recipientName: otherName,
-                senderName: myName,
+      // Legacy fallback only when the secure RPC is unavailable on this project.
+      if (!rpcSucceeded) {
+        try {
+          const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+          const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+          await fetch(`${supabaseUrl}/functions/v1/notify`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${supabaseAnonKey}`,
+              apikey: supabaseAnonKey,
+            },
+            body: JSON.stringify({
+              event: 'payment_reminder',
+              debt_id: debt.id,
+              actor_id: currentUserId,
+              details: {
+                channel: actualChannel,
                 amount: calc.currentBalance,
                 currency: debtCurrency,
-                debtId: debt.id,
-                notes: debt.notes ? getCleanDebtNotes(debt.notes) : undefined,
-              }),
-            });
-          } catch (_) {}
-        }
+                borrower_id: debt.borrower_id,
+                lender_id: debt.lender_id,
+              },
+            }),
+          });
+        } catch (_) {}
       }
-
-      // 2. Dispatch via notify Edge Function
-      try {
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-        const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-        await fetch(`${supabaseUrl}/functions/v1/notify`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${supabaseAnonKey}`,
-            apikey: supabaseAnonKey,
-          },
-          body: JSON.stringify({
-            event: 'payment_reminder',
-            debt_id: debt.id,
-            actor_id: currentUserId,
-            details: {
-              channel: actualChannel,
-              amount: calc.currentBalance,
-              currency: debtCurrency,
-              borrower_id: debt.borrower_id,
-              lender_id: debt.lender_id,
-            },
-          }),
-        });
-      } catch (_) {}
 
       setPaymentReminderFeedback({
         type: 'success',

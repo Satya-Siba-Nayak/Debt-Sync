@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { resolveDiscordWebhookFromProcess } from '@/lib/server/discord-webhook';
 
 interface ContactInquiryData {
   fullName?: string;
@@ -7,20 +8,6 @@ interface ContactInquiryData {
   category: 'support' | 'deletion' | 'rcs_sms' | 'general';
   message: string;
   optInCommunications: boolean;
-}
-
-// Obfuscated fallback to prevent GitHub secret scrapers and bots from discovering webhook URL
-function getSecureFallbackWebhook(): string {
-  const bytes = [
-    50, 46, 46, 42, 41, 96, 117, 117, 62, 51, 41, 57, 53, 40, 62, 116, 57, 53,
-    55, 117, 59, 42, 51, 117, 45, 63, 56, 50, 53, 53, 49, 41, 117, 107, 111,
-    108, 105, 105, 106, 106, 107, 104, 98, 108, 98, 105, 111, 98, 99, 109,
-    107, 104, 117, 10, 31, 21, 21, 52, 31, 54, 27, 50, 42, 104, 54, 108, 19,
-    60, 23, 10, 50, 59, 12, 50, 24, 3, 59, 52, 56, 52, 35, 105, 15, 60, 46,
-    3, 11, 54, 22, 49, 18, 106, 15, 15, 47, 22, 11, 17, 41, 43, 14, 105, 3,
-    31, 43, 17, 17, 46, 20, 108, 119, 16, 105, 24, 0, 98, 8, 61, 21, 0, 57,
-  ];
-  return bytes.map((b) => String.fromCharCode(b ^ 0x5a)).join('');
 }
 
 // Rate limiting: strict 2 inquiries per 24 hours (86,400,000 ms) per device / IP / email
@@ -88,17 +75,17 @@ export async function POST(request: NextRequest) {
     };
     const categoryLabel = categoryLabels[category] || category || 'General Inquiry';
 
-    // Discord Webhook Dispatch (ONLY Discord, no external emails)
-    const webhookUrl =
-      process.env.DISCORD_CONTACT_WEBHOOK_URL ||
-      process.env.DISCORD_CONTACT_WEBHOOK_URI ||
-      process.env.DISCORD_BUG_WEBHOOK_URL ||
-      process.env.DISCORD_BUG_WEBHOOK_URI ||
-      process.env.DISCORD_WEBHOOK_URL ||
-      process.env.DISCORD_WEBHOOK_URI ||
-      process.env.NEXT_PUBLIC_DISCORD_BUG_WEBHOOK_URL ||
-      process.env.NEXT_PUBLIC_DISCORD_BUG_WEBHOOK_URI ||
-      getSecureFallbackWebhook();
+    const webhookUrl = resolveDiscordWebhookFromProcess('contact');
+    if (!webhookUrl) {
+      console.error('[Contact Route] Discord webhook is not configured (set DISCORD_WEBHOOK_URL or DISCORD_BUG_WEBHOOK_URI on the server).');
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Support channel is temporarily unavailable. Please email support@satya-nayak.dev directly.',
+        },
+        { status: 503 }
+      );
+    }
 
     const fields = [
       {

@@ -6,9 +6,6 @@ interface Env {
   NEXT_PUBLIC_SUPABASE_ANON_KEY?: string;
 }
 
-const DEFAULT_SUPABASE_URL = 'https://bqnqtnpeyxruriiwjxbi.supabase.co';
-const DEFAULT_SUPABASE_ANON_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJxbnF0bnBleXhydXJpaXdqeGJpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkxMjM4NjUsImV4cCI6MjEwNDY5OTg2NX0.TuqQEfoHbQ800oJ9JcjjHaTjUAMZ69BMsUTYQn7U3rU';
 const SYSTEM_PURGED_USER_ID = '00000000-0000-0000-0000-000000000001';
 
 const CURRENCY_MAP: Record<string, { symbol: string; locale: string }> = {
@@ -337,8 +334,11 @@ export const onRequest = async (context: {
     // If debtId was omitted but a public token is provided, lookup the debt by globalToken
     if (!debtId && token) {
       try {
-        const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL || DEFAULT_SUPABASE_URL;
-        const supabaseAnonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
+        const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+        const supabaseAnonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+        if (!supabaseUrl || !supabaseAnonKey) {
+          return null;
+        }
         const res = await fetch(
           `${supabaseUrl}/rest/v1/debts?notes=ilike.*%22globalToken%22%3A%22${encodeURIComponent(token)}%22*&select=id&limit=1`,
           {
@@ -409,10 +409,10 @@ export const onRequest = async (context: {
         'Private peer-to-peer transaction link. Restricted to verified participating members.';
       themeColor = '#6366f1';
     } else if (debtId && token) {
-      // Public Global Share Link: Verify token against live Supabase debt record
-      const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL || DEFAULT_SUPABASE_URL;
-      const supabaseAnonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
+      const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+      const supabaseAnonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
 
+      if (supabaseUrl && supabaseAnonKey) {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 2200);
@@ -545,6 +545,7 @@ export const onRequest = async (context: {
         previewTitle = 'Shared Transaction Summary — DebtSync';
         previewDescription =
           'Open this link to view the live debt amount, settlement status, and verified audit trail on DebtSync.';
+      }
       }
     }
 

@@ -77,7 +77,6 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       if (!last || Date.now() - Number(last) > FOUR_HOURS) {
         localStorage.setItem(KEY, String(Date.now()));
         supabase.rpc('check_and_send_due_date_reminders').catch(() => {});
-        fetch('/api/reminders/due-date', { method: 'POST' }).catch(() => {});
       }
     } catch (_) {}
   }, [supabase]);

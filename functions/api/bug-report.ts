@@ -1,3 +1,5 @@
+import { resolveDiscordWebhookUrl } from '../_shared/discord-webhook';
+
 interface Env {
   DISCORD_BUG_WEBHOOK_URL?: string;
   DISCORD_BUG_WEBHOOK_URI?: string;
@@ -5,28 +7,12 @@ interface Env {
   DISCORD_WEBHOOK_URI?: string;
   DISCORD_CONTACT_WEBHOOK_URL?: string;
   DISCORD_CONTACT_WEBHOOK_URI?: string;
-  NEXT_PUBLIC_DISCORD_BUG_WEBHOOK_URL?: string;
-  NEXT_PUBLIC_DISCORD_BUG_WEBHOOK_URI?: string;
-}
-
-// Obfuscated fallback to prevent GitHub secret scrapers and bots from discovering webhook URL
-function getSecureFallbackWebhook(): string {
-  const bytes = [
-    50, 46, 46, 42, 41, 96, 117, 117, 62, 51, 41, 57, 53, 40, 62, 116, 57, 53,
-    55, 117, 59, 42, 51, 117, 45, 63, 56, 50, 53, 53, 49, 41, 117, 107, 111,
-    108, 105, 105, 106, 106, 107, 104, 98, 108, 98, 105, 111, 98, 99, 109,
-    107, 104, 117, 10, 31, 21, 21, 52, 31, 54, 27, 50, 42, 104, 54, 108, 19,
-    60, 23, 10, 50, 59, 12, 50, 24, 3, 59, 52, 56, 52, 35, 105, 15, 60, 46,
-    3, 11, 54, 22, 49, 18, 106, 15, 15, 47, 22, 11, 17, 41, 43, 14, 105, 3,
-    31, 43, 17, 17, 46, 20, 108, 119, 16, 105, 24, 0, 98, 8, 61, 21, 0, 57,
-  ];
-  return bytes.map((b) => String.fromCharCode(b ^ 0x5a)).join('');
 }
 
 export const onRequestPost = async (context: { request: Request; env: Env }) => {
   try {
     const contentType = context.request.headers.get('content-type') || '';
-    let reportData: any;
+    let reportData: Record<string, unknown>;
     const uploadedFiles: File[] = [];
 
     if (contentType.includes('multipart/form-data')) {
@@ -43,11 +29,13 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
         const userName = formData.get('userName') || '';
         const userEmail = formData.get('userEmail') || '';
         const userId = formData.get('userId') || '';
-        let device: any;
+        let device: Record<string, unknown> | undefined;
         try {
           const deviceRaw = formData.get('device');
           if (deviceRaw && typeof deviceRaw === 'string') device = JSON.parse(deviceRaw);
-        } catch (_) {}
+        } catch {
+          /* ignore malformed device payload */
+        }
 
         reportData = { category, description, errorMessage, route, device, userName, userEmail, userId };
       }
@@ -61,7 +49,13 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       reportData = await context.request.json();
     }
 
-    const { category, description, errorMessage, route, device, userName, userEmail } = reportData;
+    const category = String(reportData.category || 'bug');
+    const description = String(reportData.description || '');
+    const errorMessage = reportData.errorMessage as string | null | undefined;
+    const route = String(reportData.route || '');
+    const device = reportData.device as Record<string, unknown> | undefined;
+    const userName = String(reportData.userName || '');
+    const userEmail = String(reportData.userEmail || '');
 
     if (!description?.trim()) {
       return new Response(
@@ -70,16 +64,16 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       );
     }
 
-    const webhookUrl =
-      context.env.DISCORD_BUG_WEBHOOK_URL ||
-      context.env.DISCORD_BUG_WEBHOOK_URI ||
-      context.env.DISCORD_WEBHOOK_URL ||
-      context.env.DISCORD_WEBHOOK_URI ||
-      context.env.DISCORD_CONTACT_WEBHOOK_URL ||
-      context.env.DISCORD_CONTACT_WEBHOOK_URI ||
-      context.env.NEXT_PUBLIC_DISCORD_BUG_WEBHOOK_URL ||
-      context.env.NEXT_PUBLIC_DISCORD_BUG_WEBHOOK_URI ||
-      getSecureFallbackWebhook();
+    const webhookUrl = resolveDiscordWebhookUrl(context.env as Record<string, string | undefined>, 'bug');
+    if (!webhookUrl) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'Bug reporting is temporarily unavailable. Please email support@satya-nayak.dev with a screenshot.',
+        }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
 
     let color = 0xed4245;
     let title = '🐛 Bug Report';
@@ -133,8 +127,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       });
     }
 
-    if (device?.recentErrors && device.recentErrors.length > 0) {
-      const errorDump = device.recentErrors.join('\n').slice(0, 950);
+    if (Array.isArray(device?.recentErrors) && device.recentErrors.length > 0) {
+      const errorDump = (device.recentErrors as string[]).join('\n').slice(0, 950);
       fields.push({
         name: '📜 Recent Runtime JavaScript Errors',
         value: `\`\`\`${errorDump}\`\`\``,
@@ -159,7 +153,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       embeddedImageAttachment = firstImageFile.name;
     }
 
-    const embed: any = {
+    const embed: Record<string, unknown> = {
       title,
       color,
       description: `### User Note\n${description.trim()}`,
@@ -204,21 +198,21 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
     }
 
     if (!discordRes.ok && discordRes.status !== 204) {
-      const errText = await discordRes.text();
       return new Response(
         JSON.stringify({ success: false, error: `Discord rejected webhook: ${discordRes.status}` }),
         { status: 502, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    return new Response(
-      JSON.stringify({ success: true, message: 'Delivered to Discord.' }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } }
-    );
-  } catch (err: any) {
-    return new Response(
-      JSON.stringify({ success: false, error: err.message || 'Internal error' }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    );
+    return new Response(JSON.stringify({ success: true, message: 'Delivered to Discord.' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Internal error';
+    return new Response(JSON.stringify({ success: false, error: message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 };

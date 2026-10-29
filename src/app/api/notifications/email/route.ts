@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isInternalApiAuthorized } from '@/lib/server/internal-api-auth';
 
 interface EmailPayload {
   type: 'ghost_account_invite' | 'payment_request' | 'debt_recorded' | 'split_bill_request' | 'payment_reminder' | 'due_date_reminder';
@@ -32,6 +33,16 @@ function cleanupRateLimits() {
 
 export async function POST(request: NextRequest) {
   try {
+    if (!isInternalApiAuthorized(request)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Unauthorized. This endpoint is for server-side delivery only.',
+        },
+        { status: 401 }
+      );
+    }
+
     cleanupRateLimits();
 
     const body: EmailPayload = await request.json();
