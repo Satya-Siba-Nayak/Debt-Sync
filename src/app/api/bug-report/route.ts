@@ -134,6 +134,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const webhookUrl = resolveDiscordWebhookFromProcess('bug');
+    if (!webhookUrl) {
+      console.error('[Bug Report] Discord webhook is not configured on the server.');
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Bug reporting is temporarily unavailable. Please email support@satya-nayak.dev with a screenshot.',
+        },
+        { status: 503 }
+      );
+    }
+
     const ip =
       request.headers.get('cf-connecting-ip') ||
       request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
@@ -149,18 +161,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { success: false, error: 'You have reached the hourly report limit. Please wait a moment before sending more reports.' },
         { status: 429 }
-      );
-    }
-
-    const webhookUrl = resolveDiscordWebhookFromProcess('bug');
-    if (!webhookUrl) {
-      console.error('[Bug Report] Discord webhook is not configured on the server.');
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Bug reporting is temporarily unavailable. Please email support@satya-nayak.dev with a screenshot.',
-        },
-        { status: 503 }
       );
     }
 

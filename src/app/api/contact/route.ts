@@ -65,6 +65,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const webhookUrl = resolveDiscordWebhookFromProcess('contact');
+    if (!webhookUrl) {
+      console.error('[Contact Route] Discord webhook is not configured (set DISCORD_WEBHOOK_URL on the server).');
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Support channel is temporarily unavailable. Please email support@satya-nayak.dev directly.',
+        },
+        { status: 503 }
+      );
+    }
+
     const deviceId = (request.headers.get('x-device-id') || '').slice(0, 128);
     const ip =
       request.headers.get('cf-connecting-ip') ||
@@ -97,18 +109,6 @@ export async function POST(request: NextRequest) {
       general: '💬 General Feedback & Partnerships',
     };
     const categoryLabel = categoryLabels[category] || sanitizeDiscordText(String(category || 'General Inquiry'), 80);
-
-    const webhookUrl = resolveDiscordWebhookFromProcess('contact');
-    if (!webhookUrl) {
-      console.error('[Contact Route] Discord webhook is not configured (set DISCORD_WEBHOOK_URL on the server).');
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Support channel is temporarily unavailable. Please email support@satya-nayak.dev directly.',
-        },
-        { status: 503 }
-      );
-    }
 
     const safeName = sanitizeDiscordText(fullName?.trim() || 'Website Visitor', 120);
     const safeEmail = sanitizeDiscordText(cleanEmail, 160);

@@ -108,6 +108,17 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       }
     }
 
+    const webhookUrl = resolveDiscordWebhookUrl(context.env as Record<string, string | undefined>, 'contact');
+    if (!webhookUrl) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'Support channel is temporarily unavailable. Please email support@satya-nayak.dev directly.',
+        }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
     const rateKeys = [
       ip !== 'anon' ? `ip:${ip}` : '',
       deviceId ? `dev:${deviceId}` : '',
@@ -131,17 +142,6 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       general: '💬 General Feedback & Partnerships',
     };
     const categoryLabel = categoryLabels[category || ''] || sanitizeDiscordText(String(category || 'General Inquiry'), 80);
-
-    const webhookUrl = resolveDiscordWebhookUrl(context.env as Record<string, string | undefined>, 'contact');
-    if (!webhookUrl) {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: 'Support channel is temporarily unavailable. Please email support@satya-nayak.dev directly.',
-        }),
-        { status: 503, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
 
     const safeName = sanitizeDiscordText(fullName?.trim() || 'Website Visitor', 120);
     const safeEmail = sanitizeDiscordText(cleanEmail, 160);

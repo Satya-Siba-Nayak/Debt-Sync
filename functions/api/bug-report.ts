@@ -133,6 +133,17 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       );
     }
 
+    const webhookUrl = resolveDiscordWebhookUrl(context.env as Record<string, string | undefined>, 'bug');
+    if (!webhookUrl) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'Bug reporting is temporarily unavailable. Please email support@satya-nayak.dev with a screenshot.',
+        }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
     const ip =
       context.request.headers.get('cf-connecting-ip') ||
       context.request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
@@ -150,17 +161,6 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
           error: 'You have reached the hourly report limit. Please wait a while before sending more reports.',
         }),
         { status: 429, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const webhookUrl = resolveDiscordWebhookUrl(context.env as Record<string, string | undefined>, 'bug');
-    if (!webhookUrl) {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: 'Bug reporting is temporarily unavailable. Please email support@satya-nayak.dev with a screenshot.',
-        }),
-        { status: 503, headers: { 'Content-Type': 'application/json' } }
       );
     }
 

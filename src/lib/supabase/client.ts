@@ -2,28 +2,15 @@ import { createBrowserClient } from '@supabase/ssr';
 
 let clientInstance: ReturnType<typeof createBrowserClient> | null = null;
 
+const DEFAULT_PUBLIC_SUPABASE_URL = 'https://bqnqtnpeyxruriiwjxbi.supabase.co';
+const DEFAULT_PUBLIC_SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJxbnF0bnBleXhydXJpaXdqeGJpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkxMjM4NjUsImV4cCI6MjEwNDY5OTg2NX0.TuqQEfoHbQ800oJ9JcjjHaTjUAMZ69BMsUTYQn7U3rU';
+
 function resolvePublicSupabaseConfig(): { url: string; anonKey: string } {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || '';
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || '';
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || DEFAULT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || DEFAULT_PUBLIC_SUPABASE_ANON_KEY;
 
-  if (url && anonKey) {
-    return { url, anonKey };
-  }
-
-  // Static export runs a one-pass SSR prerender during `next build`. Cloudflare must supply
-  // NEXT_PUBLIC_* at build time (see wrangler.toml [vars]); this fallback avoids hard failures.
-  if (typeof window === 'undefined') {
-    return {
-      url: url || 'https://placeholder.supabase.co',
-      anonKey:
-        anonKey ||
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBsYWNlaG9sZGVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE2NDE3NjcyMDAsImV4cCI6MTk2NzM0MzIwMH0.placeholder',
-    };
-  }
-
-  throw new Error(
-    'Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY. Configure them for the Pages build (wrangler.toml [vars] or Cloudflare dashboard).'
-  );
+  return { url, anonKey };
 }
 
 export function createClient() {

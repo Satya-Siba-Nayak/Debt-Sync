@@ -7,6 +7,9 @@ interface Env {
 }
 
 const SYSTEM_PURGED_USER_ID = '00000000-0000-0000-0000-000000000001';
+const DEFAULT_PUBLIC_SUPABASE_URL = 'https://bqnqtnpeyxruriiwjxbi.supabase.co';
+const DEFAULT_PUBLIC_SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJxbnF0bnBleXhydXJpaXdqeGJpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkxMjM4NjUsImV4cCI6MjEwNDY5OTg2NX0.TuqQEfoHbQ800oJ9JcjjHaTjUAMZ69BMsUTYQn7U3rU';
 
 const CURRENCY_MAP: Record<string, { symbol: string; locale: string }> = {
   inr: { symbol: '₹', locale: 'en-IN' },
@@ -334,11 +337,8 @@ export const onRequest = async (context: {
     // If debtId was omitted but a public token is provided, lookup the debt by globalToken
     if (!debtId && token) {
       try {
-        const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-        const supabaseAnonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
-        if (!supabaseUrl || !supabaseAnonKey) {
-          return null;
-        }
+        const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL?.trim() || DEFAULT_PUBLIC_SUPABASE_URL;
+        const supabaseAnonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || DEFAULT_PUBLIC_SUPABASE_ANON_KEY;
         const res = await fetch(
           `${supabaseUrl}/rest/v1/debts?notes=ilike.*%22globalToken%22%3A%22${encodeURIComponent(token)}%22*&select=id&limit=1`,
           {
@@ -409,8 +409,8 @@ export const onRequest = async (context: {
         'Private peer-to-peer transaction link. Restricted to verified participating members.';
       themeColor = '#6366f1';
     } else if (debtId && token) {
-      const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-      const supabaseAnonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+      const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL?.trim() || DEFAULT_PUBLIC_SUPABASE_URL;
+      const supabaseAnonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || DEFAULT_PUBLIC_SUPABASE_ANON_KEY;
 
       if (supabaseUrl && supabaseAnonKey) {
       try {

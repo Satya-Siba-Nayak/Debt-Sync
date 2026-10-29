@@ -400,11 +400,12 @@ function ShareTransactionContent() {
       // 3. Fallback to anonymous client (prevents expired browser JWT tokens from failing RPC)
       if (!resolvedDebt) {
         try {
-          const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-          const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-          if (!supabaseUrl || !supabaseAnonKey) {
-            throw new Error('Missing Supabase public configuration');
-          }
+          const supabaseUrl =
+            process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
+            'https://bqnqtnpeyxruriiwjxbi.supabase.co';
+          const supabaseAnonKey =
+            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ||
+            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJxbnF0bnBleXhydXJpaXdqeGJpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkxMjM4NjUsImV4cCI6MjEwNDY5OTg2NX0.TuqQEfoHbQ800oJ9JcjjHaTjUAMZ69BMsUTYQn7U3rU';
           const anonRes = await fetch(`${supabaseUrl}/rest/v1/rpc/get_debt_for_acceptance`, {
             method: 'POST',
             headers: {
