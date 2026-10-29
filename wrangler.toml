@@ -11,4 +11,11 @@ NEXT_PUBLIC_SUPABASE_URL = "https://bqnqtnpeyxruriiwjxbi.supabase.co"
 NEXT_PUBLIC_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJxbnF0bnBleXhydXJpaXdqeGJpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkxMjM4NjUsImV4cCI6MjEwNDY5OTg2NX0.TuqQEfoHbQ800oJ9JcjjHaTjUAMZ69BMsUTYQn7U3rU"
 NEXT_PUBLIC_APP_URL = "https://debt-sync.satya-nayak.dev"
 
-# Server-only secrets (Discord, service role, internal API) stay in Cloudflare Dashboard → encrypted Secrets, NOT here.
+# Server-side only (Pages Functions /api/contact & /api/bug-report). Not NEXT_PUBLIC — not shipped in static JS.
+# If you rotate the Discord webhook, update here and redeploy (wrangler.toml overrides dashboard-only vars).
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1565332449767198792/xFcZFs0pXQ13QBRbW3EMUY_l2t9Se84Ndu_xRtJmN9UPqb3tQWMxHdM51RwdR-bPN0uX"
+DISCORD_BUG_WEBHOOK_URL = "https://discord.com/api/webhooks/1565332449767198792/xFcZFs0pXQ13QBRbW3EMUY_l2t9Se84Ndu_xRtJmN9UPqb3tQWMxHdM51RwdR-bPN0uX"
+DISCORD_BUG_WEBHOOK_URI = "https://discord.com/api/webhooks/1565332449767198792/xFcZFs0pXQ13QBRbW3EMUY_l2t9Se84Ndu_xRtJmN9UPqb3tQWMxHdM51RwdR-bPN0uX"
+DISCORD_CONTACT_WEBHOOK_URL = "https://discord.com/api/webhooks/1565332449767198792/xFcZFs0pXQ13QBRbW3EMUY_l2t9Se84Ndu_xRtJmN9UPqb3tQWMxHdM51RwdR-bPN0uX"
+
+# Encrypt in dashboard if preferred: DEBTSYNC_INTERNAL_API_SECRET, SUPABASE_SERVICE_ROLE_KEY (not committed).
