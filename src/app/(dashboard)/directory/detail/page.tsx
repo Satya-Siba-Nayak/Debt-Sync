@@ -86,6 +86,7 @@ function PersonDebtDetailContent() {
   const [selectedDebtIdForPay, setSelectedDebtIdForPay] = useState<string | null>(null);
   const [selectedDebtForEdit, setSelectedDebtForEdit] = useState<Debt | null>(null);
   const [verifyingPaymentId, setVerifyingPaymentId] = useState<string | null>(null);
+  const [verifyingAll, setVerifyingAll] = useState(false);
 
   const fetchDetails = useCallback(async () => {
     if (!personId) {
@@ -173,20 +174,6 @@ function PersonDebtDetailContent() {
         loadedPayments = (paymentRes.data as any) || [];
         setPayments(loadedPayments);
         setActivityLogs(logRes.data || []);
-
-        // Only purge unverified payments on settled debts if any actually exist (non-blocking)
-        const settledDebtIdSet = new Set(allDebts.filter((d) => d.status === 'settled').map((d) => d.id));
-        const hasOrphanedUnverified = loadedPayments.some(
-          (p) => !p.is_verified && settledDebtIdSet.has(p.debt_id)
-        );
-        if (hasOrphanedUnverified) {
-          supabase
-            .from('payments')
-            .delete()
-            .in('debt_id', Array.from(settledDebtIdSet))
-            .eq('is_verified', false)
-            .then(() => {});
-        }
       } else {
         setPayments([]);
         setActivityLogs([]);
@@ -255,6 +242,26 @@ function PersonDebtDetailContent() {
         shouldSettle = calc.currentBalance <= 0.01;
       }
 
+      // Optimistic state update so UI immediately displays new status
+      setPayments((prev) =>
+        prev.map((p) =>
+          p.id === paymentId
+            ? {
+                ...p,
+                is_verified: decision === 'verified',
+                verified_at: new Date().toISOString(),
+                verified_by: currentUserId || p.verified_by,
+                note:
+                  decision === 'disputed'
+                    ? (p.note?.includes('[DISPUTED]')
+                        ? p.note
+                        : (p.note ? `${p.note} [DISPUTED]` : 'Disputed by lender [DISPUTED]'))
+                    : p.note,
+              }
+            : p
+        )
+      );
+
       const rpcDecision = decision === 'verified' ? 'accepted' : 'declined';
       let handled = false;
       try {
@@ -263,12 +270,18 @@ function PersonDebtDetailContent() {
           p_decision: rpcDecision,
           p_should_settle: shouldSettle,
         });
-        if (!error && data?.success) handled = true;
-      } catch (_) {}
+        if (!error && data?.success) {
+          handled = true;
+        } else if (error) {
+          console.warn('verify_repayment RPC returned error, using fallback:', error.message);
+        }
+      } catch (rpcErr) {
+        console.warn('verify_repayment RPC exception, using fallback:', rpcErr);
+      }
 
       if (!handled) {
         if (decision === 'verified') {
-          await supabase
+          const { error: updateErr } = await supabase
             .from('payments')
             .update({
               is_verified: true,
@@ -277,21 +290,34 @@ function PersonDebtDetailContent() {
             })
             .eq('id', paymentId);
 
-          if (targetDebt && shouldSettle) {
+          if (updateErr) {
+            console.error('Direct payment verification update failed:', updateErr);
+            throw updateErr;
+          }
+
+          if (targetDebt && currentUserId) {
+            await supabase.from('activity_log').insert({
+              user_id: currentUserId,
+              debt_id: targetDebt.id,
+              action: 'payment_verified',
+              details: {
+                payment_id: paymentId,
+                amount: paymentItem?.amount,
+                debt_settled: shouldSettle,
+                verified_by: currentUserId,
+              },
+            });
+          }
+
+          if (targetDebt && shouldSettle && targetDebt.status !== 'settled') {
             await supabase
               .from('debts')
               .update({
                 status: 'settled',
                 settled_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
               })
               .eq('id', targetDebt.id);
-
-            // Auto-purge any remaining unverified payments for this now-settled debt
-            await supabase
-              .from('payments')
-              .delete()
-              .eq('debt_id', targetDebt.id)
-              .eq('is_verified', false);
           }
         } else {
           // Lender disputes repayment
@@ -300,7 +326,7 @@ function PersonDebtDetailContent() {
             ? existingNote
             : (existingNote ? `${existingNote} [DISPUTED]` : 'Disputed by lender [DISPUTED]');
 
-          await supabase
+          const { error: disputeErr } = await supabase
             .from('payments')
             .update({
               is_verified: false,
@@ -309,6 +335,11 @@ function PersonDebtDetailContent() {
               note: disputedNote,
             })
             .eq('id', paymentId);
+
+          if (disputeErr) {
+            console.error('Direct payment dispute update failed:', disputeErr);
+            throw disputeErr;
+          }
 
           if (paymentItem && currentUserId) {
             await supabase.from('activity_log').insert({
@@ -331,8 +362,80 @@ function PersonDebtDetailContent() {
     } catch (err: any) {
       console.error('Error verifying repayment:', err);
       alert(err.message || 'Failed to process repayment verification');
+      await fetchDetails();
     } finally {
       setVerifyingPaymentId(null);
+    }
+  };
+
+  const handleVerifyAllRepayments = async (pendingPaymentList: Payment[]) => {
+    if (!pendingPaymentList.length) return;
+    if (!confirm(`Verify all ${pendingPaymentList.length} pending repayment receipts at once?`)) return;
+
+    setVerifyingAll(true);
+    try {
+      const pids = pendingPaymentList.map((p) => p.id);
+
+      // Optimistic local state update
+      setPayments((prev) =>
+        prev.map((p) =>
+          pids.includes(p.id)
+            ? {
+                ...p,
+                is_verified: true,
+                verified_at: new Date().toISOString(),
+                verified_by: currentUserId || p.verified_by,
+              }
+            : p
+        )
+      );
+
+      // Try batch RPC first
+      let handled = false;
+      try {
+        const { data, error } = await supabase.rpc('verify_all_repayments', {
+          p_payment_ids: pids,
+        });
+        if (!error && data?.success) handled = true;
+      } catch (_) {}
+
+      if (!handled) {
+        // Fallback: verify each one via direct update
+        for (const p of pendingPaymentList) {
+          const targetDebt = debts.find((d) => d.id === p.debt_id);
+          await supabase
+            .from('payments')
+            .update({
+              is_verified: true,
+              verified_at: new Date().toISOString(),
+              verified_by: currentUserId,
+            })
+            .eq('id', p.id);
+
+          if (targetDebt && currentUserId) {
+            await supabase.from('activity_log').insert({
+              user_id: currentUserId,
+              debt_id: targetDebt.id,
+              action: 'payment_verified',
+              details: {
+                payment_id: p.id,
+                amount: p.amount,
+                verified_by: currentUserId,
+              },
+            });
+          }
+        }
+      }
+
+      invalidateLedgerCache();
+      window.dispatchEvent(new CustomEvent('debtsync:refresh'));
+      await fetchDetails();
+    } catch (err: any) {
+      console.error('Error verifying all repayments:', err);
+      alert(err.message || 'Failed to verify all repayments');
+      await fetchDetails();
+    } finally {
+      setVerifyingAll(false);
     }
   };
 
@@ -458,6 +561,15 @@ function PersonDebtDetailContent() {
   );
 
   const sortedPayments = sortPaymentsPendingFirst(payments);
+  const pendingLenderPayments = sortedPayments.filter((p) => {
+    const matchedDebt = debts.find((d) => d.id === p.debt_id);
+    const isLenderOfDebt = matchedDebt?.lender_id === currentUserId;
+    const isDisputed =
+      (p as any).status === 'disputed' ||
+      ((p as any).is_verified === false && (p as any).verified_at != null) ||
+      (typeof p.note === 'string' && p.note.includes('[DISPUTED]'));
+    return (p as any).is_verified === false && !isDisputed && isLenderOfDebt;
+  });
 
   let filteredBalance = 0;
   for (const d of displayDebts) {
@@ -1189,7 +1301,7 @@ function PersonDebtDetailContent() {
       {/* Repayments & Verification Section */}
       {payments.length > 0 && (
         <section className="bg-surface-container-lowest rounded-2xl p-6 md:p-8 border border-outline-variant/30 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
             <div>
               <h3 className="font-heading text-lg font-bold text-on-surface">
                 Repayment Receipts &amp; Verifications
@@ -1198,9 +1310,25 @@ function PersonDebtDetailContent() {
                 Two-way receipt verification log for all payments made on these debts
               </p>
             </div>
-            <span className="font-mono text-xs px-2.5 py-1 rounded-full bg-surface-container text-on-surface-variant">
-              {payments.length} payment{payments.length > 1 ? 's' : ''}
-            </span>
+            <div className="flex items-center gap-2">
+              {pendingLenderPayments.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => handleVerifyAllRepayments(pendingLenderPayments)}
+                  disabled={verifyingAll}
+                  className="py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-mono text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-sm"
+                  title="Verify all pending repayment receipts at once"
+                >
+                  <span className="material-symbols-outlined text-[15px]">
+                    {verifyingAll ? 'hourglass_top' : 'done_all'}
+                  </span>
+                  <span>{verifyingAll ? 'Verifying...' : `Verify All (${pendingLenderPayments.length})`}</span>
+                </button>
+              )}
+              <span className="font-mono text-xs px-2.5 py-1 rounded-full bg-surface-container text-on-surface-variant">
+                {payments.length} payment{payments.length > 1 ? 's' : ''}
+              </span>
+            </div>
           </div>
 
           <div className="max-h-[380px] overflow-y-auto overscroll-contain modal-scroll-container pr-1 sm:pr-2 space-y-3">

@@ -431,6 +431,24 @@ export function DebtDetailModal({
       const simCalc = calculateDebtBalance(debt, updatedPaymentsSim);
       const shouldSettle = simCalc.currentBalance <= 0.01;
 
+      // Optimistic update
+      setPayments((prev) =>
+        prev.map((p) =>
+          p.id === paymentId
+            ? {
+                ...p,
+                is_verified: decision === 'verified',
+                verified_at: new Date().toISOString(),
+                verified_by: currentUserId || p.verified_by,
+                note:
+                  decision === 'disputed'
+                    ? (p.note?.includes('[DISPUTED]') ? p.note : (p.note ? `${p.note} [DISPUTED]` : 'Disputed by lender [DISPUTED]'))
+                    : p.note,
+              }
+            : p
+        )
+      );
+
       let handled = false;
       try {
         const { data, error } = await supabase.rpc('verify_repayment', {
@@ -438,14 +456,20 @@ export function DebtDetailModal({
           p_decision: rpcDecision,
           p_should_settle: shouldSettle,
         });
-        if (!error && data?.success) handled = true;
-      } catch (_) {}
+        if (!error && data?.success) {
+          handled = true;
+        } else if (error) {
+          console.warn('DebtDetailModal verify_repayment RPC returned error, using fallback:', error.message);
+        }
+      } catch (rpcErr) {
+        console.warn('DebtDetailModal verify_repayment RPC threw exception, using fallback:', rpcErr);
+      }
 
       if (!handled) {
         const paymentItem = payments.find((p) => p.id === paymentId);
 
         if (decision === 'verified') {
-          await supabase
+          const { error: updateErr } = await supabase
             .from('payments')
             .update({
               is_verified: true,
@@ -454,26 +478,31 @@ export function DebtDetailModal({
             })
             .eq('id', paymentId);
 
-          const updatedPayments = payments.map((p) =>
-            p.id === paymentId ? { ...p, is_verified: true } : p
-          );
-          const newCalc = calculateDebtBalance(debt, updatedPayments);
+          if (updateErr) throw updateErr;
 
-          if (newCalc.currentBalance <= 0.01) {
+          if (currentUserId) {
+            await supabase.from('activity_log').insert({
+              user_id: currentUserId,
+              debt_id: debt.id,
+              action: 'payment_verified',
+              details: {
+                payment_id: paymentId,
+                amount: paymentItem?.amount,
+                debt_settled: shouldSettle,
+                verified_by: currentUserId,
+              },
+            });
+          }
+
+          if (shouldSettle && debt.status !== 'settled') {
             await supabase
               .from('debts')
               .update({
                 status: 'settled',
                 settled_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
               })
               .eq('id', debt.id);
-
-            // Auto-purge other lingering unverified payments for this settled debt
-            await supabase
-              .from('payments')
-              .delete()
-              .eq('debt_id', debt.id)
-              .eq('is_verified', false);
           }
         } else {
           // Lender disputes repayment
@@ -482,7 +511,7 @@ export function DebtDetailModal({
             ? existingNote
             : (existingNote ? `${existingNote} [DISPUTED]` : 'Disputed by lender [DISPUTED]');
 
-          await supabase
+          const { error: disputeErr } = await supabase
             .from('payments')
             .update({
               is_verified: false,
@@ -491,6 +520,8 @@ export function DebtDetailModal({
               note: disputedNote,
             })
             .eq('id', paymentId);
+
+          if (disputeErr) throw disputeErr;
 
           if (currentUserId) {
             await supabase.from('activity_log').insert({
@@ -514,6 +545,7 @@ export function DebtDetailModal({
     } catch (err: any) {
       console.error('Error verifying repayment:', err);
       alert(err.message || 'Failed to process repayment verification');
+      await fetchDebtDetails();
     } finally {
       setVerifyingPaymentId(null);
     }

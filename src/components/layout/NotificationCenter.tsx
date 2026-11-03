@@ -535,15 +535,32 @@ export function NotificationCenter() {
 
       if (!success) {
         const { data: pRec } = await supabase.from('payments').select('debt_id, amount, note').eq('id', paymentId).single();
+        const user = await getCurrentUserFast(supabase);
 
         if (decision === 'accepted') {
-          await supabase
+          const { error: updErr } = await supabase
             .from('payments')
             .update({
               is_verified: true,
               verified_at: new Date().toISOString(),
+              verified_by: user?.id,
             })
             .eq('id', paymentId);
+
+          if (updErr) throw updErr;
+
+          if (pRec?.debt_id && user?.id) {
+            await supabase.from('activity_log').insert({
+              user_id: user.id,
+              debt_id: pRec.debt_id,
+              action: 'payment_verified',
+              details: {
+                payment_id: paymentId,
+                amount: pRec.amount,
+                verified_by: user.id,
+              },
+            });
+          }
 
           // Check if debt balance (including accrued interest) is cleared
           if (pRec?.debt_id) {
@@ -553,17 +570,11 @@ export function NotificationCenter() {
             ]);
             if (dRec) {
               const calc = calculateDebtBalance(dRec, allP || []);
-              if (calc.currentBalance <= 0.01) {
+              if (calc.currentBalance <= 0.01 && dRec.status !== 'settled') {
                 await supabase
                   .from('debts')
-                  .update({ status: 'settled', settled_at: new Date().toISOString() })
+                  .update({ status: 'settled', settled_at: new Date().toISOString(), updated_at: new Date().toISOString() })
                   .eq('id', pRec.debt_id);
-                // Auto-purge other lingering unverified payments for this settled debt
-                await supabase
-                  .from('payments')
-                  .delete()
-                  .eq('debt_id', pRec.debt_id)
-                  .eq('is_verified', false);
               }
             }
           }
@@ -574,16 +585,18 @@ export function NotificationCenter() {
             ? existingNote
             : (existingNote ? `${existingNote} [DISPUTED]` : 'Disputed by lender [DISPUTED]');
 
-          await supabase
+          const { error: dispErr } = await supabase
             .from('payments')
             .update({
               is_verified: false,
               verified_at: new Date().toISOString(),
+              verified_by: user?.id,
               note: disputedNote,
             })
             .eq('id', paymentId);
 
-          const user = await getCurrentUserFast(supabase);
+          if (dispErr) throw dispErr;
+
           if (pRec?.debt_id && user?.id) {
             await supabase.from('activity_log').insert({
               user_id: user.id,

@@ -430,22 +430,16 @@ export function PaymentModal({
 
       if (paymentError) throw paymentError;
 
-      // If lender recorded payment and it clears the balance (within 0.005 threshold), settle immediately and purge orphaned unverified payments
+      // If lender recorded payment and it clears the balance (within 0.005 threshold), settle immediately
       if (isVerified && paymentAmount >= currentBalance - 0.005) {
         await supabase
           .from('debts')
           .update({
             status: 'settled',
             settled_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
           })
           .eq('id', debt.id);
-
-        // Auto-purge any lingering unverified payments for this settled debt
-        await supabase
-          .from('payments')
-          .delete()
-          .eq('debt_id', debt.id)
-          .eq('is_verified', false);
       }
 
       // Add activity log

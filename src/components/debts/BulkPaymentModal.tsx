@@ -168,21 +168,16 @@ export function BulkPaymentModal({
 
         if (pErr) throw pErr;
 
-        // 2. Settle debt if cleared and verified, and purge lingering unverified payments
+        // 2. Settle debt if cleared and verified
         if (isVerified && item.newBalance <= 0.01) {
           await supabase
             .from('debts')
             .update({
               status: 'settled',
               settled_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
             })
             .eq('id', item.debt.id);
-
-          await supabase
-            .from('payments')
-            .delete()
-            .eq('debt_id', item.debt.id)
-            .eq('is_verified', false);
         }
 
         // 3. Activity log
