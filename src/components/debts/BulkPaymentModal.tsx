@@ -148,9 +148,32 @@ export function BulkPaymentModal({
       if (!user) throw new Error('Not authenticated');
 
       const isVerified = direction === 'they_paid';
+      const activeAllocations = allocations.filter((item) => item.allocated > 0);
+      const totalAllocated = round2(activeAllocations.reduce((sum, item) => sum + item.allocated, 0));
+      const batchId =
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `bulk-${Date.now()}`;
 
-      for (const item of allocations) {
-        if (item.allocated <= 0) continue;
+      const breakdown = activeAllocations.map((item) => {
+        const splitMeta = parseSplitDetails(item.debt.notes);
+        const cleanNotes = getCleanDebtNotes(item.debt.notes);
+        const label =
+          splitMeta?.title || cleanNotes || `Loan #${item.debt.id.slice(0, 6)}`;
+        return {
+          debt_id: item.debt.id,
+          label,
+          amount: round2(item.allocated),
+          principal: Number(item.debt.principal || 0),
+          interest_rate: Number(item.debt.interest_rate || 0),
+          remaining: round2(item.newBalance),
+          cleared: item.newBalance <= 0.01,
+        };
+      });
+
+      for (let idx = 0; idx < activeAllocations.length; idx++) {
+        const item = activeAllocations[idx];
+        const isFirstInBatch = idx === 0;
 
         // 1. Insert payment record
         const { error: pErr } = await supabase.from('payments').insert({
@@ -180,17 +203,24 @@ export function BulkPaymentModal({
             .eq('id', item.debt.id);
         }
 
-        // 3. Activity log
+        // 3. Activity log (suppress duplicate emails on items 2..N of bulk repayment)
         await supabase.from('activity_log').insert({
           user_id: user.id,
           debt_id: item.debt.id,
           action: isVerified ? 'payment_made' : 'repayment_reported',
           details: {
             amount: item.allocated,
+            total_bulk_amount: totalAllocated,
+            is_bulk: activeAllocations.length > 1,
+            batch_id: batchId,
+            allocations_count: activeAllocations.length,
             strategy,
             is_verified: isVerified,
             remaining: isVerified ? item.newBalance : item.currentBalance,
             cleared: isVerified && item.newBalance <= 0.01,
+            note: note.trim() || undefined,
+            suppress_notification: !isFirstInBatch,
+            ...(isFirstInBatch ? { breakdown } : {}),
           },
         });
       }
@@ -359,7 +389,7 @@ export function BulkPaymentModal({
             value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder="e.g. UPI transfer reference, consolidated month-end settlement"
-            className="w-full px-4 py-2.5 rounded-xl border border-outline-variant/40 bg-surface text-on-surface text-xs outline-none focus:border-primary"
+            className="w-full px-4 py-2.5 rounded-xl border border-outline-variant/40 bg-surface text-on-surface text-base md:text-xs outline-none focus:border-primary"
           />
         </div>
 

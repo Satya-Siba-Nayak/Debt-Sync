@@ -103,6 +103,17 @@ interface Profile {
   notify_email: boolean | null;
 }
 
+interface BreakdownItem {
+  debt_id?: string;
+  label?: string;
+  principal?: number;
+  allocated?: number;
+  amount?: number;
+  remaining?: number;
+  cleared?: boolean;
+  rate?: number;
+}
+
 interface Message {
   title: string;
   body: string;
@@ -110,6 +121,12 @@ interface Message {
   tag: string;
   cta: string;
   amountLine?: string;
+  amountLabel?: string;
+  strategy?: string;
+  transactionRef?: string;
+  paymentMethod?: string;
+  currency?: string;
+  breakdown?: BreakdownItem[];
 }
 
 function displayName(p?: Profile | null): string {
@@ -122,13 +139,19 @@ function buildMessage(
   actorName: string,
   debt: any | null,
   details: Record<string, any>,
-  recipientIsGhost: boolean
+  recipientIsGhost: boolean,
+  actorId?: string | null
 ): Message {
   const currency = debt?.currency || details.currency || 'inr';
   const debtAmount = formatAmount(debt?.principal ?? details.principal, currency);
-  const eventAmount = formatAmount(details.amount ?? debt?.principal, currency);
+  const isBulk = Boolean(details.is_bulk) && Array.isArray(details.breakdown) && details.breakdown.length > 0;
+  const totalBulkRaw = details.total_bulk_amount ?? details.amount ?? debt?.principal;
+  const eventAmount = formatAmount(isBulk ? totalBulkRaw : (details.amount ?? debt?.principal), currency);
   const debtUrl = debt?.id ? `${APP_URL}/transactions?debt=${debt.id}` : `${APP_URL}/transactions`;
-  const tagBase = debt?.id || 'general';
+  const ledgerUrl = actorId ? `${APP_URL}/directory/detail?id=${actorId}` : debtUrl;
+  const tagBase = details.batch_id || debt?.id || 'general';
+  const strategyLabel = details.strategy ? String(details.strategy).toUpperCase() : 'BULK';
+  const count = details.allocations_count || (Array.isArray(details.breakdown) ? details.breakdown.length : 1);
 
   switch (event) {
     case 'debt_inserted': {
@@ -156,16 +179,49 @@ function buildMessage(
       };
     }
     case 'repayment_reported':
-    case 'payment_made':
+    case 'payment_made': {
+      if (isBulk) {
+        return {
+          title: `Bulk Repayment of ${eventAmount} (${strategyLabel}) across ${count} loans`,
+          body: `${actorName} reported a Smart Bulk Repayment (${strategyLabel}) totaling ${eventAmount} across ${count} loans on your shared ledger. Review the itemized breakdown below and verify all receipts with a single tap.`,
+          amountLine: eventAmount,
+          amountLabel: `Total Bulk Repayment (${strategyLabel} • ${count} Loans)`,
+          strategy: strategyLabel,
+          transactionRef: details.transaction_ref || undefined,
+          paymentMethod: details.payment_method || undefined,
+          currency,
+          breakdown: details.breakdown,
+          url: ledgerUrl,
+          tag: `bulk-${tagBase}-repayment`,
+          cta: `Verify All ${count} Repayments`,
+        };
+      }
       return {
         title: `Repayment of ${eventAmount} reported`,
         body: `${actorName} reported a repayment of ${eventAmount}. Please review and verify the receipt.`,
         amountLine: eventAmount,
+        transactionRef: details.transaction_ref || undefined,
+        paymentMethod: details.payment_method || undefined,
+        currency,
         url: debtUrl,
         tag: `debt-${tagBase}-repayment`,
         cta: 'Verify Repayment',
       };
-    case 'payment_verified':
+    }
+    case 'payment_verified': {
+      if (isBulk) {
+        return {
+          title: `Bulk Repayment Verified (${eventAmount} across ${count} loans)`,
+          body: `${actorName} verified your bulk repayment totaling ${eventAmount} across ${count} loans. Your shared ledger balances have been updated.`,
+          amountLine: eventAmount,
+          amountLabel: `Total Verified (${count} Loans)`,
+          currency,
+          breakdown: details.breakdown,
+          url: ledgerUrl,
+          tag: `bulk-${tagBase}-verified`,
+          cta: 'View Updated Ledger',
+        };
+      }
       return {
         title: `Payment verified (${eventAmount})`,
         body: `${actorName} verified your repayment of ${eventAmount}. Your ledger has been updated.`,
@@ -174,7 +230,21 @@ function buildMessage(
         tag: `debt-${tagBase}-verified`,
         cta: 'View Updated Balance',
       };
-    case 'payment_disputed':
+    }
+    case 'payment_disputed': {
+      if (isBulk) {
+        return {
+          title: `Bulk Repayment Disputed by ${actorName}`,
+          body: `${actorName} marked your bulk repayment of ${eventAmount} (${count} loans) as disputed. Please review the ledger details.`,
+          amountLine: eventAmount,
+          amountLabel: `Disputed Bulk Repayment (${count} Loans)`,
+          currency,
+          breakdown: details.breakdown,
+          url: ledgerUrl,
+          tag: `bulk-${tagBase}-disputed`,
+          cta: 'Review Disputed Receipts',
+        };
+      }
       return {
         title: `Repayment disputed by ${actorName}`,
         body: `${actorName} marked a reported payment of ${eventAmount} as disputed. Please check the transaction details.`,
@@ -183,6 +253,7 @@ function buildMessage(
         tag: `debt-${tagBase}-disputed`,
         cta: 'Review Disputed Payment',
       };
+    }
     case 'debt_accepted':
       return {
         title: `Transaction agreement accepted`,
@@ -343,8 +414,52 @@ function buildEmailHtml(
             ${
               msg.amountLine
                 ? `<div style="background-color:#162234;border:1px solid #253750;border-radius:14px;padding:18px 20px;margin:20px 0;">
-              <div style="font-size:11px;text-transform:uppercase;color:#94a3b8;font-weight:700;letter-spacing:1px;">Transaction Amount</div>
+              <div style="font-size:11px;text-transform:uppercase;color:#94a3b8;font-weight:700;letter-spacing:1px;">${escapeHtml(msg.amountLabel || 'Transaction Amount')}</div>
               <div style="font-size:26px;font-weight:800;color:#22d3ee;margin-top:4px;letter-spacing:-0.5px;" class="amount-headline">${escapeHtml(msg.amountLine)}</div>
+              ${
+                msg.transactionRef || msg.paymentMethod
+                  ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid #253750;font-size:12px;color:#cbd5e1;font-family:monospace;">
+                      ${msg.paymentMethod ? `<span style="color:#67e8f9;font-weight:700;text-transform:uppercase;">${escapeHtml(msg.paymentMethod)}</span>` : ''}
+                      ${msg.transactionRef ? `${msg.paymentMethod ? ' &bull; ' : ''}Ref/UTR: <strong style="color:#ffffff;">${escapeHtml(msg.transactionRef)}</strong>` : ''}
+                    </div>`
+                  : ''
+              }
+            </div>`
+                : ''
+            }
+
+            ${
+              msg.breakdown && msg.breakdown.length > 0
+                ? `<div style="background-color:#0d1522;border:1px solid #1f2d42;border-radius:14px;padding:16px 18px;margin:18px 0;">
+              <div style="font-size:11px;text-transform:uppercase;color:#67e8f9;font-weight:700;letter-spacing:1px;margin-bottom:10px;">
+                Payment Breakdown (${msg.breakdown.length} Loans${msg.strategy ? ` &bull; ${escapeHtml(msg.strategy)}` : ''})
+              </div>
+              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+                ${msg.breakdown
+                  .map((item, idx) => {
+                    const itemCur = msg.currency || 'inr';
+                    const allocFormatted = formatAmount(item.allocated ?? item.amount ?? 0, itemCur);
+                    const remFormatted =
+                      typeof item.remaining === 'number' ? formatAmount(item.remaining, itemCur) : '';
+                    const isCleared = Boolean(item.cleared) || (typeof item.remaining === 'number' && item.remaining <= 0.01);
+                    const itemTitle =
+                      item.label?.trim() ||
+                      (item.principal ? `Loan (${formatAmount(item.principal, itemCur)})` : `Loan #${idx + 1}`);
+                    return `<tr style="${idx > 0 ? 'border-top:1px solid #1c283a;' : ''}">
+                      <td style="padding:9px 4px 9px 0;font-size:13px;color:#e2e8f0;font-weight:600;">
+                        <div>${escapeHtml(itemTitle)}</div>
+                        <div style="font-size:11px;color:#94a3b8;font-weight:400;margin-top:2px;">
+                          ${item.rate && Number(item.rate) > 0 ? `${Number(item.rate)}% APR` : '0% APR'}
+                          ${isCleared ? ' &bull; <span style="color:#34d399;font-weight:700;">Clears Loan</span>' : remFormatted ? ` &bull; Remaining: ${escapeHtml(remFormatted)}` : ''}
+                        </div>
+                      </td>
+                      <td align="right" style="padding:9px 0 9px 8px;font-size:14px;font-weight:700;color:#22d3ee;font-family:monospace;white-space:nowrap;">
+                        ${escapeHtml(allocFormatted)}
+                      </td>
+                    </tr>`;
+                  })
+                  .join('')}
+              </table>
             </div>`
                 : ''
             }
@@ -698,7 +813,7 @@ Deno.serve(async (req: Request) => {
       if (!recipient) continue;
 
       const ghost = Boolean(recipient.is_shadow);
-      const msg = buildMessage(event, actorName, debt, details, ghost);
+      const msg = buildMessage(event, actorName, debt, details, ghost, actorId);
 
       const channel = (details.channel || 'both').toLowerCase();
       const allowEmail = channel === 'email' || channel === 'both';

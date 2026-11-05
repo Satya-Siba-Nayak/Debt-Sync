@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Modal } from '../ui/Modal';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment, Profile, PaymentMethod } from '@/lib/types/database';
@@ -12,10 +12,9 @@ import { parseSplitDetails, getCleanDebtNotes, getDebtDisplayLabel } from '@/lib
 import {
   generateUPILink,
   generateUPIQRCodeDataURL,
-  detectUPIApp,
   getSortedUPIAppsForUser,
+  getUPIAppLaunchUrl,
   maskBankAccount,
-  isValidIFSC,
 } from '@/lib/utils/upi-link';
 
 export type RepayAllocationStrategy = 'avalanche' | 'due_date' | 'fifo';
@@ -132,9 +131,22 @@ export function PersonRepaymentModal({
     [currentUserUpiId]
   );
 
-  // Initialize selected debt on open or change
+  const prevIsOpenRef = useRef(false);
+  const prevInitialDebtIdRef = useRef<string | null | undefined>(undefined);
+
+  // Initialize selected debt on open or when initialSelectedDebtId changes
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      prevIsOpenRef.current = false;
+      return;
+    }
+
+    const isJustOpening = !prevIsOpenRef.current;
+    const isDifferentTarget = prevInitialDebtIdRef.current !== initialSelectedDebtId;
+    if (!isJustOpening && !isDifferentTarget) return;
+
+    prevIsOpenRef.current = true;
+    prevInitialDebtIdRef.current = initialSelectedDebtId;
 
     if (initialSelectedDebtId && eligibleDebts.some((d) => d.debt.id === initialSelectedDebtId)) {
       setSelectedDebtId(initialSelectedDebtId);
@@ -152,10 +164,10 @@ export function PersonRepaymentModal({
         setAmount(eligibleDebts[0].allowableBalance);
         setAmountStr(eligibleDebts[0].allowableBalance.toFixed(2));
       } else {
-        // Default to bulk repaying full amount or single first debt
-        setRepayMode('single');
-        setAmount(eligibleDebts[0].allowableBalance);
-        setAmountStr(eligibleDebts[0].allowableBalance.toFixed(2));
+        // Default to bulk repaying full amount when clicking top-level Pay across multiple loans
+        setRepayMode('bulk');
+        setAmount(totalOwedAll);
+        setAmountStr(totalOwedAll > 0 ? totalOwedAll.toFixed(2) : '');
       }
     }
 
@@ -174,7 +186,7 @@ export function PersonRepaymentModal({
       setPaymentMethod('cash');
     }
     setError('');
-  }, [isOpen, initialSelectedDebtId, eligibleDebts, hasMultipleDebts, person, hasUpi, hasBank]);
+  }, [isOpen, initialSelectedDebtId, eligibleDebts, hasMultipleDebts, totalOwedAll, person, hasUpi, hasBank]);
 
   // Handle switching between single and bulk modes
   const handleSwitchMode = (mode: 'single' | 'bulk') => {
@@ -417,7 +429,27 @@ export function PersonRepaymentModal({
           throw new Error('No eligible loans available to receive repayment allocations.');
         }
 
-        for (const item of validAllocations) {
+        const batchId = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`.toUpperCase();
+        const totalBulkAmount = round2(validAllocations.reduce((sum, a) => sum + a.allocated, 0));
+        const breakdown = validAllocations.map((item) => {
+          const split = parseSplitDetails(item.debt);
+          const cleanNote = getCleanDebtNotes(item.debt.notes);
+          const label = split?.title || cleanNote || `Loan #${item.debt.id.slice(0, 6)}`;
+          return {
+            debt_id: item.debt.id,
+            label,
+            principal: Number(item.debt.principal) || 0,
+            allocated: round2(item.allocated),
+            remaining: round2(item.newBalance),
+            cleared: item.newBalance <= 0.01,
+            rate: item.rate,
+          };
+        });
+
+        for (let idx = 0; idx < validAllocations.length; idx++) {
+          const item = validAllocations[idx];
+          const isPrimaryNotification = idx === 0;
+
           const { error: pErr } = await supabase.from('payments').insert({
             debt_id: item.debt.id,
             paid_by: user.id,
@@ -426,7 +458,7 @@ export function PersonRepaymentModal({
             payment_method: paymentMethod,
             transaction_ref: transactionRef.trim() || null,
             note: note.trim()
-              ? `Bulk Repayment: ${note.trim()}`
+              ? `Bulk Repayment (${strategy.toUpperCase()}): ${note.trim()}`
               : `Smart Bulk Repayment (${strategy.toUpperCase()})`,
             is_verified: false,
           });
@@ -437,11 +469,28 @@ export function PersonRepaymentModal({
             user_id: user.id,
             debt_id: item.debt.id,
             action: 'repayment_reported',
-            details: {
-              amount: item.allocated,
-              strategy,
-              transaction_ref: transactionRef.trim() || null,
-            },
+            details: isPrimaryNotification
+              ? {
+                  amount: item.allocated,
+                  total_bulk_amount: totalBulkAmount,
+                  is_bulk: validAllocations.length > 1,
+                  batch_id: batchId,
+                  allocations_count: validAllocations.length,
+                  strategy: strategy.toUpperCase(),
+                  payment_method: paymentMethod,
+                  transaction_ref: transactionRef.trim() || null,
+                  note: note.trim() || null,
+                  breakdown,
+                  suppress_notification: false,
+                }
+              : {
+                  amount: item.allocated,
+                  batch_id: batchId,
+                  strategy: strategy.toUpperCase(),
+                  payment_method: paymentMethod,
+                  transaction_ref: transactionRef.trim() || null,
+                  suppress_notification: true,
+                },
           });
         }
 
@@ -451,9 +500,11 @@ export function PersonRepaymentModal({
             recipientEmail: person.email,
             recipientName: person.full_name || 'Lender',
             senderName: user.user_metadata?.full_name || user.email || 'Borrower',
-            amount: round2(amount),
+            amount: totalBulkAmount,
             currency,
-            notes: note.trim() || `Smart Bulk Repayment across ${validAllocations.length} loans`,
+            strategy: strategy.toUpperCase(),
+            breakdown,
+            notes: note.trim() || `Smart Bulk Repayment (${strategy.toUpperCase()}) across ${validAllocations.length} loans`,
           });
         }
       }
@@ -884,7 +935,7 @@ export function PersonRepaymentModal({
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {sortedApps.map((app) => {
                       const isUserPreferred = userPreferredApp?.id === app.id;
-                      const launchUrl = upiLink;
+                      const launchUrl = getUPIAppLaunchUrl(app.id, upiLink);
                       return (
                         <a
                           key={app.id}

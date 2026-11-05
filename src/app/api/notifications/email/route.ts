@@ -11,6 +11,16 @@ interface EmailPayload {
   notes?: string;
   debtId?: string;
   dueDate?: string;
+  strategy?: string;
+  breakdown?: Array<{
+    debt_id?: string;
+    label?: string;
+    principal?: number;
+    allocated?: number;
+    remaining?: number;
+    cleared?: boolean;
+    rate?: number;
+  }>;
 }
 
 // In-memory rate limiting map: recipientEmail:type -> timestamp
@@ -109,10 +119,18 @@ export async function POST(request: NextRequest) {
       ctaText = 'Sign Up to Review & Accept';
       ctaUrl = signupUrl;
     } else if (type === 'payment_request') {
-      subject = `Repayment of ${formattedAmount} reported by ${senderName}`;
-      headline = 'Payment Verification Request';
-      description = `<strong>${senderName}</strong> has reported a repayment of <strong>${formattedAmount}</strong> on your shared ledger. Please review and verify the receipt.`;
-      ctaText = 'Verify Repayment Receipt';
+      if (body.breakdown && body.breakdown.length > 0) {
+        const stratLabel = body.strategy ? body.strategy.toUpperCase() : 'BULK';
+        subject = `Bulk Repayment of ${formattedAmount} (${stratLabel} across ${body.breakdown.length} loans) reported by ${senderName}`;
+        headline = `Bulk Payment Verification Request (${stratLabel})`;
+        description = `<strong>${senderName}</strong> has reported a Smart Bulk Repayment (${stratLabel}) totaling <strong>${formattedAmount}</strong> across <strong>${body.breakdown.length} loans</strong> on your shared ledger. Please review the breakdown below and verify all receipts with a single tap.`;
+        ctaText = `Verify All ${body.breakdown.length} Repayments`;
+      } else {
+        subject = `Repayment of ${formattedAmount} reported by ${senderName}`;
+        headline = 'Payment Verification Request';
+        description = `<strong>${senderName}</strong> has reported a repayment of <strong>${formattedAmount}</strong> on your shared ledger. Please review and verify the receipt.`;
+        ctaText = 'Verify Repayment Receipt';
+      }
     } else if (type === 'split_bill_request') {
       subject = `${senderName} split an expense with you: ${formattedAmount}`;
       headline = 'Group Expense Split Request';
@@ -171,10 +189,41 @@ export async function POST(request: NextRequest) {
               <p style="font-size:14px; line-height:1.65; color:#cbd5e1;">${description}</p>
               
               <div class="card" style="background-color:#162234; border:1px solid #253750; border-radius:14px; padding:18px 20px; margin:20px 0;">
-                <div style="font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:700; letter-spacing:1px; margin-bottom:4px;">Transaction Amount</div>
+                <div style="font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:700; letter-spacing:1px; margin-bottom:4px;">${body.breakdown && body.breakdown.length > 0 ? `Total Bulk Repayment (${body.breakdown.length} Loans)` : 'Transaction Amount'}</div>
                 <div style="font-size:26px; font-weight:800; color:#22d3ee;">${formattedAmount}</div>
                 ${notes ? `<div style="margin-top:10px; font-size:12px; color:#94a3b8; font-style:italic;">"${notes}"</div>` : ''}
               </div>
+
+              ${
+                body.breakdown && body.breakdown.length > 0
+                  ? `<div style="background-color:#0d1522; border:1px solid #1f2d42; border-radius:14px; padding:16px 18px; margin:18px 0;">
+                      <div style="font-size:11px; text-transform:uppercase; color:#67e8f9; font-weight:700; letter-spacing:1px; margin-bottom:10px;">
+                        Payment Breakdown (${body.breakdown.length} Loans${body.strategy ? ` &bull; ${body.strategy.toUpperCase()}` : ''})
+                      </div>
+                      <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+                        ${body.breakdown
+                          .map((item, idx) => {
+                            const allocStr = `${currency.toUpperCase()} ${Number(item.allocated || 0).toLocaleString()}`;
+                            const isCleared = Boolean(item.cleared) || (typeof item.remaining === 'number' && item.remaining <= 0.01);
+                            const title = item.label || `Loan #${idx + 1}`;
+                            return `<tr style="${idx > 0 ? 'border-top:1px solid #1c283a;' : ''}">
+                              <td style="padding:9px 4px 9px 0; font-size:13px; color:#e2e8f0; font-weight:600;">
+                                <div>${title}</div>
+                                <div style="font-size:11px; color:#94a3b8; font-weight:400; margin-top:2px;">
+                                  ${item.rate && Number(item.rate) > 0 ? `${item.rate}% APR` : '0% APR'}
+                                  ${isCleared ? ' &bull; <span style="color:#34d399; font-weight:700;">Clears Loan</span>' : ''}
+                                </div>
+                              </td>
+                              <td align="right" style="padding:9px 0 9px 8px; font-size:14px; font-weight:700; color:#22d3ee; font-family:monospace; white-space:nowrap;">
+                                ${allocStr}
+                              </td>
+                            </tr>`;
+                          })
+                          .join('')}
+                      </table>
+                    </div>`
+                  : ''
+              }
 
               ${
                 type === 'ghost_account_invite'

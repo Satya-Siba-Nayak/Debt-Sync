@@ -421,28 +421,40 @@ export function DebtDetailModal({
     }
   };
 
-  const handleVerifyRepayment = async (paymentId: string, decision: 'verified' | 'disputed') => {
-    setVerifyingPaymentId(paymentId);
+  const handleVerifyPendingRepayments = async (
+    pendingList: Payment[],
+    decision: 'verified' | 'disputed'
+  ) => {
+    if (!pendingList.length) return;
+    const pids = pendingList.map((p) => p.id);
+    setVerifyingPaymentId(pids[0]);
     try {
       const rpcDecision = decision === 'verified' ? 'accepted' : 'declined';
+      const nowIso = new Date().toISOString();
       const updatedPaymentsSim = payments.map((p) =>
-        p.id === paymentId ? { ...p, is_verified: decision === 'verified' } : p
+        pids.includes(p.id) ? { ...p, is_verified: decision === 'verified' } : p
       );
       const simCalc = calculateDebtBalance(debt, updatedPaymentsSim);
       const shouldSettle = simCalc.currentBalance <= 0.01;
+      const totalAmount =
+        Math.round(pendingList.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) * 100) / 100;
 
       // Optimistic update
       setPayments((prev) =>
         prev.map((p) =>
-          p.id === paymentId
+          pids.includes(p.id)
             ? {
                 ...p,
                 is_verified: decision === 'verified',
-                verified_at: new Date().toISOString(),
+                verified_at: nowIso,
                 verified_by: currentUserId || p.verified_by,
                 note:
                   decision === 'disputed'
-                    ? (p.note?.includes('[DISPUTED]') ? p.note : (p.note ? `${p.note} [DISPUTED]` : 'Disputed by lender [DISPUTED]'))
+                    ? p.note?.includes('[DISPUTED]')
+                      ? p.note
+                      : p.note
+                        ? `${p.note} [DISPUTED]`
+                        : 'Disputed by lender [DISPUTED]'
                     : p.note,
               }
             : p
@@ -450,48 +462,58 @@ export function DebtDetailModal({
       );
 
       let handled = false;
-      try {
-        const { data, error } = await supabase.rpc('verify_repayment', {
-          p_payment_id: paymentId,
-          p_decision: rpcDecision,
-          p_should_settle: shouldSettle,
-        });
-        if (!error && data?.success) {
-          handled = true;
-        } else if (error) {
-          console.warn('DebtDetailModal verify_repayment RPC returned error, using fallback:', error.message);
-        }
-      } catch (rpcErr) {
-        console.warn('DebtDetailModal verify_repayment RPC threw exception, using fallback:', rpcErr);
+      if (pids.length === 1) {
+        try {
+          const { data, error } = await supabase.rpc('verify_repayment', {
+            p_payment_id: pids[0],
+            p_decision: rpcDecision,
+            p_should_settle: shouldSettle,
+          });
+          if (!error && data?.success) handled = true;
+        } catch (_) {}
+      } else {
+        try {
+          const { data, error } = await supabase.rpc('verify_all_repayments', {
+            p_payment_ids: pids,
+            p_decision: rpcDecision,
+          });
+          if (!error && data?.success) handled = true;
+        } catch (_) {}
       }
 
       if (!handled) {
-        const paymentItem = payments.find((p) => p.id === paymentId);
-
         if (decision === 'verified') {
           const { error: updateErr } = await supabase
             .from('payments')
             .update({
               is_verified: true,
-              verified_at: new Date().toISOString(),
+              verified_at: nowIso,
               verified_by: currentUserId,
             })
-            .eq('id', paymentId);
+            .in('id', pids);
 
           if (updateErr) throw updateErr;
 
           if (currentUserId) {
-            await supabase.from('activity_log').insert({
-              user_id: currentUserId,
-              debt_id: debt.id,
-              action: 'payment_verified',
-              details: {
-                payment_id: paymentId,
-                amount: paymentItem?.amount,
-                debt_settled: shouldSettle,
-                verified_by: currentUserId,
-              },
-            });
+            for (let i = 0; i < pendingList.length; i++) {
+              const pItem = pendingList[i];
+              const isFirst = i === 0;
+              await supabase.from('activity_log').insert({
+                user_id: currentUserId,
+                debt_id: debt.id,
+                action: 'payment_verified',
+                details: {
+                  payment_id: pItem.id,
+                  amount: pItem.amount,
+                  total_bulk_amount: totalAmount,
+                  is_bulk: pendingList.length > 1,
+                  allocations_count: pendingList.length,
+                  debt_settled: shouldSettle,
+                  verified_by: currentUserId,
+                  suppress_notification: !isFirst,
+                },
+              });
+            }
           }
 
           if (shouldSettle && debt.status !== 'settled') {
@@ -499,41 +521,51 @@ export function DebtDetailModal({
               .from('debts')
               .update({
                 status: 'settled',
-                settled_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
+                settled_at: nowIso,
+                updated_at: nowIso,
               })
               .eq('id', debt.id);
           }
         } else {
-          // Lender disputes repayment
-          const existingNote = paymentItem?.note || '';
-          const disputedNote = existingNote.includes('[DISPUTED]')
-            ? existingNote
-            : (existingNote ? `${existingNote} [DISPUTED]` : 'Disputed by lender [DISPUTED]');
+          for (let i = 0; i < pendingList.length; i++) {
+            const pItem = pendingList[i];
+            const isFirst = i === 0;
+            const existingNote = pItem.note || '';
+            const disputedNote = existingNote.includes('[DISPUTED]')
+              ? existingNote
+              : existingNote
+                ? `${existingNote} [DISPUTED]`
+                : 'Disputed by lender [DISPUTED]';
 
-          const { error: disputeErr } = await supabase
-            .from('payments')
-            .update({
-              is_verified: false,
-              verified_at: new Date().toISOString(),
-              verified_by: currentUserId,
-              note: disputedNote,
-            })
-            .eq('id', paymentId);
-
-          if (disputeErr) throw disputeErr;
-
-          if (currentUserId) {
-            await supabase.from('activity_log').insert({
-              user_id: currentUserId,
-              debt_id: debt.id,
-              action: 'payment_disputed',
-              details: {
-                amount: paymentItem?.amount,
+            const { error: disputeErr } = await supabase
+              .from('payments')
+              .update({
+                is_verified: false,
+                verified_at: nowIso,
+                verified_by: currentUserId,
                 note: disputedNote,
-                disputed_by: currentUserId,
-              },
-            });
+              })
+              .eq('id', pItem.id);
+
+            if (disputeErr) throw disputeErr;
+
+            if (currentUserId) {
+              await supabase.from('activity_log').insert({
+                user_id: currentUserId,
+                debt_id: debt.id,
+                action: 'payment_disputed',
+                details: {
+                  payment_id: pItem.id,
+                  amount: pItem.amount,
+                  total_bulk_amount: totalAmount,
+                  is_bulk: pendingList.length > 1,
+                  allocations_count: pendingList.length,
+                  note: disputedNote,
+                  disputed_by: currentUserId,
+                  suppress_notification: !isFirst,
+                },
+              });
+            }
           }
         }
       }
@@ -1931,101 +1963,208 @@ export function DebtDetailModal({
               </div>
             ) : (
               <div className="max-h-60 overflow-y-auto overscroll-contain modal-scroll-container pr-1 space-y-2.5">
-                {sortedPayments.map((p) => {
-                  const isDisputed =
-                    (p as any).status === 'disputed' ||
-                    ((p as any).is_verified === false && (p as any).verified_at != null) ||
-                    (typeof p.note === 'string' && p.note.includes('[DISPUTED]'));
-                  const isPending = (p as any).is_verified === false && !isDisputed;
-                  const isVerified = (p as any).is_verified === true;
+                {(() => {
+                  const pendingList = sortedPayments.filter((p) => {
+                    const isDisputed =
+                      (p as any).status === 'disputed' ||
+                      ((p as any).is_verified === false && (p as any).verified_at != null) ||
+                      (typeof p.note === 'string' && p.note.includes('[DISPUTED]'));
+                    return (p as any).is_verified === false && !isDisputed;
+                  });
+                  const resolvedList = sortedPayments.filter((p) => {
+                    const isDisputed =
+                      (p as any).status === 'disputed' ||
+                      ((p as any).is_verified === false && (p as any).verified_at != null) ||
+                      (typeof p.note === 'string' && p.note.includes('[DISPUTED]'));
+                    return (p as any).is_verified === true || isDisputed;
+                  });
+
+                  const totalPending =
+                    Math.round(
+                      pendingList.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) * 100
+                    ) / 100;
 
                   return (
-                    <div
-                      key={p.id}
-                      className={`p-3 rounded-xl border ${
-                        isPending
-                          ? 'border-amber-500/30 bg-amber-500/5'
-                          : isDisputed
-                          ? 'border-red-500/20 bg-red-500/5'
-                          : 'border-[var(--outline-variant)]/20 bg-[var(--surface-container-low)]'
-                      } flex flex-col sm:flex-row sm:items-center justify-between gap-3`}
-                    >
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-mono text-sm font-bold text-[var(--on-surface)]">
-                            {formatCurrency(Number(p.amount), p.currency || debtCurrency, { showDecimals: true })}
-                          </span>
+                    <>
+                      {pendingList.length > 0 && (
+                        <div className="p-3 rounded-xl border border-amber-500/30 bg-amber-500/5 space-y-2.5">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-mono text-sm font-bold text-[var(--on-surface)]">
+                                  {formatCurrency(
+                                    totalPending,
+                                    pendingList[0].currency || debtCurrency,
+                                    { showDecimals: true }
+                                  )}
+                                </span>
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                                  <span className="material-symbols-outlined text-[12px]">schedule</span>
+                                  Pending Lender Verification
+                                </span>
+                                {pendingList.length > 1 && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)]">
+                                    {pendingList.length} Payments
+                                  </span>
+                                )}
+                              </div>
 
-                          {isVerified && (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-                              <span className="material-symbols-outlined text-[12px]">verified</span>
-                              Verified Receipt
-                            </span>
+                              {pendingList.length === 1 && (
+                                <div className="text-xs text-[var(--on-surface-variant)] mt-1 flex items-center gap-3 flex-wrap">
+                                  <span>{new Date(pendingList[0].created_at).toLocaleString()}</span>
+                                  {(pendingList[0] as any).payment_method && (() => {
+                                    const disp = formatPaymentMethodDisplay(
+                                      (pendingList[0] as any).payment_method,
+                                      (pendingList[0] as any).transaction_ref
+                                    );
+                                    return (
+                                      <span className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded border ${disp.badgeClass} flex items-center gap-1`}>
+                                        <span className="material-symbols-outlined text-[12px]">{disp.icon}</span>
+                                        <span>{disp.fullLabel}</span>
+                                      </span>
+                                    );
+                                  })()}
+                                  {(pendingList[0] as any).transaction_ref && (
+                                    <span className="font-mono text-[11px] text-[var(--primary)] flex items-center gap-1">
+                                      <span>UTR: {(pendingList[0] as any).transaction_ref}</span>
+                                    </span>
+                                  )}
+                                  {pendingList[0].note && (
+                                    <span className="font-mono text-[11px] italic">
+                                      &quot;{pendingList[0].note}&quot;
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            {isLender && (
+                              <div className="flex items-center gap-2 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleVerifyPendingRepayments(pendingList, 'verified')}
+                                  disabled={verifyingPaymentId != null}
+                                  className="py-1.5 px-3 rounded-lg bg-emerald-600 text-white font-mono text-xs font-bold hover:bg-emerald-700 transition-colors flex items-center gap-1 disabled:opacity-50 cursor-pointer shadow-xs"
+                                >
+                                  <span className="material-symbols-outlined text-[14px]">done_all</span>
+                                  <span>
+                                    {pendingList.length > 1
+                                      ? `Verify Receipt (${pendingList.length})`
+                                      : 'Verify Receipt'}
+                                  </span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (
+                                      confirm(
+                                        pendingList.length > 1
+                                          ? `Dispute all ${pendingList.length} pending repayment receipts?`
+                                          : 'Dispute this unverified repayment receipt?'
+                                      )
+                                    ) {
+                                      handleVerifyPendingRepayments(pendingList, 'disputed');
+                                    }
+                                  }}
+                                  disabled={verifyingPaymentId != null}
+                                  className="py-1.5 px-2.5 rounded-lg border border-red-500/30 text-red-600 dark:text-red-400 font-mono text-xs font-semibold hover:bg-red-500/10 transition-colors disabled:opacity-50 cursor-pointer"
+                                >
+                                  Dispute
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          {pendingList.length > 1 && (
+                            <div className="rounded-lg bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)]/25 divide-y divide-[var(--outline-variant)]/15 overflow-hidden">
+                              {pendingList.map((p) => (
+                                <div
+                                  key={p.id}
+                                  className="px-2.5 py-1.5 flex items-center justify-between gap-2 text-xs font-mono"
+                                >
+                                  <div className="min-w-0 flex-1 text-[var(--on-surface-variant)] truncate">
+                                    <span>{new Date(p.created_at).toLocaleString()}</span>
+                                    {p.note && <span className="ml-2 italic">&quot;{p.note}&quot;</span>}
+                                  </div>
+                                  <span className="font-bold text-emerald-600 dark:text-emerald-400 shrink-0">
+                                    {formatCurrency(Number(p.amount), p.currency || debtCurrency, {
+                                      showDecimals: true,
+                                    })}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
                           )}
-
-                          {isPending && (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
-                              <span className="material-symbols-outlined text-[12px]">schedule</span>
-                              Pending Lender Verification
-                            </span>
-                          )}
-
-                          {isDisputed && (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30 flex items-center gap-1">
-                              <span className="material-symbols-outlined text-[12px]">error</span>
-                              Receipt Disputed by Lender
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="text-xs text-[var(--on-surface-variant)] mt-1 flex items-center gap-3 flex-wrap">
-                          <span>{new Date(p.created_at).toLocaleString()}</span>
-                          {(p as any).payment_method && (() => {
-                            const disp = formatPaymentMethodDisplay((p as any).payment_method, (p as any).transaction_ref);
-                            return (
-                              <span className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded border ${disp.badgeClass} flex items-center gap-1`}>
-                                <span className="material-symbols-outlined text-[12px]">{disp.icon}</span>
-                                <span>{disp.fullLabel}</span>
-                              </span>
-                            );
-                          })()}
-                          {(p as any).transaction_ref && (
-                            <span className="font-mono text-[11px] text-[var(--primary)] flex items-center gap-1">
-                              <span>UTR: {(p as any).transaction_ref}</span>
-                            </span>
-                          )}
-                          {p.note && <span className="font-mono text-[11px] italic">"{p.note}"</span>}
-                        </div>
-                      </div>
-
-                      {isPending && isLender && (
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleVerifyRepayment(p.id, 'verified')}
-                            disabled={verifyingPaymentId === p.id}
-                            className="py-1 px-2.5 rounded-lg bg-emerald-600 text-white font-mono text-xs font-bold hover:bg-emerald-700 transition-colors flex items-center gap-1 disabled:opacity-50 cursor-pointer shadow-xs"
-                          >
-                            <span className="material-symbols-outlined text-[14px]">check</span>
-                            <span>Verify</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (confirm('Dispute this unverified repayment receipt?')) {
-                                handleVerifyRepayment(p.id, 'disputed');
-                              }
-                            }}
-                            disabled={verifyingPaymentId === p.id}
-                            className="py-1 px-2.5 rounded-lg border border-red-500/30 text-red-600 dark:text-red-400 font-mono text-xs font-semibold hover:bg-red-500/10 transition-colors disabled:opacity-50 cursor-pointer"
-                          >
-                            Dispute
-                          </button>
                         </div>
                       )}
-                    </div>
+
+                      {resolvedList.map((p) => {
+                        const isDisputed =
+                          (p as any).status === 'disputed' ||
+                          ((p as any).is_verified === false && (p as any).verified_at != null) ||
+                          (typeof p.note === 'string' && p.note.includes('[DISPUTED]'));
+                        const isVerified = (p as any).is_verified === true;
+
+                        return (
+                          <div
+                            key={p.id}
+                            className={`p-3 rounded-xl border ${
+                              isDisputed
+                                ? 'border-red-500/20 bg-red-500/5'
+                                : 'border-[var(--outline-variant)]/20 bg-[var(--surface-container-low)]'
+                            } flex flex-col sm:flex-row sm:items-center justify-between gap-3`}
+                          >
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-mono text-sm font-bold text-[var(--on-surface)]">
+                                  {formatCurrency(Number(p.amount), p.currency || debtCurrency, {
+                                    showDecimals: true,
+                                  })}
+                                </span>
+
+                                {isVerified && (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                                    <span className="material-symbols-outlined text-[12px]">verified</span>
+                                    Verified Receipt
+                                  </span>
+                                )}
+
+                                {isDisputed && (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30 flex items-center gap-1">
+                                    <span className="material-symbols-outlined text-[12px]">error</span>
+                                    Receipt Disputed by Lender
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="text-xs text-[var(--on-surface-variant)] mt-1 flex items-center gap-3 flex-wrap">
+                                <span>{new Date(p.created_at).toLocaleString()}</span>
+                                {(p as any).payment_method && (() => {
+                                  const disp = formatPaymentMethodDisplay(
+                                    (p as any).payment_method,
+                                    (p as any).transaction_ref
+                                  );
+                                  return (
+                                    <span className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded border ${disp.badgeClass} flex items-center gap-1`}>
+                                      <span className="material-symbols-outlined text-[12px]">{disp.icon}</span>
+                                      <span>{disp.fullLabel}</span>
+                                    </span>
+                                  );
+                                })()}
+                                {(p as any).transaction_ref && (
+                                  <span className="font-mono text-[11px] text-[var(--primary)] flex items-center gap-1">
+                                    <span>UTR: {(p as any).transaction_ref}</span>
+                                  </span>
+                                )}
+                                {p.note && <span className="font-mono text-[11px] italic">&quot;{p.note}&quot;</span>}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </>
                   );
-                })}
+                })()}
               </div>
             )}
           </div>

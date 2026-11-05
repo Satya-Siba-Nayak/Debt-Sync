@@ -368,61 +368,192 @@ function PersonDebtDetailContent() {
     }
   };
 
-  const handleVerifyAllRepayments = async (pendingPaymentList: Payment[]) => {
+  const handleVerifyAllRepayments = async (
+    pendingPaymentList: Payment[],
+    decision: 'verified' | 'disputed' = 'verified'
+  ) => {
     if (!pendingPaymentList.length) return;
-    if (!confirm(`Verify all ${pendingPaymentList.length} pending repayment receipts at once?`)) return;
+    if (decision === 'disputed') {
+      const msg =
+        pendingPaymentList.length > 1
+          ? `Dispute all ${pendingPaymentList.length} pending repayment receipts?`
+          : 'Dispute this unverified repayment?';
+      if (!confirm(msg)) return;
+    }
 
     setVerifyingAll(true);
     try {
       const pids = pendingPaymentList.map((p) => p.id);
+      const nowIso = new Date().toISOString();
+      const totalBulkAmount = round2(
+        pendingPaymentList.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+      );
+      const breakdown = pendingPaymentList.map((p) => {
+        const d = debts.find((item) => item.id === p.debt_id);
+        const splitMeta = d ? parseSplitDetails(d) : null;
+        const cleanNotes = d ? getCleanDebtNotes(d.notes) : '';
+        const label =
+          splitMeta?.title || cleanNotes || `Loan #${String(p.debt_id || '').slice(0, 6)}`;
+        return {
+          debt_id: p.debt_id,
+          label,
+          amount: round2(Number(p.amount) || 0),
+          principal: Number(d?.principal || 0),
+          interest_rate: Number(d?.interest_rate || 0),
+        };
+      });
 
       // Optimistic local state update
-      setPayments((prev) =>
-        prev.map((p) =>
-          pids.includes(p.id)
-            ? {
-                ...p,
-                is_verified: true,
-                verified_at: new Date().toISOString(),
-                verified_by: currentUserId || p.verified_by,
-              }
-            : p
-        )
-      );
+      if (decision === 'verified') {
+        setPayments((prev) =>
+          prev.map((p) =>
+            pids.includes(p.id)
+              ? {
+                  ...p,
+                  is_verified: true,
+                  verified_at: nowIso,
+                  verified_by: currentUserId || p.verified_by,
+                }
+              : p
+          )
+        );
+      } else {
+        setPayments((prev) =>
+          prev.map((p) => {
+            if (!pids.includes(p.id)) return p;
+            const existingNote = p.note || '';
+            const disputedNote = existingNote.includes('[DISPUTED]')
+              ? existingNote
+              : existingNote
+                ? `${existingNote} [DISPUTED]`
+                : 'Disputed by lender [DISPUTED]';
+            return {
+              ...p,
+              is_verified: false,
+              verified_at: nowIso,
+              verified_by: currentUserId || p.verified_by,
+              note: disputedNote,
+            };
+          })
+        );
+      }
 
-      // Try batch RPC first
+      // Try batch RPC first (or single RPC if 1 item)
       let handled = false;
-      try {
-        const { data, error } = await supabase.rpc('verify_all_repayments', {
-          p_payment_ids: pids,
-        });
-        if (!error && data?.success) handled = true;
-      } catch (_) {}
+      const rpcDecision = decision === 'verified' ? 'accepted' : 'declined';
+      if (pids.length === 1) {
+        try {
+          const { data, error } = await supabase.rpc('verify_repayment', {
+            p_payment_id: pids[0],
+            p_decision: rpcDecision,
+          });
+          if (!error && data?.success) handled = true;
+        } catch (_) {}
+      } else {
+        try {
+          const { data, error } = await supabase.rpc('verify_all_repayments', {
+            p_payment_ids: pids,
+            p_decision: rpcDecision,
+          });
+          if (!error && data?.success) handled = true;
+        } catch (_) {}
+      }
 
       if (!handled) {
-        // Fallback: verify each one via direct update
-        for (const p of pendingPaymentList) {
-          const targetDebt = debts.find((d) => d.id === p.debt_id);
-          await supabase
+        if (decision === 'verified') {
+          const { error: updErr } = await supabase
             .from('payments')
             .update({
               is_verified: true,
-              verified_at: new Date().toISOString(),
+              verified_at: nowIso,
               verified_by: currentUserId,
             })
-            .eq('id', p.id);
+            .in('id', pids);
+          if (updErr) throw updErr;
 
-          if (targetDebt && currentUserId) {
-            await supabase.from('activity_log').insert({
-              user_id: currentUserId,
-              debt_id: targetDebt.id,
-              action: 'payment_verified',
-              details: {
-                payment_id: p.id,
-                amount: p.amount,
+          for (let i = 0; i < pendingPaymentList.length; i++) {
+            const p = pendingPaymentList[i];
+            const isFirst = i === 0;
+            const targetDebt = debts.find((d) => d.id === p.debt_id);
+            if (targetDebt && currentUserId) {
+              await supabase.from('activity_log').insert({
+                user_id: currentUserId,
+                debt_id: targetDebt.id,
+                action: 'payment_verified',
+                details: {
+                  payment_id: p.id,
+                  amount: p.amount,
+                  total_bulk_amount: totalBulkAmount,
+                  is_bulk: pendingPaymentList.length > 1,
+                  allocations_count: pendingPaymentList.length,
+                  verified_by: currentUserId,
+                  suppress_notification: !isFirst,
+                  ...(isFirst ? { breakdown } : {}),
+                },
+              });
+            }
+          }
+
+          // Check and settle any cleared debts
+          const affectedDebtIds = Array.from(new Set(pendingPaymentList.map((p) => p.debt_id)));
+          for (const dId of affectedDebtIds) {
+            const targetDebt = debts.find((d) => d.id === dId);
+            if (!targetDebt || targetDebt.status === 'settled') continue;
+            const updatedDebtPayments = payments
+              .filter((p) => p.debt_id === dId)
+              .map((p) => (pids.includes(p.id) ? { ...p, is_verified: true } : p));
+            const calc = calculateDebtBalance(targetDebt, updatedDebtPayments);
+            if (calc.currentBalance <= 0.01) {
+              await supabase
+                .from('debts')
+                .update({
+                  status: 'settled',
+                  settled_at: nowIso,
+                  updated_at: nowIso,
+                })
+                .eq('id', dId);
+            }
+          }
+        } else {
+          for (let i = 0; i < pendingPaymentList.length; i++) {
+            const p = pendingPaymentList[i];
+            const isFirst = i === 0;
+            const existingNote = p.note || '';
+            const disputedNote = existingNote.includes('[DISPUTED]')
+              ? existingNote
+              : existingNote
+                ? `${existingNote} [DISPUTED]`
+                : 'Disputed by lender [DISPUTED]';
+
+            const { error: dispErr } = await supabase
+              .from('payments')
+              .update({
+                is_verified: false,
+                verified_at: nowIso,
                 verified_by: currentUserId,
-              },
-            });
+                note: disputedNote,
+              })
+              .eq('id', p.id);
+            if (dispErr) throw dispErr;
+
+            if (currentUserId) {
+              await supabase.from('activity_log').insert({
+                user_id: currentUserId,
+                debt_id: p.debt_id,
+                action: 'payment_disputed',
+                details: {
+                  payment_id: p.id,
+                  amount: p.amount,
+                  total_bulk_amount: totalBulkAmount,
+                  is_bulk: pendingPaymentList.length > 1,
+                  allocations_count: pendingPaymentList.length,
+                  note: disputedNote,
+                  disputed_by: currentUserId,
+                  suppress_notification: !isFirst,
+                  ...(isFirst ? { breakdown } : {}),
+                },
+              });
+            }
           }
         }
       }
@@ -431,8 +562,8 @@ function PersonDebtDetailContent() {
       window.dispatchEvent(new CustomEvent('debtsync:refresh'));
       await fetchDetails();
     } catch (err: any) {
-      console.error('Error verifying all repayments:', err);
-      alert(err.message || 'Failed to verify all repayments');
+      console.error('Error verifying repayments:', err);
+      alert(err.message || 'Failed to process repayment verification');
       await fetchDetails();
     } finally {
       setVerifyingAll(false);
@@ -560,6 +691,17 @@ function PersonDebtDetailContent() {
       })
   );
 
+  const getLoanLabel = useCallback(
+    (debtId: string) => {
+      const d = debts.find((item) => item.id === debtId);
+      if (!d) return `Loan #${String(debtId || '').slice(0, 6)}`;
+      const splitMeta = parseSplitDetails(d);
+      const cleanNotes = getCleanDebtNotes(d.notes);
+      return splitMeta?.title || cleanNotes || `Loan #${d.id.slice(0, 6)}`;
+    },
+    [debts]
+  );
+
   const sortedPayments = sortPaymentsPendingFirst(payments);
   const pendingLenderPayments = sortedPayments.filter((p) => {
     const matchedDebt = debts.find((d) => d.id === p.debt_id);
@@ -570,6 +712,169 @@ function PersonDebtDetailContent() {
       (typeof p.note === 'string' && p.note.includes('[DISPUTED]'));
     return (p as any).is_verified === false && !isDisputed && isLenderOfDebt;
   });
+
+  const pendingBorrowerPayments = sortedPayments.filter((p) => {
+    const matchedDebt = debts.find((d) => d.id === p.debt_id);
+    const isLenderOfDebt = matchedDebt?.lender_id === currentUserId;
+    const isDisputed =
+      (p as any).status === 'disputed' ||
+      ((p as any).is_verified === false && (p as any).verified_at != null) ||
+      (typeof p.note === 'string' && p.note.includes('[DISPUTED]'));
+    return (p as any).is_verified === false && !isDisputed && !isLenderOfDebt;
+  });
+
+  const resolvedPayments = sortedPayments.filter((p) => {
+    const isDisputed =
+      (p as any).status === 'disputed' ||
+      ((p as any).is_verified === false && (p as any).verified_at != null) ||
+      (typeof p.note === 'string' && p.note.includes('[DISPUTED]'));
+    return (p as any).is_verified === true || isDisputed;
+  });
+
+  // Group resolved bulk payments (same status + created within 90s of each other) into consolidated receipt cards
+  const groupedResolvedPayments: {
+    id: string;
+    isDisputed: boolean;
+    isVerified: boolean;
+    totalAmount: number;
+    currency: string;
+    createdAt: string;
+    paymentMethod: string | null;
+    transactionRef: string | null;
+    note: string | null;
+    items: Payment[];
+  }[] = [];
+
+  for (const p of resolvedPayments) {
+    const isDisputed =
+      (p as any).status === 'disputed' ||
+      ((p as any).is_verified === false && (p as any).verified_at != null) ||
+      (typeof p.note === 'string' && p.note.includes('[DISPUTED]'));
+    const isVerified = (p as any).is_verified === true;
+    const pTime = new Date(p.created_at).getTime();
+    const isBulkNote =
+      typeof p.note === 'string' &&
+      (p.note.includes('Bulk Repayment') || p.note.includes('Smart Bulk'));
+
+    const prevGroup = groupedResolvedPayments[groupedResolvedPayments.length - 1];
+    const prevTime = prevGroup ? new Date(prevGroup.createdAt).getTime() : 0;
+    const prevIsBulkNote =
+      prevGroup &&
+      typeof prevGroup.note === 'string' &&
+      (prevGroup.note.includes('Bulk Repayment') || prevGroup.note.includes('Smart Bulk'));
+
+    if (
+      prevGroup &&
+      prevGroup.isDisputed === isDisputed &&
+      prevGroup.isVerified === isVerified &&
+      Math.abs(prevTime - pTime) <= 90_000 &&
+      (isBulkNote || prevIsBulkNote || prevGroup.items[0]?.transaction_ref === p.transaction_ref)
+    ) {
+      prevGroup.items.push(p);
+      prevGroup.totalAmount = round2(prevGroup.totalAmount + (Number(p.amount) || 0));
+      if (!prevGroup.paymentMethod && p.payment_method) prevGroup.paymentMethod = p.payment_method;
+      if (!prevGroup.transactionRef && p.transaction_ref) prevGroup.transactionRef = p.transaction_ref;
+    } else {
+      groupedResolvedPayments.push({
+        id: p.id,
+        isDisputed,
+        isVerified,
+        totalAmount: round2(Number(p.amount) || 0),
+        currency: p.currency || currency,
+        createdAt: p.created_at,
+        paymentMethod: p.payment_method || null,
+        transactionRef: p.transaction_ref || null,
+        note: p.note || null,
+        items: [p],
+      });
+    }
+  }
+
+  // Consolidate activity logs so bulk repayments/verifications appear as 1 unified audit trail event with breakdown
+  const consolidatedActivityLogs: {
+    id: string;
+    action: string;
+    created_at: string;
+    user_id: string;
+    debt_id: string | null;
+    totalAmount: number;
+    details: any;
+    breakdown: { label: string; amount: number; debt_id?: string }[];
+  }[] = [];
+
+  for (const log of activityLogs) {
+    const det = (log.details as any) || {};
+    if (det.suppress_notification === true) {
+      continue;
+    }
+
+    const isPaymentEvent =
+      log.action === 'repayment_reported' ||
+      log.action === 'payment_made' ||
+      log.action === 'payment_verified' ||
+      log.action === 'payment_disputed';
+
+    const logTime = new Date(log.created_at).getTime();
+    const prev = consolidatedActivityLogs[consolidatedActivityLogs.length - 1];
+    const prevTime = prev ? new Date(prev.created_at).getTime() : 0;
+
+    // If this log already carries an explicit bulk breakdown from migration 030 / updated modals:
+    if (isPaymentEvent && det.is_bulk && Array.isArray(det.breakdown) && det.breakdown.length > 0) {
+      consolidatedActivityLogs.push({
+        id: log.id,
+        action: log.action,
+        created_at: log.created_at,
+        user_id: log.user_id,
+        debt_id: log.debt_id,
+        totalAmount: round2(Number(det.total_bulk_amount || det.amount || 0)),
+        details: det,
+        breakdown: det.breakdown.map((b: any) => ({
+          label: b.label || getLoanLabel(b.debt_id || ''),
+          amount: round2(Number(b.amount || 0)),
+          debt_id: b.debt_id,
+        })),
+      });
+      continue;
+    }
+
+    // Group historical consecutive payment events (within 60s by same user & action) into one consolidated audit item
+    if (
+      isPaymentEvent &&
+      prev &&
+      prev.action === log.action &&
+      prev.user_id === log.user_id &&
+      !prev.details?.is_bulk &&
+      Math.abs(prevTime - logTime) <= 60_000
+    ) {
+      const amt = round2(Number(det.amount || 0));
+      prev.totalAmount = round2(prev.totalAmount + amt);
+      prev.breakdown.push({
+        label: getLoanLabel(log.debt_id || ''),
+        amount: amt,
+        debt_id: log.debt_id || undefined,
+      });
+    } else {
+      const amt = round2(Number(det.total_bulk_amount || det.amount || 0));
+      consolidatedActivityLogs.push({
+        id: log.id,
+        action: log.action,
+        created_at: log.created_at,
+        user_id: log.user_id,
+        debt_id: log.debt_id,
+        totalAmount: amt,
+        details: det,
+        breakdown: isPaymentEvent
+          ? [
+              {
+                label: getLoanLabel(log.debt_id || ''),
+                amount: round2(Number(det.amount || 0)),
+                debt_id: log.debt_id || undefined,
+              },
+            ]
+          : [],
+      });
+    }
+  }
 
   let filteredBalance = 0;
   for (const d of displayDebts) {
@@ -772,7 +1077,7 @@ function PersonDebtDetailContent() {
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-8 bg-surface-container-lowest rounded-2xl p-6 md:p-8 border border-outline-variant/30 shadow-sm flex flex-col justify-between">
           <div>
-            <div className="flex justify-between items-start">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
               <div>
                 <span className="font-mono text-xs text-on-surface-variant uppercase tracking-wider font-semibold">
                   Total Outstanding Balance
@@ -787,7 +1092,7 @@ function PersonDebtDetailContent() {
                 </div>
               </div>
 
-              <div className="text-right">
+              <div className="sm:text-right">
                 <span className="font-mono text-xs text-on-surface-variant uppercase tracking-wider font-semibold block">
                   Role Breakdown
                 </span>
@@ -800,7 +1105,7 @@ function PersonDebtDetailContent() {
 
             {/* Financial Breakdown 3-Way Split Bar */}
             <div className="mt-8">
-              <div className="flex justify-between text-xs font-mono text-on-surface-variant mb-2">
+              <div className="flex flex-wrap justify-between gap-2 text-xs font-mono text-on-surface-variant mb-2">
                 <span>Principal: {formatCurrency(remainingPrincipal, currency)}</span>
                 <span>Interest: +{formatCurrency(accruedInterest, currency, { showDecimals: true })}</span>
                 <span>Repaid: {formatCurrency(totalPaid, currency)}</span>
@@ -822,7 +1127,7 @@ function PersonDebtDetailContent() {
                   title={`Repaid: ${paidPct}%`}
                 />
               </div>
-              <div className="flex items-center gap-4 text-[11px] font-mono text-on-surface-variant mt-2">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] font-mono text-on-surface-variant mt-2">
                 <span className="flex items-center gap-1">
                   <span className="w-2 h-2 rounded-full bg-primary" /> Principal ({principalPct}%)
                 </span>
@@ -1300,7 +1605,7 @@ function PersonDebtDetailContent() {
 
       {/* Repayments & Verification Section */}
       {payments.length > 0 && (
-        <section className="bg-surface-container-lowest rounded-2xl p-6 md:p-8 border border-outline-variant/30 shadow-sm">
+        <section className="bg-surface-container-lowest rounded-2xl p-4 sm:p-6 md:p-8 border border-outline-variant/30 shadow-sm">
           <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
             <div>
               <h3 className="font-heading text-lg font-bold text-on-surface">
@@ -1311,77 +1616,259 @@ function PersonDebtDetailContent() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              {pendingLenderPayments.length > 1 && (
-                <button
-                  type="button"
-                  onClick={() => handleVerifyAllRepayments(pendingLenderPayments)}
-                  disabled={verifyingAll}
-                  className="py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-mono text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-sm"
-                  title="Verify all pending repayment receipts at once"
-                >
-                  <span className="material-symbols-outlined text-[15px]">
-                    {verifyingAll ? 'hourglass_top' : 'done_all'}
-                  </span>
-                  <span>{verifyingAll ? 'Verifying...' : `Verify All (${pendingLenderPayments.length})`}</span>
-                </button>
-              )}
               <span className="font-mono text-xs px-2.5 py-1 rounded-full bg-surface-container text-on-surface-variant">
                 {payments.length} payment{payments.length > 1 ? 's' : ''}
               </span>
             </div>
           </div>
 
-          <div className="max-h-[380px] overflow-y-auto overscroll-contain modal-scroll-container pr-1 sm:pr-2 space-y-3">
-            {sortedPayments.map((p) => {
-              const matchedDebt = debts.find((d) => d.id === p.debt_id);
-              const isLenderOfDebt = matchedDebt?.lender_id === currentUserId;
-              const isDisputed =
-                (p as any).status === 'disputed' ||
-                ((p as any).is_verified === false && (p as any).verified_at != null) ||
-                (typeof p.note === 'string' && p.note.includes('[DISPUTED]'));
-              const isPending = (p as any).is_verified === false && !isDisputed;
-              const isVerified = (p as any).is_verified === true;
+          <div className="max-h-[460px] overflow-y-auto overscroll-contain modal-scroll-container pr-1 sm:pr-2 space-y-3.5">
+            {/* 1. Consolidated Pending Lender Verification Card (Strictly ONE Verify button + ONE Dispute button with Breakdown) */}
+            {pendingLenderPayments.length > 0 && (() => {
+              const totalPendingAmount = round2(
+                pendingLenderPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+              );
+              const firstPayment = pendingLenderPayments[0];
+              const commonMethod =
+                pendingLenderPayments.find((p) => p.payment_method)?.payment_method || null;
+              const commonRef =
+                pendingLenderPayments.find((p) => p.transaction_ref)?.transaction_ref || null;
+              const commonNote =
+                pendingLenderPayments.find((p) => p.note)?.note || null;
 
               return (
-                <div
-                  key={p.id}
-                  className={`p-3.5 rounded-xl border ${
-                    isPending
-                      ? 'border-amber-500/30 bg-amber-500/5'
-                      : isDisputed
-                      ? 'border-red-500/20 bg-red-500/5'
-                      : 'border-outline-variant/20 bg-surface-container-low'
-                  } flex flex-col sm:flex-row sm:items-center justify-between gap-3`}
-                >
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-sm font-bold text-on-surface">
-                        {formatCurrency(Number(p.amount), p.currency || currency, { showDecimals: true })}
-                      </span>
-                      {isPending && (
+                <div className="p-4 rounded-xl border border-amber-500/40 bg-amber-500/5 space-y-3.5 shadow-xs">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-base sm:text-lg font-bold text-on-surface">
+                          {formatCurrency(totalPendingAmount, firstPayment.currency || currency, {
+                            showDecimals: true,
+                          })}
+                        </span>
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
                           <span className="material-symbols-outlined text-[12px]">schedule</span>
                           Pending Lender Verification
                         </span>
-                      )}
-                      {isDisputed && (
+                        {pendingLenderPayments.length > 1 && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-primary/15 text-primary border border-primary/25">
+                            {pendingLenderPayments.length} Loans Breakdown
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="text-xs text-on-surface-variant mt-1 flex items-center gap-3 flex-wrap">
+                        <span>{new Date(firstPayment.created_at).toLocaleString()}</span>
+                        {commonMethod && (() => {
+                          const disp = formatPaymentMethodDisplay(commonMethod, commonRef);
+                          return (
+                            <span className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded border ${disp.badgeClass} flex items-center gap-1`}>
+                              <span className="material-symbols-outlined text-[12px]">{disp.icon}</span>
+                              <span>{disp.fullLabel}</span>
+                            </span>
+                          );
+                        })()}
+                        {commonRef && (
+                          <span className="font-mono text-[11px] text-primary flex items-center gap-1">
+                            <span>UTR: {commonRef}</span>
+                          </span>
+                        )}
+                        {commonNote && <span className="font-mono text-[11px] italic">&quot;{commonNote}&quot;</span>}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleVerifyAllRepayments(pendingLenderPayments, 'verified')}
+                        disabled={verifyingAll}
+                        className="py-2 px-3.5 min-h-[38px] rounded-xl bg-emerald-600 text-white font-mono text-xs font-bold hover:bg-emerald-700 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-sm"
+                      >
+                        <span className="material-symbols-outlined text-[15px]">
+                          {verifyingAll ? 'hourglass_top' : 'done_all'}
+                        </span>
+                        <span>
+                          {verifyingAll
+                            ? 'Verifying...'
+                            : pendingLenderPayments.length > 1
+                              ? `Verify Receipt (${pendingLenderPayments.length})`
+                              : 'Verify Receipt'}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleVerifyAllRepayments(pendingLenderPayments, 'disputed')}
+                        disabled={verifyingAll}
+                        className="py-2 px-3 min-h-[38px] rounded-xl border border-red-500/30 text-red-600 dark:text-red-400 font-mono text-xs font-semibold hover:bg-red-500/10 transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        Dispute
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Itemized Breakdown Table */}
+                  <div className="rounded-xl bg-surface-container-lowest/90 border border-outline-variant/25 divide-y divide-outline-variant/15 overflow-hidden">
+                    <div className="px-3 py-1.5 bg-surface-container-low flex items-center justify-between text-[10px] font-mono font-bold uppercase tracking-wider text-on-surface-variant">
+                      <span>Payment Breakdown ({pendingLenderPayments.length} {pendingLenderPayments.length === 1 ? 'Loan' : 'Loans'})</span>
+                      <span>Allocated Amount</span>
+                    </div>
+                    {pendingLenderPayments.map((p) => {
+                      const d = debts.find((item) => item.id === p.debt_id);
+                      const loanLabel = getLoanLabel(p.debt_id);
+                      return (
+                        <div
+                          key={p.id}
+                          className="px-3 py-2 flex items-center justify-between gap-3 text-xs font-mono"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-bold text-on-surface truncate">{loanLabel}</span>
+                              {d && d.interest_type !== 'none' && d.interest_rate ? (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-semibold">
+                                  {d.interest_rate}% APR
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="text-[10px] text-on-surface-variant flex items-center gap-2 flex-wrap mt-0.5">
+                              <span>{new Date(p.created_at).toLocaleTimeString()}</span>
+                              {p.note && pendingLenderPayments.length > 1 && (
+                                <span className="italic truncate max-w-[240px]">&quot;{p.note}&quot;</span>
+                              )}
+                            </div>
+                          </div>
+                          <span className="font-bold text-emerald-600 dark:text-emerald-400 shrink-0">
+                            {formatCurrency(Number(p.amount), p.currency || currency, {
+                              showDecimals: true,
+                            })}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* 2. Consolidated Pending Borrower Repayments Card (When current user is the borrower awaiting lender verification) */}
+            {pendingBorrowerPayments.length > 0 && (() => {
+              const totalBorrowerPending = round2(
+                pendingBorrowerPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+              );
+              const firstPayment = pendingBorrowerPayments[0];
+              const commonMethod =
+                pendingBorrowerPayments.find((p) => p.payment_method)?.payment_method || null;
+              const commonRef =
+                pendingBorrowerPayments.find((p) => p.transaction_ref)?.transaction_ref || null;
+              const commonNote =
+                pendingBorrowerPayments.find((p) => p.note)?.note || null;
+
+              return (
+                <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/5 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-base font-bold text-on-surface">
+                          {formatCurrency(totalBorrowerPending, firstPayment.currency || currency, {
+                            showDecimals: true,
+                          })}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[12px]">schedule</span>
+                          Awaiting Lender Verification
+                        </span>
+                        {pendingBorrowerPayments.length > 1 && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-primary/15 text-primary border border-primary/25">
+                            {pendingBorrowerPayments.length} Loans
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-on-surface-variant mt-1 flex items-center gap-3 flex-wrap">
+                        <span>{new Date(firstPayment.created_at).toLocaleString()}</span>
+                        {commonMethod && (() => {
+                          const disp = formatPaymentMethodDisplay(commonMethod, commonRef);
+                          return (
+                            <span className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded border ${disp.badgeClass} flex items-center gap-1`}>
+                              <span className="material-symbols-outlined text-[12px]">{disp.icon}</span>
+                              <span>{disp.fullLabel}</span>
+                            </span>
+                          );
+                        })()}
+                        {commonRef && (
+                          <span className="font-mono text-[11px] text-primary">UTR: {commonRef}</span>
+                        )}
+                        {commonNote && <span className="font-mono text-[11px] italic">&quot;{commonNote}&quot;</span>}
+                      </div>
+                    </div>
+                  </div>
+
+                  {pendingBorrowerPayments.length > 1 && (
+                    <div className="rounded-xl bg-surface-container-lowest/90 border border-outline-variant/25 divide-y divide-outline-variant/15 overflow-hidden">
+                      <div className="px-3 py-1.5 bg-surface-container-low flex items-center justify-between text-[10px] font-mono font-bold uppercase tracking-wider text-on-surface-variant">
+                        <span>Payment Breakdown ({pendingBorrowerPayments.length} Loans)</span>
+                        <span>Allocated</span>
+                      </div>
+                      {pendingBorrowerPayments.map((p) => (
+                        <div
+                          key={p.id}
+                          className="px-3 py-1.5 flex items-center justify-between gap-3 text-xs font-mono"
+                        >
+                          <span className="text-on-surface font-medium truncate">
+                            {getLoanLabel(p.debt_id)}
+                          </span>
+                          <span className="font-bold text-on-surface shrink-0">
+                            {formatCurrency(Number(p.amount), p.currency || currency, {
+                              showDecimals: true,
+                            })}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* 3. Resolved (Verified or Disputed) Receipts (Consolidated for Bulk Payments) */}
+            {groupedResolvedPayments.map((grp) => (
+              <div
+                key={grp.id}
+                className={`p-3.5 rounded-xl border ${
+                  grp.isDisputed
+                    ? 'border-red-500/20 bg-red-500/5'
+                    : 'border-outline-variant/20 bg-surface-container-low'
+                } space-y-2.5`}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-sm font-bold text-on-surface">
+                        {formatCurrency(grp.totalAmount, grp.currency, { showDecimals: true })}
+                      </span>
+                      {grp.isDisputed && (
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30 flex items-center gap-1">
                           <span className="material-symbols-outlined text-[12px]">error</span>
-                          Receipt Disputed by Lender
+                          {grp.items.length > 1 ? 'Bulk Receipt Disputed' : 'Receipt Disputed by Lender'}
                         </span>
                       )}
-                      {isVerified && (
+                      {grp.isVerified && (
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
                           <span className="material-symbols-outlined text-[12px]">verified</span>
-                          Verified Receipt
+                          {grp.items.length > 1
+                            ? `Verified Bulk Receipt (${grp.items.length} Loans)`
+                            : 'Verified Receipt'}
+                        </span>
+                      )}
+                      {grp.items.length === 1 && (
+                        <span className="text-[11px] font-mono text-on-surface-variant">
+                          • {getLoanLabel(grp.items[0].debt_id)}
                         </span>
                       )}
                     </div>
 
                     <div className="text-xs text-on-surface-variant mt-1 flex items-center gap-3 flex-wrap">
-                      <span>{new Date(p.created_at).toLocaleString()}</span>
-                      {p.payment_method && (() => {
-                        const disp = formatPaymentMethodDisplay(p.payment_method, p.transaction_ref);
+                      <span>{new Date(grp.createdAt).toLocaleString()}</span>
+                      {grp.paymentMethod && (() => {
+                        const disp = formatPaymentMethodDisplay(grp.paymentMethod, grp.transactionRef);
                         return (
                           <span className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded border ${disp.badgeClass} flex items-center gap-1`}>
                             <span className="material-symbols-outlined text-[12px]">{disp.icon}</span>
@@ -1389,41 +1876,37 @@ function PersonDebtDetailContent() {
                           </span>
                         );
                       })()}
-                      {p.transaction_ref && (
+                      {grp.transactionRef && (
                         <span className="font-mono text-[11px] text-primary flex items-center gap-1">
-                          <span>UTR: {p.transaction_ref}</span>
+                          <span>UTR: {grp.transactionRef}</span>
                         </span>
                       )}
-                      {p.note && <span className="font-mono text-[11px] italic">"{p.note}"</span>}
+                      {grp.note && <span className="font-mono text-[11px] italic">&quot;{grp.note}&quot;</span>}
                     </div>
                   </div>
-
-                  {isPending && isLenderOfDebt && (
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleVerifyRepayment(p.id, 'verified')}
-                        disabled={verifyingPaymentId === p.id}
-                        className="py-1.5 px-3 rounded-lg bg-emerald-600 text-white font-mono text-xs font-bold hover:bg-emerald-700 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                      >
-                        <span className="material-symbols-outlined text-[14px]">check</span>
-                        <span>Verify Receipt</span>
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (confirm('Dispute this unverified repayment?')) {
-                            handleVerifyRepayment(p.id, 'disputed');
-                          }
-                        }}
-                        disabled={verifyingPaymentId === p.id}
-                        className="py-1.5 px-3 rounded-lg border border-red-500/30 text-red-600 dark:text-red-400 font-mono text-xs font-semibold hover:bg-red-500/10 transition-colors cursor-pointer disabled:opacity-50"
-                      >
-                        Dispute
-                      </button>
-                    </div>
-                  )}
                 </div>
-              );
-            })}
+
+                {grp.items.length > 1 && (
+                  <div className="rounded-lg bg-surface-container-lowest/80 border border-outline-variant/20 divide-y divide-outline-variant/10 overflow-hidden">
+                    {grp.items.map((item) => (
+                      <div
+                        key={item.id}
+                        className="px-3 py-1.5 flex items-center justify-between gap-2 text-[11px] font-mono"
+                      >
+                        <span className="text-on-surface-variant truncate">
+                          {getLoanLabel(item.debt_id)}
+                        </span>
+                        <span className="font-bold text-on-surface shrink-0">
+                          {formatCurrency(Number(item.amount), item.currency || currency, {
+                            showDecimals: true,
+                          })}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         </section>
       )}
@@ -1434,33 +1917,40 @@ function PersonDebtDetailContent() {
           <h3 className="font-heading text-lg font-bold text-on-surface">
             Activity Log &amp; Audit Trail
           </h3>
-          {activityLogs.length > 0 && (
+          {consolidatedActivityLogs.length > 0 && (
             <span className="font-mono text-[11px] text-on-surface-variant bg-surface-container px-2 py-0.5 rounded-full">
-              {activityLogs.length} events
+              {consolidatedActivityLogs.length} events
             </span>
           )}
         </div>
 
-        {activityLogs.length === 0 ? (
+        {consolidatedActivityLogs.length === 0 ? (
           <p className="font-mono text-xs text-on-surface-variant py-4">
             No activity logged yet.
           </p>
         ) : (
-          <div className="max-h-[300px] overflow-y-auto overscroll-contain modal-scroll-container pr-2">
+          <div className="max-h-[320px] overflow-y-auto overscroll-contain modal-scroll-container pr-2">
             <div className="relative pl-6 space-y-5 before:content-[''] before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-outline-variant/30">
-              {activityLogs.map((log) => {
+              {consolidatedActivityLogs.map((log) => {
                 let dotColor = 'bg-outline';
                 let title = log.action;
+                const isMultiLoan = log.breakdown.length > 1;
 
                 if (log.action === 'payment_made') {
                   dotColor = 'bg-secondary';
-                  title = `Payment Received (${formatCurrency(Number((log.details as any)?.amount || 0), currency)})`;
+                  title = isMultiLoan
+                    ? `Bulk Payment Received (${formatCurrency(log.totalAmount, currency, { showDecimals: true })} across ${log.breakdown.length} loans)`
+                    : `Payment Received (${formatCurrency(log.totalAmount, currency, { showDecimals: true })})`;
                 } else if (log.action === 'repayment_reported') {
                   dotColor = 'bg-amber-500';
-                  title = `Repayment Reported (${formatCurrency(Number((log.details as any)?.amount || 0), currency)})`;
+                  title = isMultiLoan
+                    ? `Bulk Repayment Reported (${formatCurrency(log.totalAmount, currency, { showDecimals: true })} across ${log.breakdown.length} loans)`
+                    : `Repayment Reported (${formatCurrency(log.totalAmount, currency, { showDecimals: true })})`;
                 } else if (log.action === 'payment_verified') {
                   dotColor = 'bg-emerald-500';
-                  title = 'Repayment Verified by Lender';
+                  title = isMultiLoan
+                    ? `Bulk Repayment Verified by Lender (${formatCurrency(log.totalAmount, currency, { showDecimals: true })} across ${log.breakdown.length} loans)`
+                    : `Repayment Verified by Lender${log.totalAmount > 0 ? ` (${formatCurrency(log.totalAmount, currency, { showDecimals: true })})` : ''}`;
                 } else if (log.action === 'creator_note_updated') {
                   dotColor = 'bg-primary';
                   title = 'Creator Note Updated';
@@ -1469,25 +1959,27 @@ function PersonDebtDetailContent() {
                   title = 'Counterparty Note Updated';
                 } else if (log.action === 'debt_created') {
                   dotColor = 'bg-primary';
-                  title = `Debt Record Created (Principal: ${formatCurrency(Number((log.details as any)?.principal || 0), currency)})`;
+                  title = `Debt Record Created (Principal: ${formatCurrency(Number(log.details?.principal || 0), currency)})`;
                 } else if (log.action === 'debt_accepted') {
                   dotColor = 'bg-success';
                   title = 'Agreement Accepted by Counterparty';
                 } else if (log.action === 'payment_disputed') {
                   dotColor = 'bg-red-500';
-                  title = `Repayment Disputed by Lender (${formatCurrency(Number((log.details as any)?.amount || 0), currency)})`;
+                  title = isMultiLoan
+                    ? `Bulk Repayment Disputed by Lender (${formatCurrency(log.totalAmount, currency, { showDecimals: true })} across ${log.breakdown.length} loans)`
+                    : `Repayment Disputed by Lender (${formatCurrency(log.totalAmount, currency, { showDecimals: true })})`;
                 } else if (log.action === 'debt_settled') {
                   dotColor = 'bg-emerald-500';
                   title = 'Debt Agreement Fully Settled';
                 } else if (log.action === 'global_share_enabled') {
                   dotColor = 'bg-amber-500';
-                  title = `Global Public Link Enabled by ${(log.details as any)?.actorName || 'Participant'}`;
+                  title = `Global Public Link Enabled by ${log.details?.actorName || 'Participant'}`;
                 } else if (log.action === 'global_share_disabled') {
                   dotColor = 'bg-outline';
-                  title = `Global Public Link Disabled by ${(log.details as any)?.actorName || 'Participant'}`;
+                  title = `Global Public Link Disabled by ${log.details?.actorName || 'Participant'}`;
                 } else if (log.action === 'global_share_regenerated') {
                   dotColor = 'bg-amber-500';
-                  title = `Global Public Link Rotated by ${(log.details as any)?.actorName || 'Participant'}`;
+                  title = `Global Public Link Rotated by ${log.details?.actorName || 'Participant'}`;
                 }
 
                 return (
@@ -1503,9 +1995,24 @@ function PersonDebtDetailContent() {
                         {new Date(log.created_at).toLocaleString()}
                       </div>
                     </div>
-                    {log.details && (log.details as any).note && (
+                    {isMultiLoan && (
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {log.breakdown.map((b, idx) => (
+                          <span
+                            key={`${log.id}-b-${idx}`}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-surface-container text-[10px] font-mono text-on-surface-variant border border-outline-variant/20"
+                          >
+                            <span className="truncate max-w-[140px]">{b.label}:</span>
+                            <strong className="text-on-surface">
+                              {formatCurrency(b.amount, currency, { showDecimals: true })}
+                            </strong>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {log.details?.note && (
                       <p className="text-xs text-on-surface-variant mt-0.5">
-                        {(log.details as any).note}
+                        {log.details.note}
                       </p>
                     )}
                   </div>
