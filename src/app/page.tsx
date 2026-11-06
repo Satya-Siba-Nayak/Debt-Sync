@@ -460,11 +460,11 @@ function LandingPageContent() {
               ))}
             </div>
 
-            {/* Showcase Stage */}
-            <div className="bg-[var(--surface-container-low)] rounded-3xl border border-[var(--outline-variant)]/30 p-4 sm:p-6 md:p-8 shadow-lg">
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-center">
-                {/* Information Column */}
-                <div className="lg:col-span-4 space-y-4">
+            {/* Showcase Stage - Full Widescreen 16-inch Laptop Viewport */}
+            <div className="bg-[var(--surface-container-low)] rounded-3xl border border-[var(--outline-variant)]/30 p-4 sm:p-6 md:p-8 shadow-2xl space-y-6">
+              {/* Information & Action Header */}
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-[var(--outline-variant)]/20">
+                <div className="space-y-1.5 max-w-3xl">
                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/30">
                     <span className="material-symbols-outlined text-[13px]">verified</span>
                     <span>{currentShot.tag}</span>
@@ -475,45 +475,45 @@ function LandingPageContent() {
                   <p className="font-mono text-xs sm:text-sm text-[var(--on-surface-variant)] leading-relaxed">
                     {currentShot.desc}
                   </p>
+                </div>
 
-                  <div className="pt-4 flex flex-wrap items-center gap-3">
-                    {isLoggedIn ? (
-                      <Link
-                        href="/dash"
-                        onClick={clearPublicSession}
-                        className="px-5 py-2.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 transition-opacity min-h-[44px] inline-flex items-center gap-1.5 shadow-xs"
-                      >
-                        <span className="material-symbols-outlined text-[15px]">dashboard</span>
-                        <span>Open Your Dashboard</span>
-                      </Link>
-                    ) : (
-                      <Link
-                        href="/signup"
-                        className="px-5 py-2.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 transition-opacity min-h-[44px] inline-flex items-center gap-1.5 shadow-xs"
-                      >
-                        <span>Try DebtSync Now</span>
-                        <span className="material-symbols-outlined text-[15px]">arrow_forward</span>
-                      </Link>
-                    )}
-                    <a
-                      href={SAMPLE_PUBLIC_SHARE_URL}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container)] font-mono text-xs font-semibold text-[var(--on-surface)] min-h-[44px] inline-flex items-center gap-1.5"
+                <div className="flex items-center gap-3 shrink-0 flex-wrap">
+                  {isLoggedIn ? (
+                    <Link
+                      href="/dash"
+                      onClick={clearPublicSession}
+                      className="px-5 py-2.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 transition-opacity min-h-[44px] inline-flex items-center gap-1.5 shadow-xs"
                     >
-                      <span className="material-symbols-outlined text-[15px]">receipt_long</span>
-                      <span>Sample Public Receipt</span>
-                    </a>
-                  </div>
+                      <span className="material-symbols-outlined text-[15px]">dashboard</span>
+                      <span>Open Your Dashboard</span>
+                    </Link>
+                  ) : (
+                    <Link
+                      href="/signup"
+                      className="px-5 py-2.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 transition-opacity min-h-[44px] inline-flex items-center gap-1.5 shadow-xs"
+                    >
+                      <span>Try DebtSync Now</span>
+                      <span className="material-symbols-outlined text-[15px]">arrow_forward</span>
+                    </Link>
+                  )}
+                  <a
+                    href={SAMPLE_PUBLIC_SHARE_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-4 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 hover:bg-[var(--surface-container)] font-mono text-xs font-semibold text-[var(--on-surface)] min-h-[44px] inline-flex items-center gap-1.5"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">receipt_long</span>
+                    <span>Sample Public Receipt</span>
+                  </a>
                 </div>
+              </div>
 
-                {/* Interactive Sandbox Display Column */}
-                <div className="lg:col-span-8 flex justify-center">
-                  <InteractivePreviewSandbox
-                    activeTab={activeScreenshotTab}
-                    fallbackScreenshotUrl={currentShot.desktop}
-                  />
-                </div>
+              {/* Full Width 16-Inch Widescreen Emulator */}
+              <div className="w-full flex justify-center">
+                <InteractivePreviewSandbox
+                  activeTab={activeScreenshotTab}
+                  fallbackScreenshotUrl={currentShot.desktop}
+                />
               </div>
             </div>
           </div>
