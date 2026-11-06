@@ -4,7 +4,8 @@ import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment } from '@/lib/types/database';
-import { calculateDebtBalance, sortDebtsActiveFirst, isDebtPurgedByAdmin, round2 } from '@/lib/utils/interest';
+import { calculateDebtBalance, sortDebtsActiveFirst, isDebtPurgedByAdmin, round2, getEffectiveDebtStatus } from '@/lib/utils/interest';
+import { autoSettleClearedDebts } from '@/lib/utils/auto-settle';
 import { formatCurrency } from '@/lib/utils/currency';
 import { Chip } from '@/components/ui/Chip';
 import { Avatar } from '@/components/ui/Avatar';
@@ -191,6 +192,15 @@ function TransactionsPageContent() {
       }
       setPayments(allPayments);
 
+      // Auto-heal: settle any active debts whose verified payments have cleared the balance (<= 0.01)
+      autoSettleClearedDebts(supabase, allDebts, allPayments).then((settledIds) => {
+        if (settledIds && settledIds.length > 0) {
+          setDebts((prev) =>
+            prev.map((d) => (settledIds.includes(d.id) ? { ...d, status: 'settled', settled_at: new Date().toISOString() } : d))
+          );
+        }
+      });
+
       setLedgerCache({
         userId: user.id,
         debts: allDebts,
@@ -289,11 +299,13 @@ function TransactionsPageContent() {
       .filter((d) => {
         const isLender = d.lender_id === currentUserId;
         const isPurged = isDebtPurgedByAdmin(d);
-        if (filter === 'pending') return d.status === 'pending' && !isPurged;
-        if (filter === 'lent') return isLender && d.status !== 'declined' && !isPurged;
-        if (filter === 'borrowed') return !isLender && d.status !== 'declined' && !isPurged;
-        if (filter === 'settled') return d.status === 'settled' && !isPurged;
-        if (filter === 'declined') return d.status === 'declined' && !isPurged;
+        const dPayments = payments.filter((p) => p.debt_id === d.id);
+        const effectiveStatus = getEffectiveDebtStatus(d, dPayments);
+        if (filter === 'pending') return effectiveStatus === 'pending' && !isPurged;
+        if (filter === 'lent') return isLender && effectiveStatus !== 'declined' && effectiveStatus !== 'settled' && !isPurged;
+        if (filter === 'borrowed') return !isLender && effectiveStatus !== 'declined' && effectiveStatus !== 'settled' && !isPurged;
+        if (filter === 'settled') return effectiveStatus === 'settled' && !isPurged;
+        if (filter === 'declined') return effectiveStatus === 'declined' && !isPurged;
         if (filter === 'purged') return isPurged;
         return true;
       })
@@ -320,7 +332,8 @@ function TransactionsPageContent() {
           (d.status ? d.status.toLowerCase().includes(q) : false) ||
           (d.interest_type ? d.interest_type.toLowerCase().includes(q) : false)
         );
-      })
+      }),
+    payments
   );
 
   // Compute live summary metrics for the currently filtered view
@@ -332,8 +345,9 @@ function TransactionsPageContent() {
       if (d.status === 'declined' || isDebtPurgedByAdmin(d)) continue;
       const debtPayments = payments.filter((p) => p.debt_id === d.id);
       const calc = calculateDebtBalance(d, debtPayments);
+      const effectiveStatus = getEffectiveDebtStatus(d, debtPayments);
       settledPaid += calc.totalPaid;
-      if (d.status === 'active') {
+      if (effectiveStatus === 'active') {
         if (d.lender_id === currentUserId) receivable += calc.currentBalance;
         else payable += calc.currentBalance;
       }
@@ -361,16 +375,18 @@ function TransactionsPageContent() {
         counts.purged++;
         continue;
       }
-      if (d.status === 'pending') counts.pending++;
-      else if (d.status === 'settled') counts.settled++;
-      else if (d.status === 'declined') counts.declined++;
-      else if (d.status === 'active') {
+      const dPayments = payments.filter((p) => p.debt_id === d.id);
+      const effectiveStatus = getEffectiveDebtStatus(d, dPayments);
+      if (effectiveStatus === 'pending') counts.pending++;
+      else if (effectiveStatus === 'settled') counts.settled++;
+      else if (effectiveStatus === 'declined') counts.declined++;
+      else if (effectiveStatus === 'active') {
         if (d.lender_id === currentUserId) counts.lent++;
         if (d.borrower_id === currentUserId) counts.borrowed++;
       }
     }
     return counts;
-  }, [visibleDebts, currentUserId]);
+  }, [visibleDebts, payments, currentUserId]);
 
   const filterLabels: Record<FilterTab, string> = {
     all: 'All',
@@ -518,7 +534,8 @@ function TransactionsPageContent() {
                   (p) => !p.is_verified && !(typeof p.note === 'string' && p.note.includes('[DISPUTED]'))
                 ).length;
                 const calc = calculateDebtBalance(d, debtPayments);
-                const dueDateInfo = getDueDateInfo(d.due_date, d.status);
+                const effectiveStatus = getEffectiveDebtStatus(d, debtPayments);
+                const dueDateInfo = getDueDateInfo(d.due_date, effectiveStatus, calc.currentBalance);
                 const split = parseSplitDetails(d);
                 const shareMeta = parseShareMetadata(d.notes);
                 const cleanNotes = getCleanDebtNotes(d.notes);
@@ -530,7 +547,7 @@ function TransactionsPageContent() {
                     className={`block p-4 rounded-xl border transition-all shadow-xs cursor-pointer ${
                       isPurged
                         ? 'bg-red-500/5 border-red-500/30 hover:bg-red-500/10'
-                        : d.status === 'declined'
+                        : effectiveStatus === 'declined'
                         ? 'bg-[var(--surface-container-low)]/40 border-red-500/20 opacity-85'
                         : 'bg-[var(--surface-container-low)]/70 hover:bg-[var(--surface-container-high)]/70 border-[var(--outline-variant)]/20'
                     }`}
@@ -573,23 +590,23 @@ function TransactionsPageContent() {
                       </Link>
                       <div className="flex flex-col items-end gap-1">
                         <Chip
-                          label={isPurged ? 'purged' : d.status}
+                          label={isPurged ? 'purged' : effectiveStatus}
                           variant={
                             isPurged
                               ? 'purged'
-                              : d.status === 'active'
+                              : effectiveStatus === 'active'
                               ? 'active'
-                              : d.status === 'settled'
+                              : effectiveStatus === 'settled'
                               ? 'settled'
-                              : d.status === 'pending'
+                              : effectiveStatus === 'pending'
                               ? 'pending'
-                              : d.status === 'declined'
+                              : effectiveStatus === 'declined'
                               ? 'declined'
                               : 'default'
                           }
                           icon={isPurged ? 'admin_panel_settings' : undefined}
                         />
-                        {dueDateInfo && d.status !== 'declined' && !isPurged && (
+                        {dueDateInfo && effectiveStatus !== 'declined' && !isPurged && (
                           <span className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-semibold border ${dueDateInfo.className} flex items-center gap-1`}>
                             <span className="material-symbols-outlined text-[11px]">
                               {dueDateInfo.isOverdue ? 'warning' : 'event'}
@@ -597,7 +614,7 @@ function TransactionsPageContent() {
                             {dueDateInfo.text}
                           </span>
                         )}
-                        {unverifiedCount > 0 && d.status === 'active' && !isPurged && (
+                        {unverifiedCount > 0 && effectiveStatus === 'active' && !isPurged && (
                           <span
                             className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-bold border flex items-center gap-1 ${
                               isLender
@@ -687,7 +704,7 @@ function TransactionsPageContent() {
 
                     <div className="mt-3 pt-2.5 border-t border-[var(--outline-variant)]/15 flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-2">
-                        {d.status === 'active' && !isPurged && unverifiedCount > 0 && isLender ? (
+                        {effectiveStatus === 'active' && !isPurged && unverifiedCount > 0 && isLender ? (
                           <button
                             type="button"
                             onClick={(e) => {
@@ -700,7 +717,7 @@ function TransactionsPageContent() {
                             <span className="material-symbols-outlined text-[14px]">fact_check</span>
                             <span>Verify</span>
                           </button>
-                        ) : d.status === 'active' && !isPurged && calc.currentBalance > 0 ? (
+                        ) : effectiveStatus === 'active' && !isPurged && calc.currentBalance > 0 ? (
                           <button
                             type="button"
                             onClick={(e) => {
@@ -868,7 +885,8 @@ function TransactionsPageContent() {
                       (p) => !p.is_verified && !(typeof p.note === 'string' && p.note.includes('[DISPUTED]'))
                     ).length;
                     const calc = calculateDebtBalance(d, debtPayments);
-                    const dueDateInfo = getDueDateInfo(d.due_date, d.status);
+                    const effectiveStatus = getEffectiveDebtStatus(d, debtPayments);
+                    const dueDateInfo = getDueDateInfo(d.due_date, effectiveStatus, calc.currentBalance);
                     const split = parseSplitDetails(d);
                     const shareMeta = parseShareMetadata(d.notes);
                     const cleanNotes = getCleanDebtNotes(d.notes);
@@ -880,7 +898,7 @@ function TransactionsPageContent() {
                         className={`transition-colors cursor-pointer ${
                           isPurged
                             ? 'bg-red-500/5 hover:bg-red-500/10'
-                            : d.status === 'declined'
+                            : effectiveStatus === 'declined'
                             ? 'bg-red-500/5 hover:bg-red-500/10 opacity-80'
                             : 'hover:bg-[var(--surface-container-low)]/80'
                         }`}
@@ -1008,23 +1026,23 @@ function TransactionsPageContent() {
                         <td className="py-4">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <Chip
-                              label={isPurged ? 'purged' : d.status}
+                              label={isPurged ? 'purged' : effectiveStatus}
                               variant={
                                 isPurged
                                   ? 'purged'
-                                  : d.status === 'active'
+                                  : effectiveStatus === 'active'
                                   ? 'active'
-                                  : d.status === 'settled'
+                                  : effectiveStatus === 'settled'
                                   ? 'settled'
-                                  : d.status === 'pending'
+                                  : effectiveStatus === 'pending'
                                   ? 'pending'
-                                  : d.status === 'declined'
+                                  : effectiveStatus === 'declined'
                                   ? 'declined'
                                   : 'default'
                               }
                               icon={isPurged ? 'admin_panel_settings' : undefined}
                             />
-                            {dueDateInfo && d.status !== 'declined' && !isPurged && (
+                            {dueDateInfo && effectiveStatus !== 'declined' && !isPurged && (
                               <span className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-semibold border ${dueDateInfo.className} flex items-center gap-1`}>
                                 <span className="material-symbols-outlined text-[11px]">
                                   {dueDateInfo.isOverdue ? 'warning' : 'event'}
@@ -1032,7 +1050,7 @@ function TransactionsPageContent() {
                                 {dueDateInfo.text}
                               </span>
                             )}
-                            {unverifiedCount > 0 && d.status === 'active' && !isPurged && (
+                            {unverifiedCount > 0 && effectiveStatus === 'active' && !isPurged && (
                               <span
                                 className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-bold border flex items-center gap-1 ${
                                   isLender
@@ -1052,7 +1070,7 @@ function TransactionsPageContent() {
                         <td className="py-4 text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-end gap-1.5 flex-wrap">
                             {/* Verify button if payments pending lender confirmation */}
-                            {d.status === 'active' && !isPurged && unverifiedCount > 0 && isLender && (
+                            {effectiveStatus === 'active' && !isPurged && unverifiedCount > 0 && isLender && (
                               <button
                                 type="button"
                                 onClick={() => setSelectedDebtForDetail(d)}
@@ -1065,7 +1083,7 @@ function TransactionsPageContent() {
                             )}
 
                             {/* Direct Pay / Record Repayment button */}
-                            {d.status === 'active' && !isPurged && calc.currentBalance > 0 && (
+                            {effectiveStatus === 'active' && !isPurged && calc.currentBalance > 0 && (
                               <button
                                 type="button"
                                 onClick={() => setActiveDebtForPayment({ debt: d, balance: calc.currentBalance })}

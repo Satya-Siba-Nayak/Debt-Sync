@@ -376,6 +376,22 @@ function PersonDebtDetailContent() {
         }
       }
 
+      // Guaranteed post-verification check: if the debt's balance is cleared, ensure it is settled in DB & local state
+      if (decision === 'verified' && targetDebt && shouldSettle) {
+        await supabase
+          .from('debts')
+          .update({
+            status: 'settled',
+            settled_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', targetDebt.id);
+
+        setDebts((prev) =>
+          prev.map((d) => (d.id === targetDebt.id ? { ...d, status: 'settled', settled_at: new Date().toISOString() } : d))
+        );
+      }
+
       invalidateLedgerCache();
       window.dispatchEvent(new CustomEvent('debtsync:refresh'));
       await fetchDetails();
@@ -578,6 +594,36 @@ function PersonDebtDetailContent() {
         }
       }
 
+      // Unconditionally settle any affected debts that have reached 0.00 balance (<= 0.01)
+      if (decision === 'verified') {
+        const affectedDebtIds = Array.from(new Set(pendingPaymentList.map((p) => p.debt_id)));
+        const newlySettledIds: string[] = [];
+        for (const dId of affectedDebtIds) {
+          const targetDebt = debts.find((d) => d.id === dId);
+          if (!targetDebt || targetDebt.status === 'settled') continue;
+          const updatedDebtPayments = payments
+            .filter((p) => p.debt_id === dId)
+            .map((p) => (pids.includes(p.id) ? { ...p, is_verified: true } : p));
+          const calc = calculateDebtBalance(targetDebt, updatedDebtPayments);
+          if (calc.currentBalance <= 0.01) {
+            newlySettledIds.push(dId);
+            await supabase
+              .from('debts')
+              .update({
+                status: 'settled',
+                settled_at: nowIso,
+                updated_at: nowIso,
+              })
+              .eq('id', dId);
+          }
+        }
+        if (newlySettledIds.length > 0) {
+          setDebts((prev) =>
+            prev.map((d) => (newlySettledIds.includes(d.id) ? { ...d, status: 'settled', settled_at: nowIso } : d))
+          );
+        }
+      }
+
       invalidateLedgerCache();
       window.dispatchEvent(new CustomEvent('debtsync:refresh'));
       await fetchDetails();
@@ -708,7 +754,8 @@ function PersonDebtDetailContent() {
           (d.interest_type ? d.interest_type.toLowerCase().includes(q) : false) ||
           (d.status ? d.status.toLowerCase().includes(q) : false)
         );
-      })
+      }),
+    payments
   );
 
   const getLoanLabel = useCallback(
@@ -1176,6 +1223,8 @@ function PersonDebtDetailContent() {
 
             {debts.length > 0 ? (() => {
               const primaryAgreement = debts.find((d) => d.status !== 'declined') || debts[0];
+              const primaryPayments = primaryAgreement ? payments.filter((p) => p.debt_id === primaryAgreement.id) : [];
+              const primaryEffectiveStatus = primaryAgreement ? getEffectiveDebtStatus(primaryAgreement, primaryPayments) : 'default';
               return (
                 <div className="space-y-3 font-mono text-xs">
                   <div className="flex justify-between pb-2 border-b border-outline-variant/10">
@@ -1209,15 +1258,15 @@ function PersonDebtDetailContent() {
                   <div className="flex justify-between">
                     <span className="text-on-surface-variant">Agreement Status</span>
                     <Chip
-                      label={primaryAgreement.status}
+                      label={primaryEffectiveStatus}
                       variant={
-                        primaryAgreement.status === 'active'
+                        primaryEffectiveStatus === 'active'
                           ? 'active'
-                          : primaryAgreement.status === 'settled'
+                          : primaryEffectiveStatus === 'settled'
                           ? 'settled'
-                          : primaryAgreement.status === 'pending'
+                          : primaryEffectiveStatus === 'pending'
                           ? 'pending'
-                          : primaryAgreement.status === 'declined'
+                          : primaryEffectiveStatus === 'declined'
                           ? 'declined'
                           : 'default'
                       }
@@ -1354,16 +1403,18 @@ function PersonDebtDetailContent() {
           <div className="space-y-3 sm:space-y-4">
             {displayDebts.map((d) => {
               const isLender = d.lender_id === currentUserId;
-              const isIncomingPending = d.status === 'pending' && d.created_by !== currentUserId;
-              const isOutgoingPending = d.status === 'pending' && d.created_by === currentUserId;
               const debtPayments = payments.filter((p) => p.debt_id === d.id);
               const calc = calculateDebtBalance(d, debtPayments);
-              const dueDateInfo = getDueDateInfo(d.due_date, d.status);
+              const effectiveStatus = getEffectiveDebtStatus(d, debtPayments);
+              const isIncomingPending = effectiveStatus === 'pending' && d.created_by !== currentUserId;
+              const isOutgoingPending = effectiveStatus === 'pending' && d.created_by === currentUserId;
+              const dueDateInfo = getDueDateInfo(d.due_date, effectiveStatus, calc.currentBalance);
               const split = parseSplitDetails(d);
               const shareMeta = parseShareMetadata(d.notes);
               const cleanNotes = getCleanDebtNotes(d.notes);
               const isPurged =
                 d.status === 'purged' ||
+                effectiveStatus === 'purged' ||
                 (typeof d.notes === 'string' && d.notes.includes('[TRANSACTION PURGED BY ADMIN')) ||
                 Boolean(person?.is_purged);
 
@@ -1376,7 +1427,7 @@ function PersonDebtDetailContent() {
                       ? 'border-red-500/30 bg-red-500/5 hover:bg-red-500/10'
                       : isIncomingPending
                       ? 'border-amber-500/40 bg-amber-500/5 hover:bg-amber-500/10'
-                      : d.status === 'declined'
+                      : effectiveStatus === 'declined'
                       ? 'border-red-500/20 bg-surface-container-low/40 opacity-85'
                       : 'border-outline-variant/20 bg-surface-container-low hover:bg-surface-container-high/70'
                   } flex flex-col sm:flex-row sm:items-center justify-between gap-4`}
@@ -1388,7 +1439,7 @@ function PersonDebtDetailContent() {
                           <span className="material-symbols-outlined text-[14px]">admin_panel_settings</span>
                           (Transaction purged by admin)
                         </span>
-                      ) : d.status === 'declined' ? (
+                      ) : effectiveStatus === 'declined' ? (
                         <span className="font-mono text-xs font-bold inline-flex items-center gap-1 text-red-500 dark:text-red-400">
                           <span className="material-symbols-outlined text-[14px]">block</span>
                           Declined
@@ -1399,17 +1450,17 @@ function PersonDebtDetailContent() {
                         </span>
                       )}
                       <Chip
-                        label={isPurged ? 'purged' : d.status}
+                        label={isPurged ? 'purged' : effectiveStatus}
                         variant={
                           isPurged
                             ? 'purged'
-                            : d.status === 'active'
+                            : effectiveStatus === 'active'
                             ? 'active'
-                            : d.status === 'settled'
+                            : effectiveStatus === 'settled'
                             ? 'settled'
-                            : d.status === 'pending'
+                            : effectiveStatus === 'pending'
                             ? 'pending'
-                            : d.status === 'declined'
+                            : effectiveStatus === 'declined'
                             ? 'declined'
                             : 'default'
                         }
@@ -1596,7 +1647,7 @@ function PersonDebtDetailContent() {
                       </div>
                     )}
 
-                    {d.status === 'active' && calc.currentBalance > 0 && (
+                    {effectiveStatus === 'active' && calc.currentBalance > 0 && (
                       <button
                         onClick={() => {
                           if (d.borrower_id === currentUserId && person) {

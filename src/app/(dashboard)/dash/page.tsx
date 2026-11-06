@@ -3,7 +3,8 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment } from '@/lib/types/database';
-import { calculateDebtBalance, calculatePortfolioAccrualRates, round2, sortDebtsActiveFirst, isDebtPurgedByAdmin } from '@/lib/utils/interest';
+import { calculateDebtBalance, calculatePortfolioAccrualRates, round2, sortDebtsActiveFirst, isDebtPurgedByAdmin, getEffectiveDebtStatus } from '@/lib/utils/interest';
+import { autoSettleClearedDebts } from '@/lib/utils/auto-settle';
 import { BalanceCards } from '@/components/dashboard/BalanceCards';
 import { LiveTicker } from '@/components/dashboard/LiveTicker';
 import { CashflowChart } from '@/components/dashboard/CashflowChart';
@@ -131,6 +132,15 @@ export default function GlobalDashboardPage() {
       setPayments(allPayments);
       setHasCompletedFetch(true);
 
+      // Auto-heal: settle any active debts whose verified payments have cleared the balance (<= 0.01)
+      autoSettleClearedDebts(supabase, allDebts, allPayments).then((settledIds) => {
+        if (settledIds && settledIds.length > 0) {
+          setDebts((prev) =>
+            prev.map((d) => (settledIds.includes(d.id) ? { ...d, status: 'settled', settled_at: new Date().toISOString() } : d))
+          );
+        }
+      });
+
       // Compute calculations instantly via shared utility
       const stats = computeDashboardStats(allDebts, allPayments, user.id);
       setTotalLent(stats.totalLent);
@@ -234,7 +244,7 @@ export default function GlobalDashboardPage() {
       .filter((item) => item.unverifiedPayments.length > 0);
   }, [visibleDebts, payments, currentUserId]);
 
-  const sortedDebts = React.useMemo(() => sortDebtsActiveFirst(visibleDebts), [visibleDebts]);
+  const sortedDebts = React.useMemo(() => sortDebtsActiveFirst(visibleDebts, payments), [visibleDebts, payments]);
   const shouldDisplayFlowGuide =
     showFlowGuide || (hasCompletedFetch && !loading && !isFlowGuideDismissed && debts.length === 0);
 
@@ -667,7 +677,8 @@ export default function GlobalDashboardPage() {
                   (p) => !p.is_verified && !(typeof p.note === 'string' && p.note.includes('[DISPUTED]'))
                 ).length;
                 const calc = calculateDebtBalance(d, debtPayments);
-                const dueDateInfo = getDueDateInfo(d.due_date, d.status);
+                const effectiveStatus = getEffectiveDebtStatus(d, debtPayments);
+                const dueDateInfo = getDueDateInfo(d.due_date, effectiveStatus, calc.currentBalance);
                 const split = parseSplitDetails(d);
                 const shareMeta = parseShareMetadata(d.notes);
                 const cleanNotes = getCleanDebtNotes(d.notes);
@@ -679,7 +690,7 @@ export default function GlobalDashboardPage() {
                     className={`block p-4 rounded-xl border transition-all shadow-xs cursor-pointer ${
                       isPurged
                         ? 'bg-red-500/5 border-red-500/30 hover:bg-red-500/10'
-                        : d.status === 'declined'
+                        : effectiveStatus === 'declined'
                         ? 'bg-[var(--surface-container-low)]/40 border-red-500/20 opacity-85'
                         : 'bg-[var(--surface-container-low)]/70 hover:bg-[var(--surface-container-high)]/70 border-[var(--outline-variant)]/20'
                     }`}
@@ -730,23 +741,23 @@ export default function GlobalDashboardPage() {
                       </Link>
                       <div className="flex flex-col items-end gap-1">
                         <Chip
-                          label={isPurged ? 'purged' : d.status}
+                          label={isPurged ? 'purged' : effectiveStatus}
                           variant={
                             isPurged
                               ? 'purged'
-                              : d.status === 'active'
+                              : effectiveStatus === 'active'
                               ? 'active'
-                              : d.status === 'settled'
+                              : effectiveStatus === 'settled'
                               ? 'settled'
-                              : d.status === 'pending'
+                              : effectiveStatus === 'pending'
                               ? 'pending'
-                              : d.status === 'declined'
+                              : effectiveStatus === 'declined'
                               ? 'declined'
                               : 'default'
                           }
                           icon={isPurged ? 'admin_panel_settings' : undefined}
                         />
-                        {dueDateInfo && d.status !== 'declined' && !isPurged && (
+                        {dueDateInfo && effectiveStatus !== 'declined' && !isPurged && (
                           <span className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-semibold border ${dueDateInfo.className} flex items-center gap-1`}>
                             <span className="material-symbols-outlined text-[11px]">
                               {dueDateInfo.isOverdue ? 'warning' : 'event'}
@@ -754,7 +765,7 @@ export default function GlobalDashboardPage() {
                             {dueDateInfo.text}
                           </span>
                         )}
-                        {unverifiedCount > 0 && d.status === 'active' && !isPurged && (
+                        {unverifiedCount > 0 && effectiveStatus === 'active' && !isPurged && (
                           <span
                             className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-bold border flex items-center gap-1 ${
                               isLender
@@ -904,7 +915,7 @@ export default function GlobalDashboardPage() {
                           </>
                         )}
 
-                        {!isPurged && d.status === 'active' && calc.currentBalance > 0 && (
+                        {!isPurged && effectiveStatus === 'active' && calc.currentBalance > 0 && (
                           isLender && unverifiedCount > 0 ? (
                             <button
                               type="button"
@@ -969,7 +980,8 @@ export default function GlobalDashboardPage() {
                       (p) => !p.is_verified && !(typeof p.note === 'string' && p.note.includes('[DISPUTED]'))
                     ).length;
                     const calc = calculateDebtBalance(d, debtPayments);
-                    const dueDateInfo = getDueDateInfo(d.due_date, d.status);
+                    const effectiveStatus = getEffectiveDebtStatus(d, debtPayments);
+                    const dueDateInfo = getDueDateInfo(d.due_date, effectiveStatus, calc.currentBalance);
                     const split = parseSplitDetails(d);
                     const shareMeta = parseShareMetadata(d.notes);
                     const cleanNotes = getCleanDebtNotes(d.notes);
@@ -981,7 +993,7 @@ export default function GlobalDashboardPage() {
                         className={`transition-colors cursor-pointer ${
                           isPurged
                             ? 'bg-red-500/5 hover:bg-red-500/10'
-                            : d.status === 'declined'
+                            : effectiveStatus === 'declined'
                             ? 'bg-red-500/5 hover:bg-red-500/10 opacity-80'
                             : 'hover:bg-[var(--surface-container-low)]/50'
                         }`}

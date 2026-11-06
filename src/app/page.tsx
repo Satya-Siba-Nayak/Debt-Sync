@@ -461,10 +461,10 @@ function LandingPageContent() {
             </div>
 
             {/* Showcase Stage */}
-            <div className="bg-[var(--surface-container-low)] rounded-3xl border border-[var(--outline-variant)]/30 p-6 md:p-10 shadow-lg">
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+            <div className="bg-[var(--surface-container-low)] rounded-3xl border border-[var(--outline-variant)]/30 p-4 sm:p-6 md:p-8 shadow-lg">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-center">
                 {/* Information Column */}
-                <div className="lg:col-span-5 space-y-4">
+                <div className="lg:col-span-4 space-y-4">
                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/30">
                     <span className="material-symbols-outlined text-[13px]">verified</span>
                     <span>{currentShot.tag}</span>
@@ -508,7 +508,7 @@ function LandingPageContent() {
                 </div>
 
                 {/* Interactive Sandbox Display Column */}
-                <div className="lg:col-span-7 flex justify-center">
+                <div className="lg:col-span-8 flex justify-center">
                   <InteractivePreviewSandbox
                     activeTab={activeScreenshotTab}
                     fallbackScreenshotUrl={currentShot.desktop}
