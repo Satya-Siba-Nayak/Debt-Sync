@@ -9,6 +9,9 @@
 -- 4. Batch auto-healing for any historical active debts whose verified payments have cleared the balance.
 -- ═══════════════════════════════════════════════════════════════════════════
 
+-- Ensure updated_at exists on debts
+ALTER TABLE public.debts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+
 -- 1. HARDEN PAYMENT VERIFICATION INTEGRITY TRIGGER (ALLOW GHOST LENDERS & PHONE/EMAIL MATCH)
 CREATE OR REPLACE FUNCTION public.enforce_payment_verification_integrity()
 RETURNS TRIGGER
@@ -105,7 +108,7 @@ BEFORE INSERT OR UPDATE ON public.payments
 FOR EACH ROW
 EXECUTE FUNCTION public.enforce_payment_verification_integrity();
 
--- 2. AUTOMATIC DEBT SETTLEMENT TRIGGER ON PAYMENTS (AFTER INSERT OR UPDATE)
+-- 2. AUTOMATIC DEBT SETTLEMENT TRIGGER ON PAYMENTS (AFTER INSERT OR UPDATE OF is_verified, amount)
 CREATE OR REPLACE FUNCTION public.auto_settle_debt_on_payment_change()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -140,7 +143,7 @@ BEGIN
   IF v_debt.interest_type = 'none' OR COALESCE(v_debt.interest_rate, 0) <= 0 THEN
     v_total_obligation := v_debt.principal;
   ELSE
-    v_days_elapsed := GREATEST(0, EXTRACT(EPOCH FROM (NOW() - COALESCE(v_debt.start_date, v_debt.created_at))) / 86400.0);
+    v_days_elapsed := GREATEST(0, EXTRACT(EPOCH FROM (NOW() - COALESCE(v_debt.accepted_at, v_debt.created_at))) / 86400.0);
     v_years := v_days_elapsed / 365.25;
     IF v_debt.interest_type = 'simple' THEN
       v_total_obligation := ROUND(v_debt.principal * (1 + (v_debt.interest_rate / 100.0) * v_years), 2);
@@ -178,7 +181,7 @@ $$;
 
 DROP TRIGGER IF EXISTS trg_payments_auto_settle_debt ON public.payments;
 CREATE TRIGGER trg_payments_auto_settle_debt
-AFTER INSERT OR UPDATE OF is_verified, amount, status ON public.payments
+AFTER INSERT OR UPDATE OF is_verified, amount ON public.payments
 FOR EACH ROW
 EXECUTE FUNCTION public.auto_settle_debt_on_payment_change();
 
@@ -320,7 +323,7 @@ BEGIN
     IF v_debt.interest_type = 'none' OR COALESCE(v_debt.interest_rate, 0) <= 0 THEN
       v_total_obligation := v_debt.principal;
     ELSE
-      v_days_elapsed := GREATEST(0, EXTRACT(EPOCH FROM (NOW() - COALESCE(v_debt.start_date, v_debt.created_at))) / 86400.0);
+      v_days_elapsed := GREATEST(0, EXTRACT(EPOCH FROM (NOW() - COALESCE(v_debt.accepted_at, v_debt.created_at))) / 86400.0);
       v_years := v_days_elapsed / 365.25;
       IF v_debt.interest_type = 'simple' THEN
         v_total_obligation := ROUND(v_debt.principal * (1 + (v_debt.interest_rate / 100.0) * v_years), 2);
@@ -407,7 +410,7 @@ BEGIN
     IF v_debt.interest_type = 'none' OR COALESCE(v_debt.interest_rate, 0) <= 0 THEN
       v_total_obligation := v_debt.principal;
     ELSE
-      v_days_elapsed := GREATEST(0, EXTRACT(EPOCH FROM (NOW() - COALESCE(v_debt.start_date, v_debt.created_at))) / 86400.0);
+      v_days_elapsed := GREATEST(0, EXTRACT(EPOCH FROM (NOW() - COALESCE(v_debt.accepted_at, v_debt.created_at))) / 86400.0);
       v_years := v_days_elapsed / 365.25;
       IF v_debt.interest_type = 'simple' THEN
         v_total_obligation := ROUND(v_debt.principal * (1 + (v_debt.interest_rate / 100.0) * v_years), 2);
