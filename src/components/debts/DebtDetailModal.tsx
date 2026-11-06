@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Modal } from '../ui/Modal';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment, ActivityLogEntry } from '@/lib/types/database';
-import { calculateDebtBalance, isDebtPurgedByAdmin, round2, sortPaymentsPendingFirst } from '@/lib/utils/interest';
+import { calculateDebtBalance, isDebtPurgedByAdmin, round2, sortPaymentsPendingFirst, getEffectiveDebtStatus } from '@/lib/utils/interest';
 import { invalidateLedgerCache } from '@/lib/stores/ledger-store';
 import { formatCurrency } from '@/lib/utils/currency';
 import { Chip } from '../ui/Chip';
@@ -127,6 +127,25 @@ export function DebtDetailModal({
       if (debtRes.data) {
         setInternalDebt(fetchedDebt);
       }
+      // Auto-heal: settle any debt whose verified repayments have cleared the balance (<= 0.01)
+      if (fetchedDebt && fetchedDebt.status === 'active') {
+        const debtBal = calculateDebtBalance(fetchedDebt, fetchedPayments);
+        if (debtBal.currentBalance <= 0.01) {
+          const nowIso = new Date().toISOString();
+          await supabase
+            .from('debts')
+            .update({
+              status: 'settled',
+              settled_at: fetchedDebt.settled_at || nowIso,
+              updated_at: nowIso,
+            })
+            .eq('id', fetchedDebt.id);
+          fetchedDebt.status = 'settled';
+          fetchedDebt.settled_at = fetchedDebt.settled_at || nowIso;
+          setInternalDebt({ ...fetchedDebt });
+        }
+      }
+
       setPayments(fetchedPayments);
       setActivityLogs(fetchedLogs);
       if (myProfRes?.data) {
@@ -194,7 +213,8 @@ export function DebtDetailModal({
     Boolean((otherPerson as any)?.is_purged);
   const otherName = otherPerson?.full_name || otherPerson?.email || (isPurged ? 'Purged Account' : 'Counterparty');
   const calc = calculateDebtBalance(debt, payments);
-  const dueDateInfo = getDueDateInfo(debt.due_date, debt.status);
+  const effectiveStatus = getEffectiveDebtStatus(debt, payments);
+  const dueDateInfo = getDueDateInfo(debt.due_date, effectiveStatus, calc.currentBalance);
   const debtCurrency = debt.currency || currency;
   const shareMeta = parseShareMetadata(debt);
   const isGlobalShared = Boolean(shareMeta?.globalEnabled && shareMeta?.globalToken);
@@ -251,14 +271,14 @@ export function DebtDetailModal({
         const formattedBalance = formatCurrency(calc.currentBalance, debtCurrency);
         const statusLabel = isPurged
           ? 'Purged by Admin'
-          : debt.status === 'settled'
+          : effectiveStatus === 'settled'
           ? 'Settled'
-          : debt.status === 'pending'
+          : effectiveStatus === 'pending'
           ? 'Pending'
           : 'Active';
 
         const headline =
-          Math.abs(calc.currentBalance - calc.principal) >= 0.01 && !isPurged && debt.status !== 'settled'
+          Math.abs(calc.currentBalance - calc.principal) >= 0.01 && !isPurged && effectiveStatus !== 'settled'
             ? `${formattedBalance} Due (${formattedPrincipal})`
             : formattedPrincipal;
 
@@ -997,23 +1017,23 @@ export function DebtDetailModal({
                     {otherName}
                   </span>
                   <Chip
-                    label={isPurged ? 'purged' : debt.status}
+                    label={isPurged ? 'purged' : effectiveStatus}
                     variant={
                       isPurged
                         ? 'purged'
-                        : debt.status === 'active'
+                        : effectiveStatus === 'active'
                         ? 'active'
-                        : debt.status === 'settled'
+                        : effectiveStatus === 'settled'
                         ? 'settled'
-                        : debt.status === 'pending'
+                        : effectiveStatus === 'pending'
                         ? 'pending'
-                        : debt.status === 'declined'
+                        : effectiveStatus === 'declined'
                         ? 'declined'
                         : 'default'
                     }
                     icon={isPurged ? 'admin_panel_settings' : undefined}
                   />
-                  {dueDateInfo && debt.status !== 'declined' && !isPurged && (
+                  {dueDateInfo && effectiveStatus !== 'declined' && !isPurged && (
                     <span
                       className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-semibold border ${dueDateInfo.className} flex items-center gap-1`}
                     >
@@ -1318,7 +1338,7 @@ export function DebtDetailModal({
             {/* Quick Actions Row */}
             <div className="p-3 rounded-xl bg-[var(--surface-container-low)] border border-[var(--outline-variant)]/30 flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-2 flex-wrap">
-                {debt.status === 'active' && !isPurged && calc.currentBalance > 0 && (
+                {effectiveStatus === 'active' && !isPurged && calc.currentBalance > 0 && (
                   <button
                     type="button"
                     onClick={() => setIsPaymentModalOpen(true)}
@@ -1364,7 +1384,7 @@ export function DebtDetailModal({
               </div>
 
               <div className="font-mono text-xs text-[var(--on-surface-variant)]">
-                Status: <strong className="text-[var(--on-surface)] uppercase">{isPurged ? 'Purged' : debt.status}</strong>
+                Status: <strong className="text-[var(--on-surface)] uppercase">{isPurged ? 'Purged' : effectiveStatus}</strong>
               </div>
             </div>
 
@@ -1680,7 +1700,7 @@ export function DebtDetailModal({
           )}
 
           {/* Active Debt: Payment Reminders & Due Date Status */}
-          {(activeDetailSection === 'all' || activeDetailSection === 'repayments') && debt.status === 'active' && calc.currentBalance > 0 && (
+          {(activeDetailSection === 'all' || activeDetailSection === 'repayments') && effectiveStatus === 'active' && calc.currentBalance > 0 && (
             <div className="p-4 rounded-xl border border-[var(--outline-variant)]/30 bg-[var(--surface-container-low)] space-y-3.5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                 <div className="flex items-center gap-2">
@@ -2075,7 +2095,7 @@ export function DebtDetailModal({
                 <h4 className="font-heading font-bold text-sm text-[var(--on-surface)]">
                   Repayment Receipts &amp; Transactions ({payments.length})
                 </h4>
-                {debt.status === 'active' && calc.currentBalance > 0 && (
+                {effectiveStatus === 'active' && calc.currentBalance > 0 && (
                   <button
                     type="button"
                     onClick={() => setIsPaymentModalOpen(true)}
@@ -2402,7 +2422,7 @@ export function DebtDetailModal({
                 </a>
               )}
 
-              {!isPurged && debt.status === 'active' && calc.currentBalance > 0 && (
+              {!isPurged && effectiveStatus === 'active' && calc.currentBalance > 0 && (
                 <div className="flex items-center gap-2">
                   {isLender && (
                     <button

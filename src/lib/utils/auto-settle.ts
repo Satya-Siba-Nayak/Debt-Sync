@@ -29,6 +29,11 @@ export async function autoSettleClearedDebts(
   if (settledIds.length === 0) return [];
 
   try {
+    // Try fast server RPC first if available
+    try {
+      await supabase.rpc('auto_settle_cleared_debts');
+    } catch (_) {}
+
     const { error: updErr } = await supabase
       .from('debts')
       .update({

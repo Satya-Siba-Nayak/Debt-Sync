@@ -66,8 +66,9 @@ export async function POST(request: NextRequest) {
     }
 
     const webhookUrl = resolveDiscordWebhookFromProcess('contact');
-    if (!webhookUrl) {
-      console.error('[Contact Route] Discord webhook is not configured (set DISCORD_WEBHOOK_URL on the server).');
+    const resendKey = process.env.RESEND_API_KEY;
+    if (!webhookUrl && !resendKey) {
+      console.error('[Contact Route] Neither Discord webhook nor Resend API key is configured.');
       return NextResponse.json(
         {
           success: false,
@@ -153,22 +154,75 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
     };
 
-    try {
-      await fetch(webhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          embeds: [embed],
-          allowed_mentions: { parse: [] },
-        }),
-      });
-    } catch (discordErr) {
-      console.warn('[Contact Route] Discord webhook dispatch warning:', discordErr);
+    let delivered = false;
+
+    if (webhookUrl) {
+      try {
+        const discordRes = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            embeds: [embed],
+            allowed_mentions: { parse: [] },
+          }),
+        });
+        if (discordRes.ok || discordRes.status === 204) {
+          delivered = true;
+        } else {
+          console.warn('[Contact Route] Discord webhook failed:', discordRes.status);
+        }
+      } catch (discordErr) {
+        console.warn('[Contact Route] Discord webhook dispatch warning:', discordErr);
+      }
+    }
+
+    if (resendKey) {
+      try {
+        const resendRes = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${resendKey}`,
+          },
+          body: JSON.stringify({
+            from: process.env.EMAIL_FROM || 'DebtSync Support <support@satya-nayak.dev>',
+            to: ['support@satya-nayak.dev', 'contact@satya-nayak.dev'],
+            subject: `[DebtSync Inquiry] ${categoryLabel} from ${safeName}`,
+            html: `
+              <div style="font-family: sans-serif; max-width: 600px; padding: 20px; color: #1e293b;">
+                <h2 style="color: #00818d;">New Website Inquiry Received</h2>
+                <p><strong>Name:</strong> ${safeName}</p>
+                <p><strong>Email:</strong> ${safeEmail}</p>
+                <p><strong>Phone:</strong> ${phone?.trim() || 'Not Provided'}</p>
+                <p><strong>Category:</strong> ${categoryLabel}</p>
+                <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; margin-top: 15px;">
+                  <p style="margin: 0; white-space: pre-wrap;">${message.trim()}</p>
+                </div>
+              </div>
+            `,
+          }),
+        });
+        if (resendRes.ok) {
+          delivered = true;
+        }
+      } catch (resendErr) {
+        console.warn('[Contact Route] Resend dispatch warning:', resendErr);
+      }
+    }
+
+    if (!delivered) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Support channel is temporarily unavailable. Please email support@satya-nayak.dev directly.',
+        },
+        { status: 502 }
+      );
     }
 
     return NextResponse.json({
       success: true,
-      message: 'Inquiry successfully delivered to Discord.',
+      message: 'Inquiry successfully delivered.',
     });
   } catch (err: any) {
     console.error('[Contact Route] Submission error:', err);

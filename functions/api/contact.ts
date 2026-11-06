@@ -109,7 +109,8 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
     }
 
     const webhookUrl = resolveDiscordWebhookUrl(context.env as Record<string, string | undefined>, 'contact');
-    if (!webhookUrl) {
+    const resendKey = (context.env as any).RESEND_API_KEY || (context.env as any).RESEND_KEY;
+    if (!webhookUrl && !resendKey) {
       return new Response(
         JSON.stringify({
           success: false,
@@ -186,21 +187,69 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
       timestamp: new Date().toISOString(),
     };
 
-    const discordRes = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        embeds: [embed],
-        allowed_mentions: { parse: [] },
-      }),
-    });
+    let delivered = false;
 
-    if (!discordRes.ok && discordRes.status !== 204) {
-      console.warn('[Cloudflare Contact Route] Discord webhook failed:', discordRes.status);
+    if (webhookUrl) {
+      try {
+        const discordRes = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            embeds: [embed],
+            allowed_mentions: { parse: [] },
+          }),
+        });
+
+        if (discordRes.ok || discordRes.status === 204) {
+          delivered = true;
+        } else {
+          console.warn('[Cloudflare Contact Route] Discord webhook failed:', discordRes.status);
+        }
+      } catch (dErr) {
+        console.warn('[Cloudflare Contact Route] Discord fetch error:', dErr);
+      }
+    }
+
+    if (resendKey) {
+      try {
+        const resendRes = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${resendKey}`,
+          },
+          body: JSON.stringify({
+            from: (context.env as any).EMAIL_FROM || 'DebtSync Support <support@satya-nayak.dev>',
+            to: ['support@satya-nayak.dev', 'contact@satya-nayak.dev'],
+            subject: `[DebtSync Inquiry] ${categoryLabel} from ${safeName}`,
+            html: `
+              <div style="font-family: sans-serif; max-width: 600px; padding: 20px; color: #1e293b;">
+                <h2 style="color: #00818d;">New Website Inquiry Received</h2>
+                <p><strong>Name:</strong> ${safeName}</p>
+                <p><strong>Email:</strong> ${safeEmail}</p>
+                <p><strong>Phone:</strong> ${phone?.trim() || 'Not Provided'}</p>
+                <p><strong>Category:</strong> ${categoryLabel}</p>
+                <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; margin-top: 15px;">
+                  <p style="margin: 0; white-space: pre-wrap;">${message.trim()}</p>
+                </div>
+              </div>
+            `,
+          }),
+        });
+
+        if (resendRes.ok) {
+          delivered = true;
+        }
+      } catch (rErr) {
+        console.warn('[Cloudflare Contact Route] Resend dispatch warning:', rErr);
+      }
+    }
+
+    if (!delivered) {
       return new Response(
         JSON.stringify({
           success: false,
-          error: 'Could not deliver your inquiry. Please email support@satya-nayak.dev directly.',
+          error: 'Support channel is temporarily unavailable. Please email support@satya-nayak.dev directly.',
         }),
         { status: 502, headers: { 'Content-Type': 'application/json' } }
       );

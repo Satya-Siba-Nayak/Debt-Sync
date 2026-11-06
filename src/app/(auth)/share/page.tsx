@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { formatCurrency } from '@/lib/utils/currency';
-import { calculateDebtBalance } from '@/lib/utils/interest';
+import { calculateDebtBalance, getEffectiveDebtStatus } from '@/lib/utils/interest';
 import { Avatar } from '@/components/ui/Avatar';
 import { BrandLogo } from '@/components/ui/BrandLogo';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
@@ -958,6 +958,7 @@ function ShareTransactionContent() {
 
   // Authorized View (Either Verified Participant OR Active Global Link)
   const calc = calculateDebtBalance(debt, payments);
+  const effectiveStatus = getEffectiveDebtStatus(debt, payments);
   const debtCurrency = debt.currency || 'inr';
   const splitDetails = parseSplitDetails(debt);
   const cleanCreatorNote = getCleanDebtNotes(debt.notes);
@@ -1359,16 +1360,16 @@ function ShareTransactionContent() {
                 className={`px-2.5 py-1 rounded-md font-mono text-[10px] uppercase font-bold ${
                   isPurged
                     ? 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/25'
-                    : debt.status === 'active'
+                    : effectiveStatus === 'active'
                     ? 'bg-[var(--primary)]/10 text-[var(--primary)]'
-                    : debt.status === 'pending'
+                    : effectiveStatus === 'pending'
                     ? 'bg-amber-500/10 text-amber-500'
-                    : debt.status === 'settled'
+                    : effectiveStatus === 'settled'
                     ? 'bg-emerald-500/10 text-emerald-500'
                     : 'bg-red-500/10 text-red-500'
                 }`}
               >
-                {isPurged ? '(Transaction purged by admin)' : debt.status}
+                {isPurged ? '(Transaction purged by admin)' : effectiveStatus}
               </span>
             </div>
           </div>
