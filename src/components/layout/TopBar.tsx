@@ -48,26 +48,26 @@ export function TopBar({
   const pathname = usePathname();
 
   const resolvedHeader = React.useMemo(() => {
-    if (title) return { heading: title, subtitle: 'Bilateral P2P Financial Ledger', icon: 'dashboard' };
+    if (title) return { heading: title, subtitle: 'Bilateral P2P Financial Ledger', icon: 'space_dashboard' };
     if (pathname?.startsWith('/admin')) {
       return { heading: 'Admin Observatory', subtitle: 'Platform telemetry, user governance & live ledgers', icon: 'shield_person' };
     }
     if (pathname?.startsWith('/directory/detail')) {
-      return { heading: 'Counterparty Ledger', subtitle: 'Bilateral agreement history & direct settlement', icon: 'menu_book' };
+      return { heading: 'Person Ledger & Settlement', subtitle: 'Bilateral agreement history, repayments & direct settlement', icon: 'menu_book' };
     }
     if (pathname?.startsWith('/directory')) {
-      return { heading: 'People Directory', subtitle: 'Counterparties, trust scores & net positions', icon: 'group' };
+      return { heading: 'People Directory', subtitle: 'Contacts, trust scores & net balances', icon: 'group' };
     }
     if (pathname?.startsWith('/transactions')) {
-      return { heading: 'Transactions Ledger', subtitle: 'Audit trail of peer-to-peer agreements & repayments', icon: 'receipt_long' };
+      return { heading: 'All Transactions', subtitle: 'Complete history of lent, borrowed, pending & settled records', icon: 'receipt_long' };
     }
     if (pathname?.startsWith('/analytics')) {
-      return { heading: 'Analytics & Performance', subtitle: 'Portfolio yield, repayment velocity & maturity profile', icon: 'monitoring' };
+      return { heading: 'Analytics & Insights', subtitle: 'Portfolio yield, repayment velocity & maturity breakdown', icon: 'monitoring' };
     }
     if (pathname?.startsWith('/settings')) {
-      return { heading: 'Account & Preferences', subtitle: 'Profile identity, UPI settlement & alert controls', icon: 'tune' };
+      return { heading: 'Settings & Preferences', subtitle: 'Profile identity, UPI settlement ID & notification controls', icon: 'tune' };
     }
-    return { heading: 'Global Dashboard', subtitle: 'Real-time bilateral portfolio & active obligations', icon: 'space_dashboard' };
+    return { heading: 'Home Overview', subtitle: 'Your net balances, active obligations & quick actions', icon: 'space_dashboard' };
   }, [title, pathname]);
 
   // Close dropdown on outside click or escape
@@ -143,6 +143,18 @@ export function TopBar({
           <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
             <NotificationCenter />
             <ThemeToggle compact />
+            <Link
+              href="/settings"
+              className={`w-9 h-9 flex items-center justify-center rounded-xl transition-colors shrink-0 ${
+                pathname?.startsWith('/settings')
+                  ? 'bg-[var(--primary)]/15 text-[var(--primary)]'
+                  : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-high)]/60'
+              }`}
+              title="Settings & UPI Preferences"
+              aria-label="Settings"
+            >
+              <span className="material-symbols-outlined text-[20px]">settings</span>
+            </Link>
             <button
               ref={triggerMobileRef}
               type="button"
@@ -181,6 +193,15 @@ export function TopBar({
             <div className="flex items-center gap-2 mr-1">
               <button
                 type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_add_person'))}
+                className="px-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-low)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
+                title="Add a new person to your directory"
+              >
+                <span className="material-symbols-outlined text-[15px] text-[var(--secondary)]">person_add</span>
+                <span>Add Person</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_split_modal'))}
                 className="px-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-low)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
                 title="Split a bill among multiple people"
@@ -194,8 +215,8 @@ export function TopBar({
                   onClick={onNewTransaction}
                   className="px-3.5 py-1.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 transition-opacity shadow-xs flex items-center gap-1 cursor-pointer"
                 >
-                  <span className="material-symbols-outlined text-[15px]">add</span>
-                  <span>New Entry</span>
+                  <span className="material-symbols-outlined text-[15px]">add_circle</span>
+                  <span>Record Debt</span>
                 </button>
               )}
             </div>
@@ -208,7 +229,7 @@ export function TopBar({
             type="button"
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
             className="flex items-center gap-2.5 pl-2 border-l border-[var(--outline-variant)]/20 group cursor-pointer focus:outline-none"
-            title="Profile & Avatar menu"
+            title="Profile & Settings menu"
           >
             <Avatar
               src={avatarUrl}
@@ -232,7 +253,7 @@ export function TopBar({
       {isDropdownOpen && (
         <div
           ref={dropdownRef}
-          className="fixed right-[max(0.75rem,env(safe-area-inset-right,0px))] top-[calc(3.5rem+env(safe-area-inset-top,0px)+0.5rem)] md:right-8 md:top-16 w-[min(18rem,calc(100vw-1.5rem))] max-h-[calc(100dvh-6rem)] overflow-y-auto overscroll-contain bg-[var(--surface-container-lowest)] rounded-2xl p-3.5 border border-[var(--outline-variant)]/30 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150 space-y-3"
+          className="fixed right-[max(0.75rem,env(safe-area-inset-right,0px))] top-[calc(3.5rem+env(safe-area-inset-top,0px)+0.5rem)] md:right-8 md:top-16 w-[min(19rem,calc(100vw-1.5rem))] max-h-[calc(100dvh-6rem)] overflow-y-auto overscroll-contain bg-[var(--surface-container-lowest)] rounded-2xl p-3.5 border border-[var(--outline-variant)]/30 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150 space-y-3"
           role="menu"
         >
           {/* User Details */}
@@ -248,18 +269,72 @@ export function TopBar({
             </div>
           </div>
 
+          {/* Primary Account & Quick Actions at the Top */}
+          <div className="space-y-1.5 pb-2.5 border-b border-[var(--outline-variant)]/20">
+            <Link
+              href="/settings"
+              onClick={() => setIsDropdownOpen(false)}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-[var(--primary)]/10 hover:bg-[var(--primary)]/20 border border-[var(--primary)]/25 font-mono text-xs font-bold text-[var(--on-surface)] transition-colors"
+              role="menuitem"
+            >
+              <span className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[18px] text-[var(--primary)]">manage_accounts</span>
+                <span>Settings, UPI &amp; Profile</span>
+              </span>
+              <span className="material-symbols-outlined text-[15px] text-[var(--primary)]">chevron_right</span>
+            </Link>
+
+            {!inAdminMode && (
+              <div className="grid grid-cols-3 gap-1.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsDropdownOpen(false);
+                    onNewTransaction?.();
+                  }}
+                  className="p-2 rounded-xl bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/25 flex flex-col items-center justify-center gap-1 text-center transition-colors cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[17px] text-[var(--primary)]">add_circle</span>
+                  <span className="font-mono text-[10px] font-semibold text-[var(--on-surface)]">Record</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsDropdownOpen(false);
+                    window.dispatchEvent(new CustomEvent('debtsync:open_split_modal'));
+                  }}
+                  className="p-2 rounded-xl bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/25 flex flex-col items-center justify-center gap-1 text-center transition-colors cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[17px] text-[var(--primary)]">call_split</span>
+                  <span className="font-mono text-[10px] font-semibold text-[var(--on-surface)]">Split Bill</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsDropdownOpen(false);
+                    window.dispatchEvent(new CustomEvent('debtsync:open_add_person'));
+                  }}
+                  className="p-2 rounded-xl bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/25 flex flex-col items-center justify-center gap-1 text-center transition-colors cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[17px] text-[var(--secondary)]">person_add</span>
+                  <span className="font-mono text-[10px] font-semibold text-[var(--on-surface)]">+ Person</span>
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* Quick Avatar Switcher */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="font-mono text-[10px] text-[var(--outline)] uppercase tracking-wider font-semibold">
-                Switch Avatar
+                Quick Avatar Switcher
               </span>
               <Link
                 href="/settings"
                 onClick={() => setIsDropdownOpen(false)}
                 className="text-[10px] font-mono text-[var(--primary)] hover:underline flex items-center gap-0.5"
               >
-                <span>Edit &amp; More</span>
+                <span>Custom Photo</span>
                 <span className="material-symbols-outlined text-[12px]">chevron_right</span>
               </Link>
             </div>

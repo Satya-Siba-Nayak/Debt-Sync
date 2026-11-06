@@ -18,6 +18,7 @@ import { SkeletonBalanceCards, SkeletonTableRows } from '@/components/ui/Skeleto
 import { parseSplitDetails, parseShareMetadata, getCleanDebtNotes } from '@/lib/utils/split-bills';
 import { EditPendingDebtModal } from '@/components/debts/EditPendingDebtModal';
 import { DebtDetailModal } from '@/components/debts/DebtDetailModal';
+import { PaymentModal } from '@/components/debts/PaymentModal';
 import { respondToDebtAgreement, cancelPendingDebt } from '@/lib/utils/debt-acceptance';
 import Link from 'next/link';
 
@@ -32,6 +33,7 @@ export default function GlobalDashboardPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(initialCache?.userId || null);
   const [selectedDebtForEdit, setSelectedDebtForEdit] = useState<Debt | null>(null);
   const [selectedDebtForDetail, setSelectedDebtForDetail] = useState<Debt | null>(null);
+  const [activeDebtForPayment, setActiveDebtForPayment] = useState<{ debt: Debt; balance: number } | null>(null);
   const [showFlowGuide, setShowFlowGuide] = useState(false);
   const [hasCompletedFetch, setHasCompletedFetch] = useState(Boolean(initialCache));
   const [isFlowGuideDismissed, setIsFlowGuideDismissed] = useState<boolean>(true);
@@ -237,7 +239,61 @@ export default function GlobalDashboardPage() {
     showFlowGuide || (hasCompletedFetch && !loading && !isFlowGuideDismissed && debts.length === 0);
 
   return (
-    <div className="page-enter flex flex-col gap-6 md:gap-8">
+    <div className="page-enter flex flex-col gap-5 md:gap-7">
+      {/* Quick Actions Hub — 1-Tap Access for Mobile & Desktop */}
+      <section className="bg-[var(--surface-container-lowest)] rounded-2xl p-3.5 sm:p-4 border border-[var(--outline-variant)]/30 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-xl bg-[var(--primary)]/15 text-[var(--primary)] flex items-center justify-center shrink-0">
+            <span className="material-symbols-outlined text-[18px]">bolt</span>
+          </div>
+          <div className="min-w-0">
+            <h2 className="font-heading text-xs sm:text-sm font-bold text-[var(--on-surface)] truncate">
+              Quick Actions
+            </h2>
+            <p className="font-mono text-[10px] sm:text-[11px] text-[var(--on-surface-variant)] truncate">
+              Record a loan, split a group bill, add a contact, or settle balances
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_record_modal'))}
+            className="px-3.5 py-2 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-95 active:scale-[0.98] transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[16px]">add_circle</span>
+            <span>Record Debt</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_split_modal'))}
+            className="px-3.5 py-2 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-low)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-xs font-bold active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">call_split</span>
+            <span>Split Bill</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_add_person'))}
+            className="px-3 py-2 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-low)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-xs font-semibold active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[16px] text-[var(--secondary)]">person_add</span>
+            <span>Add Person</span>
+          </button>
+
+          <Link
+            href="/directory"
+            className="px-3 py-2 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-low)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-xs font-semibold active:scale-[0.98] transition-all flex items-center justify-center gap-1.5"
+          >
+            <span className="material-symbols-outlined text-[16px] text-emerald-500">payments</span>
+            <span>People &amp; Settle</span>
+          </Link>
+        </div>
+      </section>
+
       {/* Incoming Agreements Awaiting Acceptance Alert */}
       {incomingPendingDebts.length > 0 && (
         <section className="bg-amber-500/10 border border-amber-500/30 dark:bg-amber-950/20 rounded-2xl p-5 md:p-6 space-y-4 animate-in fade-in duration-300">
@@ -524,46 +580,24 @@ export default function GlobalDashboardPage() {
         />
       )}
 
-      {/* 2. Middle Row: Cashflow Trend Chart & Live Accrual Ticker */}
-      <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <CashflowChart
-            debts={debts}
-            payments={payments}
-            currentUserId={currentUserId}
-            currency={currency}
-          />
-        </div>
-
-        <div className="lg:col-span-1">
-          <LiveTicker
-            totalInterestAccrued={totalInterestAccrued}
-            dailyRate={dailyAccrualRate}
-            currency={currency}
-            lendingInterestTotal={totalInterestAccrued}
-            borrowingInterestTotal={borrowingInterestAccrued}
-          />
-        </div>
-      </section>
-
-      {/* 3. Recent Activity & Active Ledgers Overview */}
-      <section className="bg-[var(--surface-container-lowest)] rounded-2xl p-6 md:p-8 border border-[var(--outline-variant)]/30 shadow-sm">
-        <div className="flex justify-between items-center mb-6 flex-wrap gap-2">
+      {/* 2. Recent Activity & Active Ledgers Overview (Positioned Above Charts for Immediate Action) */}
+      <section className="bg-[var(--surface-container-lowest)] rounded-2xl p-4 sm:p-6 md:p-8 border border-[var(--outline-variant)]/30 shadow-sm">
+        <div className="flex justify-between items-center mb-5 flex-wrap gap-2">
           <div>
             <h3 className="font-heading text-lg md:text-xl font-bold text-[var(--on-surface)]">
               Active Transactions
             </h3>
             <p className="font-mono text-xs text-[var(--on-surface-variant)] mt-0.5">
-              Recent micro-loans and peer obligations — click any row to inspect, repay, or send reminders
+              Tap any record for full details, audit trail &amp; reminders, or use quick actions to pay or verify
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             {!shouldDisplayFlowGuide && (
               <button
                 type="button"
                 onClick={() => toggleFlowGuide(true)}
-                className="px-2.5 py-1 rounded-lg border border-[var(--outline-variant)]/30 text-[11px] font-mono font-bold text-[var(--on-surface-variant)] hover:text-[var(--primary)] hover:border-[var(--primary)]/40 transition-colors flex items-center gap-1 cursor-pointer"
+                className="px-2.5 py-1.5 rounded-lg border border-[var(--outline-variant)]/30 text-[11px] font-mono font-bold text-[var(--on-surface-variant)] hover:text-[var(--primary)] hover:border-[var(--primary)]/40 transition-colors flex items-center gap-1 cursor-pointer"
               >
                 <span className="material-symbols-outlined text-[14px]">help</span>
                 <span>How It Works</span>
@@ -571,10 +605,10 @@ export default function GlobalDashboardPage() {
             )}
             <Link
               href="/transactions"
-              className="text-xs font-mono font-bold text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] hover:underline flex items-center gap-1"
+              className="px-3 py-1.5 rounded-lg bg-[var(--primary)]/10 hover:bg-[var(--primary)]/20 text-xs font-mono font-bold text-[var(--primary)] dark:text-[var(--primary-fixed-dim)] transition-colors flex items-center gap-1"
             >
-              <span>View All</span>
-              <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+              <span>All Transactions ({visibleDebts.length})</span>
+              <span className="material-symbols-outlined text-[15px]">chevron_right</span>
             </Link>
           </div>
         </div>
@@ -598,8 +632,8 @@ export default function GlobalDashboardPage() {
                 onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_record_modal'))}
                 className="px-4 py-2 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 transition-opacity shadow-xs flex items-center gap-1.5 cursor-pointer"
               >
-                <span className="material-symbols-outlined text-[16px]">add</span>
-                <span>New Transaction</span>
+                <span className="material-symbols-outlined text-[16px]">add_circle</span>
+                <span>Record Debt</span>
               </button>
               <button
                 type="button"
@@ -609,12 +643,20 @@ export default function GlobalDashboardPage() {
                 <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">call_split</span>
                 <span>Split a Bill</span>
               </button>
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_add_person'))}
+                className="px-4 py-2 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[16px] text-[var(--secondary)]">person_add</span>
+                <span>Add Person</span>
+              </button>
             </div>
           </div>
         ) : (
           <div>
-            {/* Mobile Card List (< md screens) */}
-            <div className="md:hidden max-h-[480px] overflow-y-auto overscroll-contain modal-scroll-container pr-1 space-y-3">
+            {/* Mobile Card List (< md screens) — Natural page scroll without nested scroll trap */}
+            <div className="md:hidden space-y-3">
               {sortedDebts.slice(0, 8).map((d) => {
                 const isLender = d.lender_id === currentUserId;
                 const otherPerson = isLender ? d.borrower : d.lender;
@@ -765,8 +807,8 @@ export default function GlobalDashboardPage() {
                               <span className="line-through">{formatCurrency(d.principal, d.currency || currency)}</span>
                             ) : (
                               formatCurrency(d.principal, d.currency || currency)
-                            )} • {d.interest_type === 'none' ? '0% Free' : `${d.interest_rate}% ${d.interest_type}`}
-                            {cleanNotes ? ` • "${cleanNotes}"` : ''}
+                            )} &bull; {d.interest_type === 'none' ? '0% Free' : `${d.interest_rate}% ${d.interest_type}`}
+                            {cleanNotes ? ` \u2022 "${cleanNotes}"` : ''}
                           </span>
                         </div>
                       </div>
@@ -791,76 +833,116 @@ export default function GlobalDashboardPage() {
                       </div>
                     </div>
 
-                    {isPurged && (
-                      <div
-                        className="mt-3 pt-2.5 border-t border-red-500/20 flex items-center justify-between gap-2"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <span className="text-[11px] font-mono text-red-500 flex items-center gap-1">
-                          <span className="material-symbols-outlined text-[13px]">help</span>
-                          <span>Purged balance inquiry</span>
-                        </span>
-                        <a
-                          href={`mailto:support@satya-nayak.dev?subject=Support%20Inquiry%20-%20Purged%20Transaction%20${d.id}`}
-                          className="px-3 py-1 rounded-lg border border-red-500/40 bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 font-mono text-xs font-bold flex items-center gap-1 transition-colors"
-                        >
-                          <span className="material-symbols-outlined text-[13px]">mail</span>
-                          <span>Support</span>
-                        </a>
-                      </div>
-                    )}
-
-                    {d.status === 'pending' && d.created_by !== currentUserId && (
-                      <div
-                        className="mt-3 pt-2.5 border-t border-[var(--outline-variant)]/15 flex items-center justify-end gap-2"
-                        onClick={(e) => e.stopPropagation()}
-                      >
+                    {/* Mobile Action Footer — Clear 1-Tap Actions & Details */}
+                    <div
+                      className="mt-3 pt-2.5 border-t border-[var(--outline-variant)]/15 flex items-center justify-between gap-2 flex-wrap"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="flex items-center gap-1.5">
                         <button
-                          onClick={() => handleAcceptDebt(d.id, 'declined')}
-                          className="px-3 py-1 rounded-lg border border-error/30 text-error font-mono text-xs font-bold hover:bg-error/10 cursor-pointer"
+                          type="button"
+                          onClick={() => setSelectedDebtForDetail(d)}
+                          className="px-2.5 py-1.5 rounded-lg bg-[var(--primary)]/10 hover:bg-[var(--primary)]/20 text-[var(--primary)] font-mono text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
                         >
-                          Decline
+                          <span className="material-symbols-outlined text-[14px]">receipt_long</span>
+                          <span>Details</span>
                         </button>
-                        <button
-                          onClick={() => handleAcceptDebt(d.id, 'active')}
-                          className="px-3.5 py-1 rounded-lg bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 shadow-xs cursor-pointer"
+                        <Link
+                          href={`/directory/detail?id=${otherPerson?.id || d.id}`}
+                          className="px-2.5 py-1.5 rounded-lg border border-[var(--outline-variant)]/30 bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] font-mono text-xs font-semibold flex items-center gap-1 transition-colors"
                         >
-                          Accept
-                        </button>
+                          <span className="material-symbols-outlined text-[14px]">person</span>
+                          <span>Ledger</span>
+                        </Link>
                       </div>
-                    )}
 
-                    {d.status === 'pending' && d.created_by === currentUserId && (
-                      <div
-                        className="mt-3 pt-2.5 border-t border-[var(--outline-variant)]/15 flex items-center justify-between gap-2"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <span className="text-[11px] font-mono text-amber-500/90 flex items-center gap-1">
-                          <span className="material-symbols-outlined text-[13px]">schedule</span>
-                          <span>Awaiting acceptance</span>
-                        </span>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => handleTakeBackPendingDebt(d.id)}
-                            className="px-2.5 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/25 font-mono text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
-                            title="Take back and cancel this pending transaction"
+                      <div className="flex items-center gap-1.5">
+                        {isPurged && (
+                          <a
+                            href={`mailto:support@satya-nayak.dev?subject=Support%20Inquiry%20-%20Purged%20Transaction%20${d.id}`}
+                            className="px-3 py-1.5 rounded-lg border border-red-500/40 bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 font-mono text-xs font-bold flex items-center gap-1 transition-colors"
                           >
-                            <span className="material-symbols-outlined text-[13px]">undo</span>
-                            <span>Take Back</span>
-                          </button>
-                          <button
-                            onClick={() => setSelectedDebtForEdit(d)}
-                            className="px-3 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 border border-amber-500/30 font-mono text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
-                          >
-                            <span className="material-symbols-outlined text-[13px]">edit</span>
-                            <span>Edit</span>
-                          </button>
-                        </div>
+                            <span className="material-symbols-outlined text-[13px]">mail</span>
+                            <span>Support</span>
+                          </a>
+                        )}
+
+                        {d.status === 'pending' && d.created_by !== currentUserId && (
+                          <>
+                            <button
+                              onClick={() => handleAcceptDebt(d.id, 'declined')}
+                              className="px-2.5 py-1.5 rounded-lg border border-error/30 text-error font-mono text-xs font-bold hover:bg-error/10 cursor-pointer"
+                            >
+                              Decline
+                            </button>
+                            <button
+                              onClick={() => handleAcceptDebt(d.id, 'active')}
+                              className="px-3 py-1.5 rounded-lg bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 shadow-xs cursor-pointer"
+                            >
+                              Accept
+                            </button>
+                          </>
+                        )}
+
+                        {d.status === 'pending' && d.created_by === currentUserId && (
+                          <>
+                            <button
+                              onClick={() => handleTakeBackPendingDebt(d.id)}
+                              className="px-2.5 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/25 font-mono text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                              title="Take back and cancel this pending transaction"
+                            >
+                              <span className="material-symbols-outlined text-[13px]">undo</span>
+                              <span>Take Back</span>
+                            </button>
+                            <button
+                              onClick={() => setSelectedDebtForEdit(d)}
+                              className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 border border-amber-500/30 font-mono text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                            >
+                              <span className="material-symbols-outlined text-[13px]">edit</span>
+                              <span>Edit</span>
+                            </button>
+                          </>
+                        )}
+
+                        {!isPurged && d.status === 'active' && calc.currentBalance > 0 && (
+                          isLender && unverifiedCount > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedDebtForDetail(d)}
+                              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs font-bold flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
+                            >
+                              <span className="material-symbols-outlined text-[14px]">fact_check</span>
+                              <span>Verify</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setActiveDebtForPayment({ debt: d, balance: calc.currentBalance })}
+                              className={`px-3 py-1.5 rounded-lg font-mono text-xs font-bold flex items-center gap-1 shadow-xs transition-opacity hover:opacity-90 cursor-pointer ${
+                                !isLender
+                                  ? 'bg-[var(--primary)] text-[var(--on-primary)]'
+                                  : 'bg-[var(--secondary)] text-[var(--on-secondary)]'
+                              }`}
+                            >
+                              <span className="material-symbols-outlined text-[14px]">payments</span>
+                              <span>{!isLender ? 'Pay' : 'Record Pay'}</span>
+                            </button>
+                          )
+                        )}
                       </div>
-                    )}
+                    </div>
                   </div>
                 );
               })}
+
+              {sortedDebts.length > 8 && (
+                <Link
+                  href="/transactions"
+                  className="block w-full py-3 rounded-xl border border-[var(--outline-variant)]/30 bg-[var(--surface-container-low)] hover:bg-[var(--surface-container-high)] text-center font-mono text-xs font-bold text-[var(--primary)] transition-colors"
+                >
+                  View All {sortedDebts.length} Transactions &rarr;
+                </Link>
+              )}
             </div>
 
             {/* Desktop Table (>= md screens) */}
@@ -945,7 +1027,7 @@ export default function GlobalDashboardPage() {
                                 )}
                               </div>
                               <div className="font-mono text-xs text-[var(--on-surface-variant)]">
-                                {otherPerson?.email} {cleanNotes ? `• "${cleanNotes}"` : ''}
+                                {otherPerson?.email} {cleanNotes ? `\u2022 "${cleanNotes}"` : ''}
                               </div>
                             </div>
                           </Link>
@@ -1049,7 +1131,7 @@ export default function GlobalDashboardPage() {
                         </td>
 
                         <td className="py-4 text-right" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center justify-end gap-2">
+                          <div className="flex items-center justify-end gap-1.5">
                             {isPurged && (
                               <a
                                 href={`mailto:support@satya-nayak.dev?subject=Support%20Inquiry%20-%20Purged%20Transaction%20${d.id}`}
@@ -1060,6 +1142,35 @@ export default function GlobalDashboardPage() {
                                 <span>Support</span>
                               </a>
                             )}
+
+                            {!isPurged && d.status === 'active' && calc.currentBalance > 0 && (
+                              isLender && unverifiedCount > 0 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedDebtForDetail(d)}
+                                  className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap shadow-xs"
+                                  title="Review and verify borrower repayment"
+                                >
+                                  <span className="material-symbols-outlined text-[13px]">fact_check</span>
+                                  <span>Verify</span>
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveDebtForPayment({ debt: d, balance: calc.currentBalance })}
+                                  className={`px-2.5 py-1 rounded-lg font-mono text-xs font-bold transition-opacity hover:opacity-90 flex items-center gap-1 cursor-pointer whitespace-nowrap shadow-xs ${
+                                    !isLender
+                                      ? 'bg-[var(--primary)] text-[var(--on-primary)]'
+                                      : 'bg-[var(--secondary)] text-[var(--on-secondary)]'
+                                  }`}
+                                  title={!isLender ? 'Pay or log repayment directly' : 'Record a received payment'}
+                                >
+                                  <span className="material-symbols-outlined text-[13px]">payments</span>
+                                  <span>{!isLender ? 'Pay' : 'Record Pay'}</span>
+                                </button>
+                              )
+                            )}
+
                             {d.status === 'pending' && d.created_by !== currentUserId ? (
                               <button
                                 onClick={() => handleAcceptDebt(d.id, 'active')}
@@ -1086,6 +1197,7 @@ export default function GlobalDashboardPage() {
                                 </button>
                               </>
                             ) : null}
+
                             <button
                               type="button"
                               onClick={() => setSelectedDebtForDetail(d)}
@@ -1106,6 +1218,39 @@ export default function GlobalDashboardPage() {
           </div>
         )}
       </section>
+
+      {/* 3. Portfolio Cashflow Trend Chart & Live Accrual Ticker */}
+      <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2">
+          <CashflowChart
+            debts={debts}
+            payments={payments}
+            currentUserId={currentUserId}
+            currency={currency}
+          />
+        </div>
+
+        <div className="lg:col-span-1">
+          <LiveTicker
+            totalInterestAccrued={totalInterestAccrued}
+            dailyRate={dailyAccrualRate}
+            currency={currency}
+            lendingInterestTotal={totalInterestAccrued}
+            borrowingInterestTotal={borrowingInterestAccrued}
+          />
+        </div>
+      </section>
+
+      {/* Direct Payment Modal */}
+      {activeDebtForPayment && (
+        <PaymentModal
+          isOpen={Boolean(activeDebtForPayment)}
+          debt={activeDebtForPayment.debt}
+          currentBalance={activeDebtForPayment.balance}
+          onClose={() => setActiveDebtForPayment(null)}
+          onPaymentRecorded={fetchDashboardData}
+        />
+      )}
 
       {/* Detailed Debt Agreement & Share Modal */}
       {selectedDebtForDetail && (

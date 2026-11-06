@@ -151,9 +151,15 @@ export function PersonCard({ person, currency = 'inr', onRecordDebt }: PersonCar
 
       {/* Bottom Net Balance Box matching Stitch */}
       <div className="bg-[var(--surface-container-low)] rounded-xl p-3.5 border border-[var(--outline-variant)]/20">
-        <div className="flex items-baseline justify-between mb-2">
+        <div className="flex items-baseline justify-between mb-2 gap-2">
           <span className="font-mono text-[11px] uppercase tracking-wider text-[var(--on-surface-variant)] font-semibold">
-            {person.status === 'pending' ? 'Proposed Balance' : 'Net Balance'}
+            {person.status === 'pending'
+              ? 'Proposed Balance'
+              : isNetPositive
+              ? 'They Owe You'
+              : isNetNegative
+              ? 'You Owe Them'
+              : 'Net Balance'}
           </span>
 
           <div
@@ -191,22 +197,34 @@ export function PersonCard({ person, currency = 'inr', onRecordDebt }: PersonCar
         ) : (
           <div className="flex justify-between items-center text-[11px] font-mono text-[var(--on-surface-variant)] pt-2 border-t border-[var(--outline-variant)]/10">
             <span>Lent: {formatCurrency(person.lentAmount, currency)}</span>
-            <span>Owed: {formatCurrency(person.owedAmount, currency)}</span>
+            <span>Borrowed: {formatCurrency(person.owedAmount, currency)}</span>
           </div>
         )}
 
-        <div className="mt-3 pt-2 border-t border-[var(--outline-variant)]/20 flex gap-2">
+        <div className="mt-3 pt-2 border-t border-[var(--outline-variant)]/20 flex items-center gap-1.5">
           <Link
             href={`/directory/detail?id=${person.id}`}
             className="flex-1 py-1.5 px-2.5 bg-[var(--surface-container-lowest)] hover:bg-[var(--surface-container)] rounded-lg text-center font-mono text-xs font-semibold text-[var(--on-surface)] transition-colors border border-[var(--outline-variant)]/20 flex items-center justify-center gap-1"
           >
             <span className="material-symbols-outlined text-[14px] text-[var(--primary)]">menu_book</span>
-            <span>View Ledger</span>
+            <span>Ledger</span>
           </Link>
+
+          {person.owedAmount > 0 && person.status === 'active' && (
+            <Link
+              href={`/directory/detail?id=${person.id}&action=pay`}
+              className="py-1.5 px-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-mono text-xs font-bold transition-colors flex items-center justify-center gap-1 shadow-2xs"
+              title={`Pay or settle balance with ${person.name}`}
+            >
+              <span className="material-symbols-outlined text-[14px]">payments</span>
+              <span>Pay</span>
+            </Link>
+          )}
+
           <button
             type="button"
             onClick={() => onRecordDebt?.(person.id)}
-            className="py-1.5 px-3 bg-[var(--primary)] text-[var(--on-primary)] rounded-lg font-mono text-xs font-bold hover:opacity-90 transition-opacity flex items-center gap-1 cursor-pointer"
+            className="py-1.5 px-2.5 bg-[var(--primary)] text-[var(--on-primary)] rounded-lg font-mono text-xs font-bold hover:opacity-90 transition-opacity flex items-center gap-1 cursor-pointer"
             title="Record a new transaction with this person"
           >
             <span className="material-symbols-outlined text-[14px]">add</span>

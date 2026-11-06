@@ -42,10 +42,10 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
   ];
 
   const userNavItems: NavItem[] = [
-    { label: 'Dashboard', href: '/dash', icon: 'dashboard' },
-    { label: 'Directory', href: '/directory', icon: 'group' },
+    { label: 'Home', href: '/dash', icon: 'space_dashboard' },
+    { label: 'People', href: '/directory', icon: 'group' },
     { label: 'Transactions', href: '/transactions', icon: 'receipt_long' },
-    { label: 'Analytics', href: '/analytics', icon: 'analytics' },
+    { label: 'Analytics', href: '/analytics', icon: 'monitoring' },
     { label: 'Settings', href: '/settings', icon: 'settings' },
   ];
 
@@ -54,7 +54,7 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
   return (
     <aside className="hidden md:flex bg-[var(--surface-container)] docked left-0 h-screen w-60 fixed left-0 top-0 flex-col p-4 border-r border-[var(--outline-variant)]/30 z-40 transition-colors overflow-hidden">
       {/* Brand Header */}
-      <div className="mb-6 w-full max-w-full overflow-hidden">
+      <div className="mb-5 w-full max-w-full overflow-hidden">
         <BrandLogo
           size="md"
           tagline={inAdminMode ? 'Admin Console' : 'Synced Ledgers'}
@@ -85,22 +85,47 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
             <span>Switch to User View</span>
           </button>
         </div>
-      ) : onNewTransaction ? (
-        <button
-          onClick={onNewTransaction}
-          className="bg-[var(--primary)] text-[var(--on-primary)] font-medium py-3 px-4 rounded-xl mb-6 w-full flex justify-center items-center gap-2 hover:opacity-95 active:scale-[0.98] transition-all shadow-sm cursor-pointer"
-        >
-          <span className="material-symbols-outlined text-[20px]">add</span>
-          <span>New Transaction</span>
-        </button>
       ) : (
-        <Link
-          href="/dash?action=new"
-          className="bg-[var(--primary)] text-[var(--on-primary)] font-medium py-3 px-4 rounded-xl mb-6 w-full flex justify-center items-center gap-2 hover:opacity-95 active:scale-[0.98] transition-all shadow-sm text-center"
-        >
-          <span className="material-symbols-outlined text-[20px]">add</span>
-          <span>New Transaction</span>
-        </Link>
+        <div className="space-y-2 mb-5">
+          {onNewTransaction ? (
+            <button
+              onClick={onNewTransaction}
+              className="bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold py-2.5 px-4 rounded-xl w-full flex justify-center items-center gap-2 hover:opacity-95 active:scale-[0.98] transition-all shadow-sm cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[18px]">add_circle</span>
+              <span>Record Debt / Loan</span>
+            </button>
+          ) : (
+            <Link
+              href="/dash?action=new"
+              className="bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold py-2.5 px-4 rounded-xl w-full flex justify-center items-center gap-2 hover:opacity-95 active:scale-[0.98] transition-all shadow-sm text-center"
+            >
+              <span className="material-symbols-outlined text-[18px]">add_circle</span>
+              <span>Record Debt / Loan</span>
+            </Link>
+          )}
+
+          <div className="grid grid-cols-2 gap-1.5">
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_split_modal'))}
+              className="py-2 px-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-low)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+              title="Split a bill among multiple people"
+            >
+              <span className="material-symbols-outlined text-[15px] text-[var(--primary)]">call_split</span>
+              <span>Split Bill</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_add_person'))}
+              className="py-2 px-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-low)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+              title="Add a new person or contact to your directory"
+            >
+              <span className="material-symbols-outlined text-[15px] text-[var(--secondary)]">person_add</span>
+              <span>Add Person</span>
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Main Nav Links */}

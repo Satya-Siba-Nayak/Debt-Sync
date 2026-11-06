@@ -34,6 +34,7 @@ import Link from 'next/link';
 function PersonDebtDetailContent() {
   const searchParams = useSearchParams();
   const personId = searchParams.get('id') || '';
+  const actionParam = searchParams.get('action') || '';
 
   const supabase = createClient();
 
@@ -87,6 +88,15 @@ function PersonDebtDetailContent() {
   const [selectedDebtForEdit, setSelectedDebtForEdit] = useState<Debt | null>(null);
   const [verifyingPaymentId, setVerifyingPaymentId] = useState<string | null>(null);
   const [verifyingAll, setVerifyingAll] = useState(false);
+  const [hasHandledPayParam, setHasHandledPayParam] = useState(false);
+
+  useEffect(() => {
+    if (actionParam === 'pay' && person && debts.length > 0 && !hasHandledPayParam) {
+      setHasHandledPayParam(true);
+      setSelectedDebtIdForPay(null);
+      setIsPayModalOpen(true);
+    }
+  }, [actionParam, person, debts.length, hasHandledPayParam]);
 
   const fetchDetails = useCallback(async () => {
     if (!personId) {
@@ -1331,7 +1341,7 @@ function PersonDebtDetailContent() {
         {displayDebts.length === 0 ? (
           <p className="text-xs font-mono text-on-surface-variant py-4">No records found for this filter.</p>
         ) : (
-          <div className="max-h-[520px] overflow-y-auto overscroll-contain modal-scroll-container pr-1 sm:pr-2 space-y-3 sm:space-y-4">
+          <div className="space-y-3 sm:space-y-4">
             {displayDebts.map((d) => {
               const isLender = d.lender_id === currentUserId;
               const isIncomingPending = d.status === 'pending' && d.created_by !== currentUserId;

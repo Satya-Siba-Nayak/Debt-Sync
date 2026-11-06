@@ -65,6 +65,9 @@ export function DebtDetailModal({
   const [reminderLoading, setReminderLoading] = useState(false);
   const [reminderFeedback, setReminderFeedback] = useState<string | null>(null);
 
+  // Section Navigation Filter (defaults to 'all' so 100% of details are visible immediately)
+  const [activeDetailSection, setActiveDetailSection] = useState<'all' | 'overview' | 'repayments' | 'audit'>('all');
+
   // Active debt payment reminders (Email max 2/wk, Push max 3/wk)
   const [paymentReminderLoading, setPaymentReminderLoading] = useState(false);
   const [paymentReminderFeedback, setPaymentReminderFeedback] = useState<{
@@ -1310,70 +1313,196 @@ export function DebtDetailModal({
             </div>
           )}
 
-          {/* Financial Metrics Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="p-3 rounded-xl bg-[var(--surface)] border border-[var(--outline-variant)]/30">
-              <div className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
-                Principal
+          {/* Quick Actions & Section Navigation Bar */}
+          <div className="space-y-3">
+            {/* Quick Actions Row */}
+            <div className="p-3 rounded-xl bg-[var(--surface-container-low)] border border-[var(--outline-variant)]/30 flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2 flex-wrap">
+                {debt.status === 'active' && !isPurged && calc.currentBalance > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setIsPaymentModalOpen(true)}
+                    className="py-1.5 px-3 rounded-lg bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 transition-opacity flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    title={isLender ? "Record repayment received" : "Report repayment made"}
+                  >
+                    <span className="material-symbols-outlined text-[15px]">{isLender ? 'add' : 'payments'}</span>
+                    <span>{isLender ? 'Record Payment' : 'Report Repayment'}</span>
+                  </button>
+                )}
+
+                {isLender && (calc.pendingVerificationPaid || 0) > 0 && !isPurged && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveDetailSection('repayments')}
+                    className="py-1.5 px-3 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-mono text-xs font-bold hover:bg-emerald-500/25 transition-colors flex items-center gap-1.5 cursor-pointer animate-pulse"
+                    title="Jump to pending receipts for verification"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">fact_check</span>
+                    <span>Verify Receipts</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setIsNoteModalOpen(true)}
+                  className="py-1.5 px-3 rounded-lg border border-[var(--outline-variant)]/30 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-xs font-semibold hover:border-[var(--primary)]/50 transition-colors flex items-center gap-1.5 cursor-pointer"
+                  title="View or edit notes"
+                >
+                  <span className="material-symbols-outlined text-[15px]">edit_note</span>
+                  <span>Notes</span>
+                </button>
+
+                <Link
+                  href={`/directory/detail?id=${otherPerson?.id || debt.id}`}
+                  onClick={onClose}
+                  className="py-1.5 px-3 rounded-lg border border-[var(--outline-variant)]/30 bg-[var(--surface)] text-[var(--on-surface-variant)] hover:text-[var(--primary)] hover:border-[var(--primary)]/50 font-mono text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
+                  title={`View full ledger with ${otherName}`}
+                >
+                  <span className="material-symbols-outlined text-[15px]">menu_book</span>
+                  <span>Ledger</span>
+                </Link>
               </div>
-              <div className="font-mono text-sm font-bold text-[var(--on-surface)] mt-1">
-                {formatCurrency(calc.principal, debtCurrency, { showDecimals: true })}
+
+              <div className="font-mono text-xs text-[var(--on-surface-variant)]">
+                Status: <strong className="text-[var(--on-surface)] uppercase">{isPurged ? 'Purged' : debt.status}</strong>
               </div>
             </div>
 
-            <div className="p-3 rounded-xl bg-[var(--surface)] border border-[var(--outline-variant)]/30">
-              <div className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
-                Interest Terms
-              </div>
-              <div className="font-mono text-sm font-bold text-[var(--on-surface)] mt-1">
-                {debt.interest_type === 'none'
-                  ? '0% None'
-                  : `${debt.interest_rate}% ${debt.interest_type}${debt.interest_type === 'compound' ? ` (${debt.compound_freq || 'monthly'})` : ''}`}
-              </div>
-            </div>
-
-            <div className="p-3 rounded-xl bg-[var(--surface)] border border-[var(--outline-variant)]/30">
-              <div className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
-                Accrued Interest
-              </div>
-              <div className="font-mono text-sm font-bold text-[var(--on-surface)] mt-1">
-                {formatCurrency(calc.totalAccruedInterest, debtCurrency, { showDecimals: true })}
-              </div>
-              {calc.totalAccruedInterest === 0 && calc.rawAccruedInterest > 0 && (
-                <div className="text-[9px] font-mono text-[var(--on-surface-variant)] mt-0.5 italic">
-                  &lt;0.01 unaccrued
-                </div>
-              )}
-            </div>
-
-            <div className="p-3 rounded-xl bg-[var(--surface)] border border-[var(--outline-variant)]/30">
-              <div className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
-                Total Verified Paid
-              </div>
-              <div className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400 mt-1">
-                {formatCurrency(calc.totalPaid, debtCurrency, { showDecimals: true })}
-              </div>
+            {/* Section Filter Tabs */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-[var(--outline-variant)]/20 font-mono text-xs no-scrollbar">
+              <button
+                type="button"
+                onClick={() => setActiveDetailSection('all')}
+                className={`py-1.5 px-3 rounded-lg font-bold transition-all whitespace-nowrap cursor-pointer ${
+                  activeDetailSection === 'all'
+                    ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-xs'
+                    : 'bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-highest)]'
+                }`}
+              >
+                All Details
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveDetailSection('overview')}
+                className={`py-1.5 px-3 rounded-lg font-bold transition-all whitespace-nowrap cursor-pointer ${
+                  activeDetailSection === 'overview'
+                    ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-xs'
+                    : 'bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-highest)]'
+                }`}
+              >
+                Overview &amp; Notes
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveDetailSection('repayments')}
+                className={`py-1.5 px-3 rounded-lg font-bold transition-all whitespace-nowrap cursor-pointer flex items-center gap-1 ${
+                  activeDetailSection === 'repayments'
+                    ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-xs'
+                    : 'bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-highest)]'
+                }`}
+              >
+                <span>Repayments &amp; Reminders</span>
+                {payments.length > 0 && (
+                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                    activeDetailSection === 'repayments'
+                      ? 'bg-white/20 text-white'
+                      : 'bg-[var(--primary)]/15 text-[var(--primary)]'
+                  }`}>
+                    {payments.length}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveDetailSection('audit')}
+                className={`py-1.5 px-3 rounded-lg font-bold transition-all whitespace-nowrap cursor-pointer flex items-center gap-1 ${
+                  activeDetailSection === 'audit'
+                    ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow-xs'
+                    : 'bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] hover:bg-[var(--surface-container-highest)]'
+                }`}
+              >
+                <span>Audit Trail</span>
+                {activityLogs.length > 0 && (
+                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                    activeDetailSection === 'audit'
+                      ? 'bg-white/20 text-white'
+                      : 'bg-[var(--surface-container)] text-[var(--on-surface-variant)]'
+                  }`}>
+                    {activityLogs.length}
+                  </span>
+                )}
+              </button>
             </div>
           </div>
 
-          {/* Repayment Progress Bar */}
-          {debt.status !== 'declined' && totalObligation > 0 && (
-            <div className="px-3.5 py-2.5 rounded-xl bg-[var(--surface-container-low)] border border-[var(--outline-variant)]/20 space-y-1.5">
-              <div className="flex items-center justify-between text-[11px] font-mono text-[var(--on-surface-variant)]">
-                <span>Settlement Progress ({paidPct}% Paid)</span>
-                <span>
-                  Remaining:{' '}
-                  <strong className="text-[var(--on-surface)]">
-                    {formatCurrency(calc.currentBalance, debtCurrency, { showDecimals: true })}
-                  </strong>
-                </span>
+          {/* Financial Metrics Grid */}
+          {(activeDetailSection === 'all' || activeDetailSection === 'overview') && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-3 rounded-xl bg-[var(--surface)] border border-[var(--outline-variant)]/30">
+                  <div className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                    Principal
+                  </div>
+                  <div className="font-mono text-sm font-bold text-[var(--on-surface)] mt-1">
+                    {formatCurrency(calc.principal, debtCurrency, { showDecimals: true })}
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-[var(--surface)] border border-[var(--outline-variant)]/30">
+                  <div className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                    Interest Terms
+                  </div>
+                  <div className="font-mono text-sm font-bold text-[var(--on-surface)] mt-1">
+                    {debt.interest_type === 'none'
+                      ? '0% None'
+                      : `${debt.interest_rate}% ${debt.interest_type}${debt.interest_type === 'compound' ? ` (${debt.compound_freq || 'monthly'})` : ''}`}
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-[var(--surface)] border border-[var(--outline-variant)]/30">
+                  <div className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                    Accrued Interest
+                  </div>
+                  <div className="font-mono text-sm font-bold text-[var(--on-surface)] mt-1">
+                    {formatCurrency(calc.totalAccruedInterest, debtCurrency, { showDecimals: true })}
+                  </div>
+                  {calc.totalAccruedInterest === 0 && calc.rawAccruedInterest > 0 && (
+                    <div className="text-[9px] font-mono text-[var(--on-surface-variant)] mt-0.5 italic">
+                      &lt;0.01 unaccrued
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-3 rounded-xl bg-[var(--surface)] border border-[var(--outline-variant)]/30">
+                  <div className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                    Total Verified Paid
+                  </div>
+                  <div className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+                    {formatCurrency(calc.totalPaid, debtCurrency, { showDecimals: true })}
+                  </div>
+                </div>
               </div>
-              <div className="w-full h-2 rounded-full bg-[var(--surface-container-high)] overflow-hidden flex">
-                <div
-                  className="bg-emerald-500 h-full transition-all duration-300"
-                  style={{ width: `${paidPct}%` }}
-                />
-              </div>
+
+              {/* Repayment Progress Bar */}
+              {debt.status !== 'declined' && totalObligation > 0 && (
+                <div className="px-3.5 py-2.5 rounded-xl bg-[var(--surface-container-low)] border border-[var(--outline-variant)]/20 space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px] font-mono text-[var(--on-surface-variant)]">
+                    <span>Settlement Progress ({paidPct}% Paid)</span>
+                    <span>
+                      Remaining:{' '}
+                      <strong className="text-[var(--on-surface)]">
+                        {formatCurrency(calc.currentBalance, debtCurrency, { showDecimals: true })}
+                      </strong>
+                    </span>
+                  </div>
+                  <div className="w-full h-2 rounded-full bg-[var(--surface-container-high)] overflow-hidden flex">
+                    <div
+                      className="bg-emerald-500 h-full transition-all duration-300"
+                      style={{ width: `${paidPct}%` }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1551,7 +1680,7 @@ export function DebtDetailModal({
           )}
 
           {/* Active Debt: Payment Reminders & Due Date Status */}
-          {debt.status === 'active' && calc.currentBalance > 0 && (
+          {(activeDetailSection === 'all' || activeDetailSection === 'repayments') && debt.status === 'active' && calc.currentBalance > 0 && (
             <div className="p-4 rounded-xl border border-[var(--outline-variant)]/30 bg-[var(--surface-container-low)] space-y-3.5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                 <div className="flex items-center gap-2">
@@ -1810,7 +1939,7 @@ export function DebtDetailModal({
           )}
 
           {/* Split Bill Group Card */}
-          {(() => {
+          {(activeDetailSection === 'all' || activeDetailSection === 'overview') && (() => {
             const split = parseSplitDetails(debt);
             if (!split) return null;
 
@@ -1885,7 +2014,7 @@ export function DebtDetailModal({
           })()}
 
           {/* Two-Sided Notes Section */}
-          {(() => {
+          {(activeDetailSection === 'all' || activeDetailSection === 'overview') && (() => {
             const cleanNotes = getCleanDebtNotes(debt.notes).trim();
             const counterNote = debt.counterparty_notes?.trim();
 
@@ -1940,82 +2069,210 @@ export function DebtDetailModal({
           })()}
 
           {/* Repayment Receipts & Transactions */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h4 className="font-heading font-bold text-sm text-[var(--on-surface)]">
-                Repayment Receipts &amp; Transactions ({payments.length})
-              </h4>
-              {debt.status === 'active' && calc.currentBalance > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setIsPaymentModalOpen(true)}
-                  className="font-mono text-xs text-[var(--secondary)] font-bold hover:underline flex items-center gap-1"
-                >
-                  <span className="material-symbols-outlined text-[14px]">add_circle</span>
-                  {isLender ? 'Record Payment' : 'Report Repayment'}
-                </button>
-              )}
-            </div>
-
-            {sortedPayments.length === 0 ? (
-              <div className="p-4 rounded-xl border border-[var(--outline-variant)]/20 text-center font-mono text-xs text-[var(--on-surface-variant)]">
-                No payments or repayments recorded yet for this agreement.
+          {(activeDetailSection === 'all' || activeDetailSection === 'repayments') && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="font-heading font-bold text-sm text-[var(--on-surface)]">
+                  Repayment Receipts &amp; Transactions ({payments.length})
+                </h4>
+                {debt.status === 'active' && calc.currentBalance > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setIsPaymentModalOpen(true)}
+                    className="font-mono text-xs text-[var(--secondary)] font-bold hover:underline flex items-center gap-1"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">add_circle</span>
+                    {isLender ? 'Record Payment' : 'Report Repayment'}
+                  </button>
+                )}
               </div>
-            ) : (
-              <div className="max-h-60 overflow-y-auto overscroll-contain modal-scroll-container pr-1 space-y-2.5">
-                {(() => {
-                  const pendingList = sortedPayments.filter((p) => {
-                    const isDisputed =
-                      (p as any).status === 'disputed' ||
-                      ((p as any).is_verified === false && (p as any).verified_at != null) ||
-                      (typeof p.note === 'string' && p.note.includes('[DISPUTED]'));
-                    return (p as any).is_verified === false && !isDisputed;
-                  });
-                  const resolvedList = sortedPayments.filter((p) => {
-                    const isDisputed =
-                      (p as any).status === 'disputed' ||
-                      ((p as any).is_verified === false && (p as any).verified_at != null) ||
-                      (typeof p.note === 'string' && p.note.includes('[DISPUTED]'));
-                    return (p as any).is_verified === true || isDisputed;
-                  });
 
-                  const totalPending =
-                    Math.round(
-                      pendingList.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) * 100
-                    ) / 100;
+              {sortedPayments.length === 0 ? (
+                <div className="p-4 rounded-xl border border-[var(--outline-variant)]/20 text-center font-mono text-xs text-[var(--on-surface-variant)]">
+                  No payments or repayments recorded yet for this agreement.
+                </div>
+              ) : (
+                <div className="max-h-60 overflow-y-auto overscroll-contain modal-scroll-container pr-1 space-y-2.5">
+                  {(() => {
+                    const pendingList = sortedPayments.filter((p) => {
+                      const isDisputed =
+                        (p as any).status === 'disputed' ||
+                        ((p as any).is_verified === false && (p as any).verified_at != null) ||
+                        (typeof p.note === 'string' && p.note.includes('[DISPUTED]'));
+                      return (p as any).is_verified === false && !isDisputed;
+                    });
+                    const resolvedList = sortedPayments.filter((p) => {
+                      const isDisputed =
+                        (p as any).status === 'disputed' ||
+                        ((p as any).is_verified === false && (p as any).verified_at != null) ||
+                        (typeof p.note === 'string' && p.note.includes('[DISPUTED]'));
+                      return (p as any).is_verified === true || isDisputed;
+                    });
 
-                  return (
-                    <>
-                      {pendingList.length > 0 && (
-                        <div className="p-3 rounded-xl border border-amber-500/30 bg-amber-500/5 space-y-2.5">
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                            <div>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-mono text-sm font-bold text-[var(--on-surface)]">
-                                  {formatCurrency(
-                                    totalPending,
-                                    pendingList[0].currency || debtCurrency,
-                                    { showDecimals: true }
-                                  )}
-                                </span>
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
-                                  <span className="material-symbols-outlined text-[12px]">schedule</span>
-                                  Pending Lender Verification
-                                </span>
-                                {pendingList.length > 1 && (
-                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)]">
-                                    {pendingList.length} Payments
+                    const totalPending =
+                      Math.round(
+                        pendingList.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) * 100
+                      ) / 100;
+
+                    return (
+                      <>
+                        {pendingList.length > 0 && (
+                          <div className="p-3 rounded-xl border border-amber-500/30 bg-amber-500/5 space-y-2.5">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                              <div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-mono text-sm font-bold text-[var(--on-surface)]">
+                                    {formatCurrency(
+                                      totalPending,
+                                      pendingList[0].currency || debtCurrency,
+                                      { showDecimals: true }
+                                    )}
                                   </span>
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                                    <span className="material-symbols-outlined text-[12px]">schedule</span>
+                                    Pending Lender Verification
+                                  </span>
+                                  {pendingList.length > 1 && (
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[var(--primary)]/15 text-[var(--primary)]">
+                                      {pendingList.length} Payments
+                                    </span>
+                                  )}
+                                </div>
+
+                                {pendingList.length === 1 && (
+                                  <div className="text-xs text-[var(--on-surface-variant)] mt-1 flex items-center gap-3 flex-wrap">
+                                    <span>{new Date(pendingList[0].created_at).toLocaleString()}</span>
+                                    {(pendingList[0] as any).payment_method && (() => {
+                                      const disp = formatPaymentMethodDisplay(
+                                        (pendingList[0] as any).payment_method,
+                                        (pendingList[0] as any).transaction_ref
+                                      );
+                                      return (
+                                        <span className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded border ${disp.badgeClass} flex items-center gap-1`}>
+                                          <span className="material-symbols-outlined text-[12px]">{disp.icon}</span>
+                                          <span>{disp.fullLabel}</span>
+                                        </span>
+                                      );
+                                    })()}
+                                    {(pendingList[0] as any).transaction_ref && (
+                                      <span className="font-mono text-[11px] text-[var(--primary)] flex items-center gap-1">
+                                        <span>UTR: {(pendingList[0] as any).transaction_ref}</span>
+                                      </span>
+                                    )}
+                                    {pendingList[0].note && (
+                                      <span className="font-mono text-[11px] italic">
+                                        &quot;{pendingList[0].note}&quot;
+                                      </span>
+                                    )}
+                                  </div>
                                 )}
                               </div>
 
-                              {pendingList.length === 1 && (
+                              {isLender && (
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleVerifyPendingRepayments(pendingList, 'verified')}
+                                    disabled={verifyingPaymentId != null}
+                                    className="py-1.5 px-3 rounded-lg bg-emerald-600 text-white font-mono text-xs font-bold hover:bg-emerald-700 transition-colors flex items-center gap-1 disabled:opacity-50 cursor-pointer shadow-xs"
+                                  >
+                                    <span className="material-symbols-outlined text-[14px]">done_all</span>
+                                    <span>
+                                      {pendingList.length > 1
+                                        ? `Verify Receipt (${pendingList.length})`
+                                        : 'Verify Receipt'}
+                                    </span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (
+                                        confirm(
+                                          pendingList.length > 1
+                                            ? `Dispute all ${pendingList.length} pending repayment receipts?`
+                                            : 'Dispute this unverified repayment receipt?'
+                                        )
+                                      ) {
+                                        handleVerifyPendingRepayments(pendingList, 'disputed');
+                                      }
+                                    }}
+                                    disabled={verifyingPaymentId != null}
+                                    className="py-1.5 px-2.5 rounded-lg border border-red-500/30 text-red-600 dark:text-red-400 font-mono text-xs font-semibold hover:bg-red-500/10 transition-colors disabled:opacity-50 cursor-pointer"
+                                  >
+                                    Dispute
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
+                            {pendingList.length > 1 && (
+                              <div className="rounded-lg bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)]/25 divide-y divide-[var(--outline-variant)]/15 overflow-hidden">
+                                {pendingList.map((p) => (
+                                  <div
+                                    key={p.id}
+                                    className="px-2.5 py-1.5 flex items-center justify-between gap-2 text-xs font-mono"
+                                  >
+                                    <div className="min-w-0 flex-1 text-[var(--on-surface-variant)] truncate">
+                                      <span>{new Date(p.created_at).toLocaleString()}</span>
+                                      {p.note && <span className="ml-2 italic">&quot;{p.note}&quot;</span>}
+                                    </div>
+                                    <span className="font-bold text-emerald-600 dark:text-emerald-400 shrink-0">
+                                      {formatCurrency(Number(p.amount), p.currency || debtCurrency, {
+                                        showDecimals: true,
+                                      })}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {resolvedList.map((p) => {
+                          const isDisputed =
+                            (p as any).status === 'disputed' ||
+                            ((p as any).is_verified === false && (p as any).verified_at != null) ||
+                            (typeof p.note === 'string' && p.note.includes('[DISPUTED]'));
+                          const isVerified = (p as any).is_verified === true;
+
+                          return (
+                            <div
+                              key={p.id}
+                              className={`p-3 rounded-xl border ${
+                                isDisputed
+                                  ? 'border-red-500/20 bg-red-500/5'
+                                  : 'border-[var(--outline-variant)]/20 bg-[var(--surface-container-low)]'
+                              } flex flex-col sm:flex-row sm:items-center justify-between gap-3`}
+                            >
+                              <div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-mono text-sm font-bold text-[var(--on-surface)]">
+                                    {formatCurrency(Number(p.amount), p.currency || debtCurrency, {
+                                      showDecimals: true,
+                                    })}
+                                  </span>
+
+                                  {isVerified && (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                                      <span className="material-symbols-outlined text-[12px]">verified</span>
+                                      Verified Receipt
+                                    </span>
+                                  )}
+
+                                  {isDisputed && (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30 flex items-center gap-1">
+                                      <span className="material-symbols-outlined text-[12px]">error</span>
+                                      Receipt Disputed by Lender
+                                    </span>
+                                  )}
+                                </div>
+
                                 <div className="text-xs text-[var(--on-surface-variant)] mt-1 flex items-center gap-3 flex-wrap">
-                                  <span>{new Date(pendingList[0].created_at).toLocaleString()}</span>
-                                  {(pendingList[0] as any).payment_method && (() => {
+                                  <span>{new Date(p.created_at).toLocaleString()}</span>
+                                  {(p as any).payment_method && (() => {
                                     const disp = formatPaymentMethodDisplay(
-                                      (pendingList[0] as any).payment_method,
-                                      (pendingList[0] as any).transaction_ref
+                                      (p as any).payment_method,
+                                      (p as any).transaction_ref
                                     );
                                     return (
                                       <span className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded border ${disp.badgeClass} flex items-center gap-1`}>
@@ -2024,237 +2281,113 @@ export function DebtDetailModal({
                                       </span>
                                     );
                                   })()}
-                                  {(pendingList[0] as any).transaction_ref && (
+                                  {(p as any).transaction_ref && (
                                     <span className="font-mono text-[11px] text-[var(--primary)] flex items-center gap-1">
-                                      <span>UTR: {(pendingList[0] as any).transaction_ref}</span>
+                                      <span>UTR: {(p as any).transaction_ref}</span>
                                     </span>
                                   )}
-                                  {pendingList[0].note && (
-                                    <span className="font-mono text-[11px] italic">
-                                      &quot;{pendingList[0].note}&quot;
-                                    </span>
-                                  )}
+                                  {p.note && <span className="font-mono text-[11px] italic">&quot;{p.note}&quot;</span>}
                                 </div>
-                              )}
-                            </div>
-
-                            {isLender && (
-                              <div className="flex items-center gap-2 shrink-0">
-                                <button
-                                  type="button"
-                                  onClick={() => handleVerifyPendingRepayments(pendingList, 'verified')}
-                                  disabled={verifyingPaymentId != null}
-                                  className="py-1.5 px-3 rounded-lg bg-emerald-600 text-white font-mono text-xs font-bold hover:bg-emerald-700 transition-colors flex items-center gap-1 disabled:opacity-50 cursor-pointer shadow-xs"
-                                >
-                                  <span className="material-symbols-outlined text-[14px]">done_all</span>
-                                  <span>
-                                    {pendingList.length > 1
-                                      ? `Verify Receipt (${pendingList.length})`
-                                      : 'Verify Receipt'}
-                                  </span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (
-                                      confirm(
-                                        pendingList.length > 1
-                                          ? `Dispute all ${pendingList.length} pending repayment receipts?`
-                                          : 'Dispute this unverified repayment receipt?'
-                                      )
-                                    ) {
-                                      handleVerifyPendingRepayments(pendingList, 'disputed');
-                                    }
-                                  }}
-                                  disabled={verifyingPaymentId != null}
-                                  className="py-1.5 px-2.5 rounded-lg border border-red-500/30 text-red-600 dark:text-red-400 font-mono text-xs font-semibold hover:bg-red-500/10 transition-colors disabled:opacity-50 cursor-pointer"
-                                >
-                                  Dispute
-                                </button>
-                              </div>
-                            )}
-                          </div>
-
-                          {pendingList.length > 1 && (
-                            <div className="rounded-lg bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)]/25 divide-y divide-[var(--outline-variant)]/15 overflow-hidden">
-                              {pendingList.map((p) => (
-                                <div
-                                  key={p.id}
-                                  className="px-2.5 py-1.5 flex items-center justify-between gap-2 text-xs font-mono"
-                                >
-                                  <div className="min-w-0 flex-1 text-[var(--on-surface-variant)] truncate">
-                                    <span>{new Date(p.created_at).toLocaleString()}</span>
-                                    {p.note && <span className="ml-2 italic">&quot;{p.note}&quot;</span>}
-                                  </div>
-                                  <span className="font-bold text-emerald-600 dark:text-emerald-400 shrink-0">
-                                    {formatCurrency(Number(p.amount), p.currency || debtCurrency, {
-                                      showDecimals: true,
-                                    })}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {resolvedList.map((p) => {
-                        const isDisputed =
-                          (p as any).status === 'disputed' ||
-                          ((p as any).is_verified === false && (p as any).verified_at != null) ||
-                          (typeof p.note === 'string' && p.note.includes('[DISPUTED]'));
-                        const isVerified = (p as any).is_verified === true;
-
-                        return (
-                          <div
-                            key={p.id}
-                            className={`p-3 rounded-xl border ${
-                              isDisputed
-                                ? 'border-red-500/20 bg-red-500/5'
-                                : 'border-[var(--outline-variant)]/20 bg-[var(--surface-container-low)]'
-                            } flex flex-col sm:flex-row sm:items-center justify-between gap-3`}
-                          >
-                            <div>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-mono text-sm font-bold text-[var(--on-surface)]">
-                                  {formatCurrency(Number(p.amount), p.currency || debtCurrency, {
-                                    showDecimals: true,
-                                  })}
-                                </span>
-
-                                {isVerified && (
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-                                    <span className="material-symbols-outlined text-[12px]">verified</span>
-                                    Verified Receipt
-                                  </span>
-                                )}
-
-                                {isDisputed && (
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30 flex items-center gap-1">
-                                    <span className="material-symbols-outlined text-[12px]">error</span>
-                                    Receipt Disputed by Lender
-                                  </span>
-                                )}
-                              </div>
-
-                              <div className="text-xs text-[var(--on-surface-variant)] mt-1 flex items-center gap-3 flex-wrap">
-                                <span>{new Date(p.created_at).toLocaleString()}</span>
-                                {(p as any).payment_method && (() => {
-                                  const disp = formatPaymentMethodDisplay(
-                                    (p as any).payment_method,
-                                    (p as any).transaction_ref
-                                  );
-                                  return (
-                                    <span className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded border ${disp.badgeClass} flex items-center gap-1`}>
-                                      <span className="material-symbols-outlined text-[12px]">{disp.icon}</span>
-                                      <span>{disp.fullLabel}</span>
-                                    </span>
-                                  );
-                                })()}
-                                {(p as any).transaction_ref && (
-                                  <span className="font-mono text-[11px] text-[var(--primary)] flex items-center gap-1">
-                                    <span>UTR: {(p as any).transaction_ref}</span>
-                                  </span>
-                                )}
-                                {p.note && <span className="font-mono text-[11px] italic">&quot;{p.note}&quot;</span>}
                               </div>
                             </div>
-                          </div>
-                        );
-                      })}
-                    </>
-                  );
-                })()}
-              </div>
-            )}
-          </div>
+                          );
+                        })}
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Activity Log & Audit Trail */}
-          <div className="space-y-3">
-            <h4 className="font-heading font-bold text-sm text-[var(--on-surface)]">
-              Chronological Audit Trail
-            </h4>
+          {(activeDetailSection === 'all' || activeDetailSection === 'audit') && (
+            <div className="space-y-3">
+              <h4 className="font-heading font-bold text-sm text-[var(--on-surface)]">
+                Chronological Audit Trail
+              </h4>
 
-            {activityLogs.length === 0 ? (
-              <div className="p-4 rounded-xl border border-[var(--outline-variant)]/20 text-center font-mono text-xs text-[var(--on-surface-variant)]">
-                No activity logged yet for this debt.
-              </div>
-            ) : (
-              <div className="max-h-56 overflow-y-auto overscroll-contain modal-scroll-container pr-2">
-                <div className="relative pl-6 space-y-4 before:content-[''] before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-[var(--outline-variant)]/30">
-                  {activityLogs.map((log) => {
-                    let dotColor = 'bg-[var(--outline)]';
-                    let title = log.action;
-
-                    if (log.action === 'payment_made') {
-                      dotColor = 'bg-[var(--secondary)]';
-                      title = `Payment Received (${formatCurrency(Number((log.details as any)?.amount || 0), debtCurrency)})`;
-                    } else if (log.action === 'repayment_reported') {
-                      dotColor = 'bg-amber-500';
-                      title = `Repayment Reported (${formatCurrency(Number((log.details as any)?.amount || 0), debtCurrency)})`;
-                    } else if (log.action === 'payment_verified') {
-                      dotColor = 'bg-emerald-500';
-                      title = 'Repayment Verified by Lender';
-                    } else if (log.action === 'payment_disputed') {
-                      dotColor = 'bg-red-500';
-                      title = `Repayment Disputed by Lender (${formatCurrency(Number((log.details as any)?.amount || 0), debtCurrency)})`;
-                    } else if (log.action === 'creator_note_updated') {
-                      dotColor = 'bg-[var(--primary)]';
-                      title = 'Creator Note Updated';
-                    } else if (log.action === 'counterparty_note_updated') {
-                      dotColor = 'bg-[var(--secondary)]';
-                      title = 'Counterparty Note Updated';
-                    } else if (log.action === 'debt_created') {
-                      dotColor = 'bg-[var(--primary)]';
-                      title = `Debt Agreement Created (Principal: ${formatCurrency(Number((log.details as any)?.principal || debt.principal), debtCurrency)})`;
-                    } else if (log.action === 'debt_pending_edited') {
-                      dotColor = 'bg-amber-500';
-                      title = `Pending Agreement Edited (Principal: ${formatCurrency(Number((log.details as any)?.newPrincipal || debt.principal), debtCurrency)})`;
-                    } else if (log.action === 'debt_accepted') {
-                      dotColor = 'bg-emerald-500';
-                      title = 'Agreement Accepted by Counterparty';
-                    } else if (log.action === 'debt_declined') {
-                      dotColor = 'bg-red-500';
-                      title = 'Agreement Declined by Counterparty';
-                    } else if (log.action === 'debt_settled') {
-                      dotColor = 'bg-emerald-500';
-                      title = 'Debt Agreement Fully Settled';
-                    } else if (log.action === 'global_share_enabled') {
-                      dotColor = 'bg-amber-500';
-                      title = `Global Public Link Enabled by ${(log.details as any)?.actorName || 'Participant'}`;
-                    } else if (log.action === 'global_share_disabled') {
-                      dotColor = 'bg-[var(--outline)]';
-                      title = `Global Public Link Disabled by ${(log.details as any)?.actorName || 'Participant'}`;
-                    } else if (log.action === 'global_share_regenerated') {
-                      dotColor = 'bg-amber-500';
-                      title = `Global Public Link Rotated by ${(log.details as any)?.actorName || 'Participant'}`;
-                    }
-
-                    return (
-                      <div key={log.id} className="relative group">
-                        <div
-                          className={`absolute -left-[23px] top-1 w-2.5 h-2.5 rounded-full ${dotColor} ring-4 ring-[var(--surface)]`}
-                        />
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                          <div className="font-heading font-semibold text-xs text-[var(--on-surface)]">
-                            {title}
-                          </div>
-                          <div className="font-mono text-[10px] text-[var(--on-surface-variant)]">
-                            {new Date(log.created_at).toLocaleString()}
-                          </div>
-                        </div>
-                        {log.details && (log.details as any).note && (
-                          <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">
-                            {(log.details as any).note}
-                          </p>
-                        )}
-                      </div>
-                    );
-                  })}
+              {activityLogs.length === 0 ? (
+                <div className="p-4 rounded-xl border border-[var(--outline-variant)]/20 text-center font-mono text-xs text-[var(--on-surface-variant)]">
+                  No activity logged yet for this debt.
                 </div>
-              </div>
-            )}
-          </div>
+              ) : (
+                <div className="max-h-56 overflow-y-auto overscroll-contain modal-scroll-container pr-2">
+                  <div className="relative pl-6 space-y-4 before:content-[''] before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-[var(--outline-variant)]/30">
+                    {activityLogs.map((log) => {
+                      let dotColor = 'bg-[var(--outline)]';
+                      let title = log.action;
+
+                      if (log.action === 'payment_made') {
+                        dotColor = 'bg-[var(--secondary)]';
+                        title = `Payment Received (${formatCurrency(Number((log.details as any)?.amount || 0), debtCurrency)})`;
+                      } else if (log.action === 'repayment_reported') {
+                        dotColor = 'bg-amber-500';
+                        title = `Repayment Reported (${formatCurrency(Number((log.details as any)?.amount || 0), debtCurrency)})`;
+                      } else if (log.action === 'payment_verified') {
+                        dotColor = 'bg-emerald-500';
+                        title = 'Repayment Verified by Lender';
+                      } else if (log.action === 'payment_disputed') {
+                        dotColor = 'bg-red-500';
+                        title = `Repayment Disputed by Lender (${formatCurrency(Number((log.details as any)?.amount || 0), debtCurrency)})`;
+                      } else if (log.action === 'creator_note_updated') {
+                        dotColor = 'bg-[var(--primary)]';
+                        title = 'Creator Note Updated';
+                      } else if (log.action === 'counterparty_note_updated') {
+                        dotColor = 'bg-[var(--secondary)]';
+                        title = 'Counterparty Note Updated';
+                      } else if (log.action === 'debt_created') {
+                        dotColor = 'bg-[var(--primary)]';
+                        title = `Debt Agreement Created (Principal: ${formatCurrency(Number((log.details as any)?.principal || debt.principal), debtCurrency)})`;
+                      } else if (log.action === 'debt_pending_edited') {
+                        dotColor = 'bg-amber-500';
+                        title = `Pending Agreement Edited (Principal: ${formatCurrency(Number((log.details as any)?.newPrincipal || debt.principal), debtCurrency)})`;
+                      } else if (log.action === 'debt_accepted') {
+                        dotColor = 'bg-emerald-500';
+                        title = 'Agreement Accepted by Counterparty';
+                      } else if (log.action === 'debt_declined') {
+                        dotColor = 'bg-red-500';
+                        title = 'Agreement Declined by Counterparty';
+                      } else if (log.action === 'debt_settled') {
+                        dotColor = 'bg-emerald-500';
+                        title = 'Debt Agreement Fully Settled';
+                      } else if (log.action === 'global_share_enabled') {
+                        dotColor = 'bg-amber-500';
+                        title = `Global Public Link Enabled by ${(log.details as any)?.actorName || 'Participant'}`;
+                      } else if (log.action === 'global_share_disabled') {
+                        dotColor = 'bg-[var(--outline)]';
+                        title = `Global Public Link Disabled by ${(log.details as any)?.actorName || 'Participant'}`;
+                      } else if (log.action === 'global_share_regenerated') {
+                        dotColor = 'bg-amber-500';
+                        title = `Global Public Link Rotated by ${(log.details as any)?.actorName || 'Participant'}`;
+                      }
+
+                      return (
+                        <div key={log.id} className="relative group">
+                          <div
+                            className={`absolute -left-[23px] top-1 w-2.5 h-2.5 rounded-full ${dotColor} ring-4 ring-[var(--surface)]`}
+                          />
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                            <div className="font-heading font-semibold text-xs text-[var(--on-surface)]">
+                              {title}
+                            </div>
+                            <div className="font-mono text-[10px] text-[var(--on-surface-variant)]">
+                              {new Date(log.created_at).toLocaleString()}
+                            </div>
+                          </div>
+                          {log.details && (log.details as any).note && (
+                            <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">
+                              {(log.details as any).note}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Modal Footer Actions */}
           <div className="pt-4 border-t border-[var(--outline-variant)]/20 flex flex-wrap items-center justify-between gap-3">

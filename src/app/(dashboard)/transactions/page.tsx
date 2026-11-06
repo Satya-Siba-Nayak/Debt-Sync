@@ -11,6 +11,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { CounterpartyNoteModal } from '@/components/debts/CounterpartyNoteModal';
 import { DebtDetailModal } from '@/components/debts/DebtDetailModal';
 import { EditPendingDebtModal } from '@/components/debts/EditPendingDebtModal';
+import { PaymentModal } from '@/components/debts/PaymentModal';
 import { claimUserProfile } from '@/lib/utils/claim-profile';
 import { getDueDateInfo } from '@/lib/utils/due-date';
 import { getCurrentUserFast } from '@/lib/utils/auth-session';
@@ -84,6 +85,7 @@ function TransactionsPageContent() {
   const [selectedDebtForNote, setSelectedDebtForNote] = useState<Debt | null>(null);
   const [selectedDebtForDetail, setSelectedDebtForDetail] = useState<Debt | null>(null);
   const [selectedDebtForEdit, setSelectedDebtForEdit] = useState<Debt | null>(null);
+  const [activeDebtForPayment, setActiveDebtForPayment] = useState<{ debt: Debt; balance: number } | null>(null);
   const [exportingCsv, setExportingCsv] = useState(false);
 
   useEffect(() => {
@@ -343,19 +345,56 @@ function TransactionsPageContent() {
     };
   }, [filteredDebts, payments, currentUserId]);
 
+  const filterCounts = React.useMemo(() => {
+    const counts: Record<FilterTab, number> = {
+      all: visibleDebts.length,
+      lent: 0,
+      borrowed: 0,
+      pending: 0,
+      settled: 0,
+      declined: 0,
+      purged: 0,
+    };
+    for (const d of visibleDebts) {
+      const purged = isDebtPurgedByAdmin(d);
+      if (purged) {
+        counts.purged++;
+        continue;
+      }
+      if (d.status === 'pending') counts.pending++;
+      else if (d.status === 'settled') counts.settled++;
+      else if (d.status === 'declined') counts.declined++;
+      else if (d.status === 'active') {
+        if (d.lender_id === currentUserId) counts.lent++;
+        if (d.borrower_id === currentUserId) counts.borrowed++;
+      }
+    }
+    return counts;
+  }, [visibleDebts, currentUserId]);
+
+  const filterLabels: Record<FilterTab, string> = {
+    all: 'All',
+    lent: 'Lent',
+    borrowed: 'Borrowed',
+    pending: 'Pending',
+    settled: 'Settled',
+    declined: 'Declined',
+    purged: 'Purged',
+  };
+
   return (
     <div className="page-enter space-y-6 md:space-y-8">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <h1 className="font-heading text-2xl md:text-3xl font-bold text-[var(--on-surface)]">
-            Transactions History
+            All Transactions
           </h1>
           <p className="font-mono text-xs text-[var(--on-surface-variant)] mt-1">
-            Complete audit trail of all peer-to-peer loans, micro-debts, and repayments
+            Complete audit trail of all peer-to-peer loans, group splits, and repayments
           </p>
         </div>
 
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-wrap">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-wrap">
           {/* Instant Search Bar */}
           <div className="relative">
             <span className="material-symbols-outlined absolute left-3 top-2.5 text-[16px] text-[var(--on-surface-variant)]">
@@ -366,48 +405,71 @@ function TransactionsPageContent() {
               placeholder="Search notes, names, amounts..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full sm:w-60 pl-9 pr-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-base sm:text-xs text-[var(--on-surface)] font-mono outline-none focus:border-[var(--primary)]"
+              className="w-full sm:w-56 pl-9 pr-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface)] text-base sm:text-xs text-[var(--on-surface)] font-mono outline-none focus:border-[var(--primary)]"
             />
           </div>
 
-          <button
-            type="button"
-            onClick={handleExportCSV}
-            disabled={exportingCsv || !currentUserId}
-            className="px-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-lowest)] hover:bg-[var(--surface-container)] text-[var(--on-surface)] font-mono text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-            title="Export ledger to CSV"
-          >
-            <span className="material-symbols-outlined text-[15px] text-[var(--primary)]">download</span>
-            <span>{exportingCsv ? 'Exporting...' : 'Export CSV'}</span>
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_record_modal'))}
+              className="px-3.5 py-1.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-95 transition-opacity shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[15px]">add_circle</span>
+              <span>Record Debt</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_split_modal'))}
+              className="px-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-lowest)] hover:bg-[var(--surface-container)] text-[var(--on-surface)] font-mono text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[15px] text-[var(--primary)]">call_split</span>
+              <span>Split Bill</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportCSV}
+              disabled={exportingCsv || !currentUserId}
+              className="px-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-lowest)] hover:bg-[var(--surface-container)] text-[var(--on-surface)] font-mono text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+              title="Export ledger to CSV"
+            >
+              <span className="material-symbols-outlined text-[15px] text-[var(--primary)]">download</span>
+              <span>{exportingCsv ? 'Exporting...' : 'Export CSV'}</span>
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Filter Tabs & Live Summary Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-[var(--surface-container-lowest)] p-3.5 rounded-2xl border border-[var(--outline-variant)]/30 shadow-2xs">
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 bg-[var(--surface-container-lowest)] p-3.5 rounded-2xl border border-[var(--outline-variant)]/30 shadow-2xs">
         <div className="flex bg-[var(--surface-container)] p-1 rounded-xl border border-[var(--outline-variant)]/20 self-start flex-wrap gap-0.5">
           {VALID_FILTERS.map((tab) => {
-            const count = tab === 'pending'
-              ? visibleDebts.filter((d) => d.status === 'pending' && !isDebtPurgedByAdmin(d)).length
-              : tab === 'purged'
-              ? visibleDebts.filter((d) => isDebtPurgedByAdmin(d)).length
-              : 0;
+            const count = filterCounts[tab];
+            // Hide purged/declined tab only if count is 0 and not currently selected, or show all with count
             return (
               <button
                 key={tab}
                 onClick={() => setFilter(tab)}
-                className={`px-3 py-1.5 font-mono text-xs font-bold rounded-lg uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
+                className={`px-2.5 sm:px-3 py-1.5 font-mono text-xs font-bold rounded-lg tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
                   filter === tab
                     ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-sm'
                     : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
                 }`}
               >
-                <span>{tab}</span>
-                {count > 0 && (
-                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400">
-                    {count}
-                  </span>
-                )}
+                <span>{filterLabels[tab]}</span>
+                <span
+                  className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+                    tab === 'pending' && count > 0
+                      ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                      : tab === 'purged' && count > 0
+                      ? 'bg-red-500/20 text-red-600 dark:text-red-400'
+                      : 'bg-[var(--surface-container-high)]/70 text-[var(--on-surface-variant)]'
+                  }`}
+                >
+                  {count}
+                </span>
               </button>
             );
           })}
@@ -624,8 +686,36 @@ function TransactionsPageContent() {
                       </div>
                     )}
 
-                    <div className="mt-3 pt-2.5 border-t border-[var(--outline-variant)]/15 flex items-center justify-between gap-2">
+                    <div className="mt-3 pt-2.5 border-t border-[var(--outline-variant)]/15 flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-2">
+                        {d.status === 'active' && !isPurged && unverifiedCount > 0 && isLender ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setSelectedDebtForDetail(d);
+                            }}
+                            className="py-1 px-2.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-mono text-xs font-bold flex items-center gap-1 hover:bg-emerald-500/25"
+                          >
+                            <span className="material-symbols-outlined text-[14px]">fact_check</span>
+                            <span>Verify</span>
+                          </button>
+                        ) : d.status === 'active' && !isPurged && calc.currentBalance > 0 ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setActiveDebtForPayment({ debt: d, balance: calc.currentBalance });
+                            }}
+                            className="py-1 px-2.5 rounded-lg bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold flex items-center gap-1 hover:opacity-90 shadow-xs"
+                          >
+                            <span className="material-symbols-outlined text-[14px]">{isLender ? 'add' : 'payments'}</span>
+                            <span>{isLender ? 'Record Pay' : 'Pay'}</span>
+                          </button>
+                        ) : null}
+
                         <button
                           type="button"
                           onClick={(e) => {
@@ -961,7 +1051,33 @@ function TransactionsPageContent() {
                         </td>
 
                         <td className="py-4 text-right" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center justify-end gap-1.5">
+                          <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                            {/* Verify button if payments pending lender confirmation */}
+                            {d.status === 'active' && !isPurged && unverifiedCount > 0 && isLender && (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedDebtForDetail(d)}
+                                className="px-2.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 font-mono text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap animate-pulse"
+                                title="Review and verify pending repayment receipt"
+                              >
+                                <span className="material-symbols-outlined text-[14px]">fact_check</span>
+                                <span>Verify</span>
+                              </button>
+                            )}
+
+                            {/* Direct Pay / Record Repayment button */}
+                            {d.status === 'active' && !isPurged && calc.currentBalance > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setActiveDebtForPayment({ debt: d, balance: calc.currentBalance })}
+                                className="px-2.5 py-1.5 rounded-lg bg-[var(--primary)] text-[var(--on-primary)] hover:opacity-90 font-mono text-xs font-bold transition-opacity flex items-center gap-1 cursor-pointer whitespace-nowrap shadow-xs"
+                                title={isLender ? "Record repayment received" : "Record or report repayment"}
+                              >
+                                <span className="material-symbols-outlined text-[14px]">{isLender ? 'add' : 'payments'}</span>
+                                <span>{isLender ? 'Record Pay' : 'Pay'}</span>
+                              </button>
+                            )}
+
                             {/* Support Button for Purged Transactions */}
                             {isPurged && (
                               <a
@@ -1094,6 +1210,20 @@ function TransactionsPageContent() {
           debt={selectedDebtForEdit}
           onClose={() => setSelectedDebtForEdit(null)}
           onDebtUpdated={fetchTransactions}
+        />
+      )}
+
+      {/* Direct Payment / Record Modal */}
+      {activeDebtForPayment && (
+        <PaymentModal
+          isOpen={Boolean(activeDebtForPayment)}
+          debt={activeDebtForPayment.debt}
+          currentBalance={activeDebtForPayment.balance}
+          onClose={() => setActiveDebtForPayment(null)}
+          onPaymentRecorded={() => {
+            setActiveDebtForPayment(null);
+            fetchTransactions();
+          }}
         />
       )}
     </div>

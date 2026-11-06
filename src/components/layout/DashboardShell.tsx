@@ -6,6 +6,7 @@ import { TopBar } from './TopBar';
 import { BottomNav } from './BottomNav';
 import { RecordDebtModal } from '../debts/RecordDebtModal';
 import { SplitBillModal } from '../debts/SplitBillModal';
+import { AddPersonModal } from '../directory/AddPersonModal';
 import { BugReportModal, ReportCategory } from '../feedback/BugReportModal';
 import { PWAInstallPrompt } from '../ui/PWAInstallPrompt';
 import { createClient } from '@/lib/supabase/client';
@@ -24,6 +25,7 @@ import {
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
   const [isSplitModalOpen, setIsSplitModalOpen] = useState(false);
+  const [isAddPersonOpen, setIsAddPersonOpen] = useState(false);
   const [isBugReportOpen, setIsBugReportOpen] = useState(false);
   const [bugReportParams, setBugReportParams] = useState<{
     error?: string | null;
@@ -44,12 +46,20 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     const handleOpenRecordModal = (e: any) => {
       setRecordModalParams(e.detail || null);
       setIsSplitModalOpen(false);
+      setIsAddPersonOpen(false);
       setIsRecordModalOpen(true);
     };
 
     const handleOpenSplitModal = () => {
       setIsRecordModalOpen(false);
+      setIsAddPersonOpen(false);
       setIsSplitModalOpen(true);
+    };
+
+    const handleOpenAddPerson = () => {
+      setIsRecordModalOpen(false);
+      setIsSplitModalOpen(false);
+      setIsAddPersonOpen(true);
     };
 
     const handleOpenBugReport = (e: any) => {
@@ -59,11 +69,13 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
     window.addEventListener('debtsync:open_record_modal', handleOpenRecordModal);
     window.addEventListener('debtsync:open_split_modal', handleOpenSplitModal);
+    window.addEventListener('debtsync:open_add_person', handleOpenAddPerson);
     window.addEventListener('debtsync:open_bug_report', handleOpenBugReport);
 
     return () => {
       window.removeEventListener('debtsync:open_record_modal', handleOpenRecordModal);
       window.removeEventListener('debtsync:open_split_modal', handleOpenSplitModal);
+      window.removeEventListener('debtsync:open_add_person', handleOpenAddPerson);
       window.removeEventListener('debtsync:open_bug_report', handleOpenBugReport);
     };
   }, []);
@@ -228,6 +240,15 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           setIsRecordModalOpen(true);
         }}
         onSplitCreated={() => {
+          window.dispatchEvent(new CustomEvent('debtsync:refresh'));
+        }}
+      />
+
+      {/* Global Add Person Modal */}
+      <AddPersonModal
+        isOpen={isAddPersonOpen}
+        onClose={() => setIsAddPersonOpen(false)}
+        onPersonAdded={() => {
           window.dispatchEvent(new CustomEvent('debtsync:refresh'));
         }}
       />

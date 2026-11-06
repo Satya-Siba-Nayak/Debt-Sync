@@ -392,16 +392,39 @@ export default function PeopleDirectoryPage() {
       return 0;
     });
 
+  const settledContactsCount = people.filter((p) => p.status === 'settled').length;
+
   return (
     <div className="page-enter space-y-6 md:space-y-8">
-      {/* Page Title */}
-      <div>
-        <h1 className="font-heading text-2xl md:text-3xl font-bold text-[var(--on-surface)]">
-          People Directory
-        </h1>
-        <p className="font-mono text-xs text-[var(--on-surface-variant)] mt-1">
-          Manage your contacts and track combined net balances across all ledgers
-        </p>
+      {/* Page Title & Action Buttons */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="font-heading text-2xl md:text-3xl font-bold text-[var(--on-surface)]">
+            People Directory
+          </h1>
+          <p className="font-mono text-xs text-[var(--on-surface-variant)] mt-1">
+            Manage your contacts, inspect bilateral ledgers, or settle balances in one click
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
+          <button
+            type="button"
+            onClick={() => setIsAddPersonOpen(true)}
+            className="px-4 py-2.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-95 active:scale-[0.98] transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[17px]">person_add</span>
+            <span>Add New Person</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_split_modal'))}
+            className="px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-lowest)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">call_split</span>
+            <span>Split Bill</span>
+          </button>
+        </div>
       </div>
 
       {/* Top Stats Bento Row */}
@@ -417,7 +440,7 @@ export default function PeopleDirectoryPage() {
 
         <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-5 border border-[var(--outline-variant)]/30">
           <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider font-semibold">
-            Active Debt
+            Active Ledgers
           </span>
           <div className="font-heading text-2xl md:text-3xl font-bold text-[var(--on-surface)] mt-2">
             {activeDebtsCount}
@@ -426,7 +449,7 @@ export default function PeopleDirectoryPage() {
 
         <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-5 border border-[var(--outline-variant)]/30">
           <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider font-semibold">
-            Total Owed To You
+            They Owe You
           </span>
           <div className="font-heading text-2xl md:text-3xl font-bold text-[var(--secondary)] mt-2">
             {formatCurrency(totalOwedToYou, currency, { showDecimals: true })}
@@ -435,7 +458,7 @@ export default function PeopleDirectoryPage() {
 
         <div className="bg-[var(--surface-container-lowest)] rounded-2xl p-5 border border-[var(--outline-variant)]/30">
           <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider font-semibold">
-            Total You Owe
+            You Owe Others
           </span>
           <div className="font-heading text-2xl md:text-3xl font-bold text-[var(--error)] mt-2">
             {formatCurrency(totalYouOwe, currency, { showDecimals: true })}
@@ -449,17 +472,24 @@ export default function PeopleDirectoryPage() {
         <div className="flex flex-wrap items-center gap-2.5">
           {/* Tabs */}
           <div className="flex bg-[var(--surface-container)] p-1 rounded-xl border border-[var(--outline-variant)]/20">
-            {(['all', 'active', 'settled'] as const).map((tab) => (
+            {([
+              { id: 'all', label: 'All', count: totalContacts },
+              { id: 'active', label: 'Active', count: activeDebtsCount },
+              { id: 'settled', label: 'Settled', count: settledContactsCount },
+            ] as const).map((tab) => (
               <button
-                key={tab}
-                onClick={() => setFilterTab(tab)}
-                className={`px-3.5 py-1.5 font-mono text-xs font-bold rounded-lg uppercase tracking-wider transition-all cursor-pointer ${
-                  filterTab === tab
+                key={tab.id}
+                onClick={() => setFilterTab(tab.id)}
+                className={`px-3 py-1.5 font-mono text-xs font-bold rounded-lg tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${
+                  filterTab === tab.id
                     ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-sm'
                     : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
                 }`}
               >
-                {tab}
+                <span>{tab.label}</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-[var(--surface-container-high)]/70">
+                  {tab.count}
+                </span>
               </button>
             ))}
           </div>
