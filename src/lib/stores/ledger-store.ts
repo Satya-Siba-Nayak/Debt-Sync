@@ -38,11 +38,11 @@ export function computeDashboardStats(allDebts: Debt[], allPayments: Payment[], 
 
     if (d.lender_id === userId) {
       lentSum += calc.currentBalance;
-      lentCount++;
+      if (calc.currentBalance > 0.01) lentCount++;
       lenderInterestSum += calc.totalAccruedInterest;
     } else {
       owedSum += calc.currentBalance;
-      owedCount++;
+      if (calc.currentBalance > 0.01) owedCount++;
       borrowerInterestSum += calc.totalAccruedInterest;
     }
   }

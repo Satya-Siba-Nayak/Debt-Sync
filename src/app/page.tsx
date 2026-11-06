@@ -7,6 +7,7 @@ import { PublicNav } from '@/components/layout/PublicNav';
 import { PublicFooter } from '@/components/layout/PublicFooter';
 import { getCachedUserProfile } from '@/lib/utils/auth-session';
 import { createClient } from '@/lib/supabase/client';
+import { InteractivePreviewSandbox } from '@/components/public/InteractivePreviewSandbox';
 
 const SAMPLE_PUBLIC_SHARE_URL =
   'https://debt-sync.satya-nayak.dev/share?id=81d9115e-d237-49eb-8be5-16bb3a9ea408&token=gsh_hitjra5bqn7dy2tsdf';
@@ -422,13 +423,13 @@ function LandingPageContent() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="text-center max-w-3xl mx-auto mb-12">
               <h2 className="font-heading text-xs font-bold text-[var(--primary)] uppercase tracking-wider mb-2 font-mono">
-                Visual Walkthrough
+                Interactive Previews &amp; Live Sandboxes
               </h2>
               <p className="font-heading text-3xl sm:text-4xl font-extrabold text-[var(--on-surface)] tracking-tight">
-                Designed for precision on every screen.
+                Test-drive the real interface live.
               </p>
               <p className="mt-3 text-sm text-[var(--on-surface-variant)] font-mono">
-                Explore real interface captures across desktop and mobile viewports.
+                Click buttons, toggle filters, and experience DebtSync&apos;s mutual consensus engine directly in your browser.
               </p>
             </div>
 
@@ -506,16 +507,12 @@ function LandingPageContent() {
                   </div>
                 </div>
 
-                {/* Screenshot Display Column */}
+                {/* Interactive Sandbox Display Column */}
                 <div className="lg:col-span-7 flex justify-center">
-                  <div className="w-full max-w-2xl rounded-2xl overflow-hidden border border-[var(--outline-variant)]/40 bg-[var(--surface)] shadow-2xl p-2 sm:p-3">
-                    <img
-                      src={currentShot.desktop}
-                      alt={currentShot.title}
-                      className="w-full h-auto rounded-xl object-contain max-h-[540px] mx-auto"
-                      loading="lazy"
-                    />
-                  </div>
+                  <InteractivePreviewSandbox
+                    activeTab={activeScreenshotTab}
+                    fallbackScreenshotUrl={currentShot.desktop}
+                  />
                 </div>
               </div>
             </div>

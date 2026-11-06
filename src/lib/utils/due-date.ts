@@ -2,8 +2,13 @@
  * Computes overdue status, remaining days, and styling for a debt's due date.
  * Parses YYYY-MM-DD calendar dates directly to prevent UTC midnight timezone shift bugs.
  */
-export function getDueDateInfo(dueDate?: string | null, status?: string) {
+export function getDueDateInfo(
+  dueDate?: string | null,
+  status?: string,
+  currentBalance?: number
+) {
   if (!dueDate || status === 'settled' || status === 'declined' || status === 'purged') return null;
+  if (currentBalance !== undefined && currentBalance <= 0.01) return null;
 
   const now = new Date();
   const cleanDateStr = dueDate.trim().split('T')[0];

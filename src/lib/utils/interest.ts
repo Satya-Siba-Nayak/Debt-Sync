@@ -275,13 +275,41 @@ export function allocateBulkPayment(
 /**
  * Helper to check if an active debt is overdue.
  */
-export function isDebtOverdue(dueDate?: string | null, status?: string): boolean {
+export function isDebtOverdue(
+  dueDate?: string | null,
+  status?: string,
+  currentBalance?: number
+): boolean {
   if (!dueDate || status === 'settled' || status === 'declined' || status === 'purged') return false;
+  if (currentBalance !== undefined && currentBalance <= 0.01) return false;
   const now = new Date();
   const due = new Date(dueDate);
   const nowDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate()).getTime();
   return dueDay < nowDay;
+}
+
+/**
+ * Returns the effective status of a debt.
+ * If a debt has status === 'active' (or disputed) but its remaining balance
+ * is <= 0.01 (0.00 money remaining), its effective status is 'settled'.
+ */
+export function getEffectiveDebtStatus(
+  debt: Pick<Debt, 'id' | 'status' | 'principal' | 'interest_type' | 'interest_rate' | 'compound_freq' | 'created_at'> & { notes?: string | null },
+  payments: Payment[] = []
+): 'pending' | 'active' | 'settled' | 'declined' | 'purged' | 'disputed' {
+  if (debt.status === 'purged' || isDebtPurgedByAdmin(debt as any)) return 'purged';
+  if (debt.status === 'declined') return 'declined';
+  if (debt.status === 'pending') return 'pending';
+  if (debt.status === 'settled') return 'settled';
+
+  // For active or disputed agreements, check if remaining balance is cleared
+  const calc = calculateDebtBalance(debt as any, payments);
+  if (calc.currentBalance <= 0.01) {
+    return 'settled';
+  }
+
+  return (debt.status as any) || 'active';
 }
 
 /**
@@ -301,12 +329,21 @@ export const DEBT_STATUS_PRIORITY: Record<string, number> = {
   declined: 5,
 };
 
-export function sortDebtsActiveFirst<T extends Pick<Debt, 'status' | 'created_at'> & { due_date?: string | null; settled_at?: string | null }>(
-  debtsList: T[]
+export function sortDebtsActiveFirst<T extends Pick<Debt, 'id' | 'status' | 'created_at'> & { due_date?: string | null; settled_at?: string | null }>(
+  debtsList: T[],
+  allPayments?: Payment[]
 ): T[] {
   return [...debtsList].sort((a, b) => {
-    const aOverdue = a.status === 'active' && isDebtOverdue(a.due_date, a.status);
-    const bOverdue = b.status === 'active' && isDebtOverdue(b.due_date, b.status);
+    const aPayments = allPayments ? allPayments.filter((p) => p.debt_id === a.id) : [];
+    const bPayments = allPayments ? allPayments.filter((p) => p.debt_id === b.id) : [];
+    const aStatus = allPayments ? getEffectiveDebtStatus(a as any, aPayments) : a.status;
+    const bStatus = allPayments ? getEffectiveDebtStatus(b as any, bPayments) : b.status;
+
+    const aCalc = allPayments ? calculateDebtBalance(a as any, aPayments) : undefined;
+    const bCalc = allPayments ? calculateDebtBalance(b as any, bPayments) : undefined;
+
+    const aOverdue = aStatus === 'active' && isDebtOverdue(a.due_date, aStatus, aCalc?.currentBalance);
+    const bOverdue = bStatus === 'active' && isDebtOverdue(b.due_date, bStatus, bCalc?.currentBalance);
 
     // 1. Overdue debts appear at the top-most
     if (aOverdue && !bOverdue) return -1;
@@ -318,8 +355,8 @@ export function sortDebtsActiveFirst<T extends Pick<Debt, 'status' | 'created_at
     }
 
     // 2. Status priority: pending (1) -> active (2) -> disputed (3) -> settled (4) -> declined (5)
-    const pA = DEBT_STATUS_PRIORITY[a.status] ?? 99;
-    const pB = DEBT_STATUS_PRIORITY[b.status] ?? 99;
+    const pA = DEBT_STATUS_PRIORITY[aStatus] ?? 99;
+    const pB = DEBT_STATUS_PRIORITY[bStatus] ?? 99;
     if (pA !== pB) return pA - pB;
 
     // 3. Within same priority, sort by created_at descending (newest on top)
