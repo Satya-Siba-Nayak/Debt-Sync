@@ -419,7 +419,7 @@ export default function PeopleDirectoryPage() {
           <button
             type="button"
             onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_split_modal'))}
-            className="px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-lowest)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
+            className="md:hidden px-3.5 py-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-lowest)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
           >
             <span className="material-symbols-outlined text-[16px] text-[var(--primary)]">call_split</span>
             <span>Split Bill</span>

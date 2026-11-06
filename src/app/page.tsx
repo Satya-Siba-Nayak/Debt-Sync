@@ -22,7 +22,7 @@ function LandingPageContent() {
 
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userProfile, setUserProfile] = useState<{ full_name?: string; email?: string } | null>(null);
-  const [activeScreenshotTab, setActiveScreenshotTab] = useState<'dashboard' | 'reminders' | 'share' | 'split' | 'analytics' | 'detail'>('dashboard');
+  const [activeScreenshotTab, setActiveScreenshotTab] = useState<'dashboard' | 'directory' | 'reminders' | 'share' | 'split' | 'analytics' | 'detail'>('dashboard');
   const [isThemeDark, setIsThemeDark] = useState(true);
 
   // Synchronize sessionStorage public viewing state
@@ -96,6 +96,13 @@ function LandingPageContent() {
       title: 'Real-Time Portfolio & Balances',
       desc: 'Live financial position overview, daily interest accrual tickers, active agreement cards, and quick repayment access.',
       tag: 'Desktop & Phone PWA',
+    },
+    directory: {
+      desktop: isThemeDark ? '/screenshots/directory-desktop.png' : '/screenshots/directory-desktop-light.png',
+      mobile: isThemeDark ? '/screenshots/directory-desktop.png' : '/screenshots/directory-desktop-light.png',
+      title: 'People Directory & Bilateral Ledgers',
+      desc: 'Consolidate multiple loans with the same person into a single bilateral net balance, review mutual history, and settle balances in 1 tap.',
+      tag: 'Bilateral Ledgers',
     },
     detail: {
       desktop: '/screenshots/debt-detail-upscroll-desktop.png',
@@ -370,6 +377,32 @@ function LandingPageContent() {
 
               {/* Feature 6 */}
               <div className="p-6 rounded-2xl bg-[var(--surface)] border border-[var(--outline-variant)]/30 space-y-3 shadow-xs hover:border-[var(--primary)]/40 transition-colors">
+                <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-500 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-2xl">contacts</span>
+                </div>
+                <h3 className="font-heading text-lg font-bold text-[var(--on-surface)]">
+                  People Directory &amp; Bilateral Ledgers
+                </h3>
+                <p className="text-xs font-mono text-[var(--on-surface-variant)] leading-relaxed">
+                  Automatic reciprocal debt offsetting between mutual obligations. View net balances with every peer and initiate instant 1-tap net settlement.
+                </p>
+              </div>
+
+              {/* Feature 7 */}
+              <div className="p-6 rounded-2xl bg-[var(--surface)] border border-[var(--outline-variant)]/30 space-y-3 shadow-xs hover:border-[var(--primary)]/40 transition-colors">
+                <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-500 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-2xl">devices</span>
+                </div>
+                <h3 className="font-heading text-lg font-bold text-[var(--on-surface)]">
+                  Desktop &amp; Mobile Workspaces
+                </h3>
+                <p className="text-xs font-mono text-[var(--on-surface-variant)] leading-relaxed">
+                  Clean, streamlined desktop sidebar without redundant buttons, paired with a mobile-optimized 1-tap quick action sheet and responsive filter controls.
+                </p>
+              </div>
+
+              {/* Feature 8 */}
+              <div className="p-6 rounded-2xl bg-[var(--surface)] border border-[var(--outline-variant)]/30 space-y-3 shadow-xs hover:border-[var(--primary)]/40 transition-colors">
                 <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-500 flex items-center justify-center">
                   <span className="material-symbols-outlined text-2xl">install_mobile</span>
                 </div>
@@ -403,6 +436,7 @@ function LandingPageContent() {
             <div className="flex flex-wrap items-center justify-center gap-2 mb-10 font-mono text-xs">
               {[
                 { id: 'dashboard', label: 'Portfolio Dashboard', icon: 'dashboard' },
+                { id: 'directory', label: 'People & Ledgers', icon: 'contacts' },
                 { id: 'detail', label: 'Audit Trail & Receipts', icon: 'receipt_long' },
                 { id: 'reminders', label: 'Payment Reminders', icon: 'alarm' },
                 { id: 'share', label: 'Public Share Links', icon: 'public' },
@@ -635,6 +669,15 @@ function LandingPageContent() {
                 </h3>
                 <p className="text-[var(--on-surface-variant)] leading-relaxed">
                   Your Network Trust Score is dynamically computed on the server across 4 calibrated pillars: Repayment Punctuality (38%), Principal Clearance &amp; Capital Velocity (27%), Verified Peer Network Breadth (15%), and Dispute-Free Consensus (20%). Because it is server-calibrated using UTC calendar dates, every counterparty and device sees the exact same score without exposing private individual debt amounts.
+                </p>
+              </div>
+
+              <div className="p-5 rounded-2xl bg-[var(--surface)] border border-[var(--outline-variant)]/30 space-y-2">
+                <h3 className="font-heading text-sm font-bold text-[var(--on-surface)]">
+                  How does bilateral net settlement work?
+                </h3>
+                <p className="text-[var(--on-surface-variant)] leading-relaxed">
+                  If you and a friend frequently lend and borrow from each other, DebtSync consolidates all active obligations into a single bilateral net balance in the People Directory. You can execute a 1-tap settlement that balances mutual obligations instantly without calculating manual cross-offsets.
                 </p>
               </div>
 

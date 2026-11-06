@@ -413,7 +413,7 @@ function TransactionsPageContent() {
             <button
               type="button"
               onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_record_modal'))}
-              className="px-3.5 py-1.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-95 transition-opacity shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+              className="md:hidden px-3.5 py-1.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-95 transition-opacity shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <span className="material-symbols-outlined text-[15px]">add_circle</span>
               <span>Record Debt</span>
@@ -422,7 +422,7 @@ function TransactionsPageContent() {
             <button
               type="button"
               onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_split_modal'))}
-              className="px-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-lowest)] hover:bg-[var(--surface-container)] text-[var(--on-surface)] font-mono text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+              className="md:hidden px-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-lowest)] hover:bg-[var(--surface-container)] text-[var(--on-surface)] font-mono text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <span className="material-symbols-outlined text-[15px] text-[var(--primary)]">call_split</span>
               <span>Split Bill</span>
@@ -443,24 +443,23 @@ function TransactionsPageContent() {
       </div>
 
       {/* Filter Tabs & Live Summary Bar */}
-      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 bg-[var(--surface-container-lowest)] p-3.5 rounded-2xl border border-[var(--outline-variant)]/30 shadow-2xs">
-        <div className="flex bg-[var(--surface-container)] p-1 rounded-xl border border-[var(--outline-variant)]/20 self-start flex-wrap gap-0.5">
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 bg-[var(--surface-container-lowest)] p-3 rounded-2xl border border-[var(--outline-variant)]/30 shadow-2xs">
+        <div className="flex bg-[var(--surface-container)] p-1 rounded-xl border border-[var(--outline-variant)]/20 overflow-x-auto no-scrollbar items-center gap-1">
           {VALID_FILTERS.map((tab) => {
             const count = filterCounts[tab];
-            // Hide purged/declined tab only if count is 0 and not currently selected, or show all with count
             return (
               <button
                 key={tab}
                 onClick={() => setFilter(tab)}
-                className={`px-2.5 sm:px-3 py-1.5 font-mono text-xs font-bold rounded-lg tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
+                className={`shrink-0 whitespace-nowrap px-3 py-1.5 font-mono text-xs font-bold rounded-lg tracking-wider transition-all flex items-center gap-1.5 cursor-pointer ${
                   filter === tab
-                    ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-sm'
+                    ? 'bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-xs'
                     : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
                 }`}
               >
                 <span>{filterLabels[tab]}</span>
                 <span
-                  className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+                  className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold leading-none shrink-0 ${
                     tab === 'pending' && count > 0
                       ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
                       : tab === 'purged' && count > 0
@@ -475,22 +474,22 @@ function TransactionsPageContent() {
           })}
         </div>
 
-        <div className="flex items-center gap-4 flex-wrap text-xs font-mono text-[var(--on-surface-variant)] px-1">
-          <span>
+        <div className="flex items-center gap-3 sm:gap-4 flex-wrap text-xs font-mono text-[var(--on-surface-variant)] px-1">
+          <span className="whitespace-nowrap">
             Showing <strong className="text-[var(--on-surface)]">{filteredDebts.length}</strong> {filteredDebts.length === 1 ? 'entry' : 'entries'}
           </span>
           <span className="text-[var(--outline-variant)]">&bull;</span>
-          <span>
+          <span className="whitespace-nowrap">
             Receivable: <strong className="text-[var(--secondary)]">{formatCurrency(filteredSummary.receivable, currency)}</strong>
           </span>
           <span className="text-[var(--outline-variant)]">&bull;</span>
-          <span>
+          <span className="whitespace-nowrap">
             Payable: <strong className="text-[var(--error)]">{formatCurrency(filteredSummary.payable, currency)}</strong>
           </span>
           {filteredSummary.settledPaid > 0 && (
             <>
               <span className="text-[var(--outline-variant)]">&bull;</span>
-              <span>
+              <span className="whitespace-nowrap">
                 Repaid: <strong className="text-[var(--on-surface)]">{formatCurrency(filteredSummary.settledPaid, currency)}</strong>
               </span>
             </>

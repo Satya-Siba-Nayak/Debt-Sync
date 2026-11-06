@@ -109,19 +109,19 @@ export function Sidebar({ onNewTransaction, isAdmin }: SidebarProps) {
             <button
               type="button"
               onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_split_modal'))}
-              className="py-2 px-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-low)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+              className="py-2 px-2 rounded-xl border border-[var(--outline-variant)]/30 bg-[var(--surface-container-low)] hover:bg-[var(--surface-container-high)] hover:border-[var(--primary)]/30 text-[var(--on-surface)] font-mono text-[11px] font-semibold flex flex-col items-center justify-center gap-0.5 transition-colors cursor-pointer whitespace-nowrap"
               title="Split a bill among multiple people"
             >
-              <span className="material-symbols-outlined text-[15px] text-[var(--primary)]">call_split</span>
+              <span className="material-symbols-outlined text-[17px] text-[var(--primary)]">call_split</span>
               <span>Split Bill</span>
             </button>
             <button
               type="button"
               onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_add_person'))}
-              className="py-2 px-2.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-low)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+              className="py-2 px-2 rounded-xl border border-[var(--outline-variant)]/30 bg-[var(--surface-container-low)] hover:bg-[var(--surface-container-high)] hover:border-[var(--secondary)]/30 text-[var(--on-surface)] font-mono text-[11px] font-semibold flex flex-col items-center justify-center gap-0.5 transition-colors cursor-pointer whitespace-nowrap"
               title="Add a new person or contact to your directory"
             >
-              <span className="material-symbols-outlined text-[15px] text-[var(--secondary)]">person_add</span>
+              <span className="material-symbols-outlined text-[17px] text-[var(--secondary)]">person_add</span>
               <span>Add Person</span>
             </button>
           </div>

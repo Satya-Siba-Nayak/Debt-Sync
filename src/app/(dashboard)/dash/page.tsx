@@ -240,8 +240,8 @@ export default function GlobalDashboardPage() {
 
   return (
     <div className="page-enter flex flex-col gap-5 md:gap-7">
-      {/* Quick Actions Hub — 1-Tap Access for Mobile & Desktop */}
-      <section className="bg-[var(--surface-container-lowest)] rounded-2xl p-3.5 sm:p-4 border border-[var(--outline-variant)]/30 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      {/* Quick Actions Hub — Mobile only. On desktop these actions live once, in the sidebar. */}
+      <section className="md:hidden bg-[var(--surface-container-lowest)] rounded-2xl p-3.5 sm:p-4 border border-[var(--outline-variant)]/30 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="w-8 h-8 rounded-xl bg-[var(--primary)]/15 text-[var(--primary)] flex items-center justify-center shrink-0">
             <span className="material-symbols-outlined text-[18px]">bolt</span>
@@ -588,7 +588,7 @@ export default function GlobalDashboardPage() {
               Active Transactions
             </h3>
             <p className="font-mono text-xs text-[var(--on-surface-variant)] mt-0.5">
-              Tap any record for full details, audit trail &amp; reminders, or use quick actions to pay or verify
+              Open any record for details, reminders &amp; history — or pay and verify right from the row
             </p>
           </div>
 

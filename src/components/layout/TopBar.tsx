@@ -31,7 +31,6 @@ export function TopBar({
   avatarUrl,
   recentCustomAvatars = [],
   isAdmin,
-  onNewTransaction,
 }: TopBarProps) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const {
@@ -189,39 +188,6 @@ export function TopBar({
         </div>
 
         <div className="flex items-center gap-2.5">
-          {!inAdminMode && (
-            <div className="flex items-center gap-2 mr-1">
-              <button
-                type="button"
-                onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_add_person'))}
-                className="px-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-low)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
-                title="Add a new person to your directory"
-              >
-                <span className="material-symbols-outlined text-[15px] text-[var(--secondary)]">person_add</span>
-                <span>Add Person</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => window.dispatchEvent(new CustomEvent('debtsync:open_split_modal'))}
-                className="px-3 py-1.5 rounded-xl border border-[var(--outline-variant)]/40 bg-[var(--surface-container-low)] hover:bg-[var(--surface-container-high)] text-[var(--on-surface)] font-mono text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
-                title="Split a bill among multiple people"
-              >
-                <span className="material-symbols-outlined text-[15px] text-[var(--primary)]">call_split</span>
-                <span>Split Bill</span>
-              </button>
-              {onNewTransaction && (
-                <button
-                  type="button"
-                  onClick={onNewTransaction}
-                  className="px-3.5 py-1.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 transition-opacity shadow-xs flex items-center gap-1 cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[15px]">add_circle</span>
-                  <span>Record Debt</span>
-                </button>
-              )}
-            </div>
-          )}
-
           <NotificationCenter />
 
           <button
@@ -269,8 +235,8 @@ export function TopBar({
             </div>
           </div>
 
-          {/* Primary Account & Quick Actions at the Top */}
-          <div className="space-y-1.5 pb-2.5 border-b border-[var(--outline-variant)]/20">
+          {/* Account Settings (single entry point) */}
+          <div className="pb-2.5 border-b border-[var(--outline-variant)]/20">
             <Link
               href="/settings"
               onClick={() => setIsDropdownOpen(false)}
@@ -283,44 +249,6 @@ export function TopBar({
               </span>
               <span className="material-symbols-outlined text-[15px] text-[var(--primary)]">chevron_right</span>
             </Link>
-
-            {!inAdminMode && (
-              <div className="grid grid-cols-3 gap-1.5 pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsDropdownOpen(false);
-                    onNewTransaction?.();
-                  }}
-                  className="p-2 rounded-xl bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/25 flex flex-col items-center justify-center gap-1 text-center transition-colors cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[17px] text-[var(--primary)]">add_circle</span>
-                  <span className="font-mono text-[10px] font-semibold text-[var(--on-surface)]">Record</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsDropdownOpen(false);
-                    window.dispatchEvent(new CustomEvent('debtsync:open_split_modal'));
-                  }}
-                  className="p-2 rounded-xl bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/25 flex flex-col items-center justify-center gap-1 text-center transition-colors cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[17px] text-[var(--primary)]">call_split</span>
-                  <span className="font-mono text-[10px] font-semibold text-[var(--on-surface)]">Split Bill</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsDropdownOpen(false);
-                    window.dispatchEvent(new CustomEvent('debtsync:open_add_person'));
-                  }}
-                  className="p-2 rounded-xl bg-[var(--surface-container)] hover:bg-[var(--surface-container-high)] border border-[var(--outline-variant)]/25 flex flex-col items-center justify-center gap-1 text-center transition-colors cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[17px] text-[var(--secondary)]">person_add</span>
-                  <span className="font-mono text-[10px] font-semibold text-[var(--on-surface)]">+ Person</span>
-                </button>
-              </div>
-            )}
           </div>
 
           {/* Quick Avatar Switcher */}
@@ -405,7 +333,7 @@ export function TopBar({
           {/* Menu Actions */}
           <div className="pt-2 border-t border-[var(--outline-variant)]/20 space-y-1">
             {effectiveIsAdmin && (
-              <div className="p-2 mb-1 rounded-xl bg-[var(--surface-container)]/60 border border-[var(--outline-variant)]/20 space-y-2">
+              <div className="md:hidden p-2 mb-1 rounded-xl bg-[var(--surface-container)]/60 border border-[var(--outline-variant)]/20 space-y-2">
                 <div className="flex items-center justify-between px-0.5">
                   <span className="font-mono text-[10px] text-[var(--outline)] uppercase tracking-wider font-semibold">
                     View Mode
@@ -446,18 +374,8 @@ export function TopBar({
               </div>
             )}
 
-            <Link
-              href="/settings"
-              onClick={() => setIsDropdownOpen(false)}
-              className="w-full flex items-center gap-2.5 px-2.5 min-h-[40px] md:min-h-[34px] rounded-xl font-mono text-xs text-[var(--on-surface)] hover:bg-[var(--surface-container)] transition-colors"
-              role="menuitem"
-            >
-              <span className="material-symbols-outlined text-[18px] text-[var(--primary)]">manage_accounts</span>
-              <span>Profile &amp; Preferences</span>
-            </Link>
-
-            {/* Side-by-side About & Report pills */}
-            <div className="grid grid-cols-2 gap-1.5 my-0.5">
+            {/* About & Report — mobile only (desktop sidebar already provides these) */}
+            <div className="md:hidden grid grid-cols-2 gap-1.5 my-0.5">
               <Link
                 href="/?home=true"
                 onClick={() => setIsDropdownOpen(false)}
