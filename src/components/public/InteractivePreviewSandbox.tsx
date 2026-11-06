@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Avatar } from '@/components/ui/Avatar';
 import { Chip } from '@/components/ui/Chip';
 
@@ -22,6 +22,25 @@ export function InteractivePreviewSandbox({
   activeTab,
   fallbackScreenshotUrl,
 }: InteractivePreviewSandboxProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(0.5);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const updateScale = () => {
+      if (containerRef.current) {
+        const w = containerRef.current.clientWidth;
+        if (w > 0) {
+          setScale(w / 1280);
+        }
+      }
+    };
+    updateScale();
+    const ro = new ResizeObserver(updateScale);
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
+
   const [viewMode, setViewMode] = useState<'interactive' | 'screenshot'>('interactive');
   const [copied, setCopied] = useState(false);
 
@@ -224,157 +243,173 @@ export function InteractivePreviewSandbox({
         </div>
       </div>
 
-      {/* 2. Window Body: Exact 16-Inch Laptop App Layout */}
+      {/* 2. Window Body: Exact 16-Inch Laptop App Layout (Zoomed Out / Scaled) */}
       {viewMode === 'screenshot' && fallbackScreenshotUrl ? (
-        <div className="p-4 bg-[#0b0f14]">
+        <div className="w-full bg-[#0b0f14] p-3 flex items-center justify-center">
           <img
             src={fallbackScreenshotUrl}
             alt="Static UI Screenshot"
-            className="w-full h-auto rounded-xl object-contain max-h-[700px] mx-auto shadow-2xl"
+            className="w-full h-auto rounded-xl object-contain max-h-[560px] mx-auto shadow-2xl"
           />
         </div>
       ) : (
-        <div className="flex bg-[#0b0f14] min-h-[640px] text-[#e6edf3]">
-          {/* Authentic Left Sidebar (Exact match to Image 1) */}
-          <aside className="w-16 sm:w-56 border-r border-[#1e2634] bg-[#0d1117] flex flex-col justify-between p-3 sm:p-4 shrink-0 select-none">
-            <div className="space-y-4">
-              {/* Brand Logo Header */}
-              <div className="flex items-center gap-3 px-1">
-                <div className="w-9 h-9 rounded-xl bg-[#004d4f] border border-[#006e70] flex items-center justify-center text-[#38d9d9] shadow-sm shrink-0">
-                  <span className="material-symbols-outlined text-[20px]">sync_alt</span>
-                </div>
-                <div className="hidden sm:block">
-                  <h1 className="font-heading font-extrabold text-base text-white tracking-tight leading-none">
-                    DebtSync
-                  </h1>
-                  <span className="text-[9px] font-mono tracking-widest text-[#6f7f95] uppercase font-bold">
-                    Synced Ledgers
-                  </span>
-                </div>
-              </div>
-
-              {/* Action Button: + New Transaction */}
-              <div className="pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDashToast('Opened Propose Transaction Modal (Simulation)');
-                    setTimeout(() => setDashToast(null), 3000);
-                  }}
-                  className="w-full py-2.5 px-3 rounded-2xl bg-[#38d9d9] text-[#042124] font-heading font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm hover:opacity-95 active:scale-98 transition-all cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[18px]">add</span>
-                  <span className="hidden sm:inline">New Transaction</span>
-                </button>
-              </div>
-
-              {/* Navigation Items */}
-              <nav className="space-y-1 pt-1">
-                {navItems.map((item) => {
-                  const isActive =
-                    (activeTab === 'dashboard' && item.id === 'dashboard') ||
-                    (activeTab === 'directory' && item.id === 'directory') ||
-                    (activeTab === 'detail' && item.id === 'detail') ||
-                    (activeTab === 'analytics' && item.id === 'analytics') ||
-                    (activeTab === 'split' && item.id === 'dashboard') ||
-                    (activeTab === 'reminders' && item.id === 'dashboard') ||
-                    (activeTab === 'share' && item.id === 'detail');
-
-                  return (
-                    <div
-                      key={item.id}
-                      className={`flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-mono transition-colors ${
-                        isActive
-                          ? 'bg-[#132d30] text-[#38d9d9] font-bold border border-[#005a5c]/40 shadow-2xs'
-                          : 'text-[#8a99a8] hover:text-white hover:bg-[#141b24]'
-                      }`}
-                    >
-                      <span className="material-symbols-outlined text-[18px] shrink-0">{item.icon}</span>
-                      <span className="hidden sm:inline">{item.label}</span>
-                    </div>
-                  );
-                })}
-              </nav>
-            </div>
-
-            {/* Bottom Sidebar: Theme, Report, Sign Out */}
-            <div className="space-y-2.5 pt-3 border-t border-[#1e2634] text-xs font-mono text-[#8a99a8]">
-              <div className="hidden sm:flex items-center justify-between px-1">
-                <span>Theme</span>
-                <div className="flex bg-[#141b24] p-0.5 rounded-lg border border-[#222e3d]">
-                  <span className="material-symbols-outlined text-[13px] px-1 text-gray-400">light_mode</span>
-                  <span className="material-symbols-outlined text-[13px] px-1 text-[#38d9d9] bg-[#1a2330] rounded">dark_mode</span>
-                  <span className="material-symbols-outlined text-[13px] px-1 text-gray-400">laptop</span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2.5 px-1 hover:text-white transition-colors cursor-pointer">
-                <span className="material-symbols-outlined text-[16px]">warning</span>
-                <span className="hidden sm:inline">Report Issue</span>
-              </div>
-
-              <div className="flex items-center gap-2.5 px-1 hover:text-white transition-colors cursor-pointer">
-                <span className="material-symbols-outlined text-[16px]">logout</span>
-                <span className="hidden sm:inline">Sign Out</span>
-              </div>
-            </div>
-          </aside>
-
-          {/* Main Desktop Canvas Area */}
-          <main className="flex-1 p-4 sm:p-6 lg:p-7 flex flex-col justify-between overflow-x-hidden space-y-6">
-            {/* Top Bar Header (Exact match to Image 1) */}
-            <div className="flex items-center justify-between gap-4 pb-2 border-b border-[#1e2634]">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-[#141b24] border border-[#222e3d] flex items-center justify-center text-[#38d9d9] shrink-0 shadow-2xs">
-                  <span className="material-symbols-outlined text-[20px]">space_dashboard</span>
-                </div>
-                <div>
-                  <h2 className="font-heading font-extrabold text-lg sm:text-xl text-white tracking-tight leading-tight">
-                    Global Dashboard
-                  </h2>
-                  <p className="font-mono text-xs text-[#8a99a8]">
-                    Real-time bilateral portfolio &amp; active obligations
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDashToast('Opened Split Bill Modal');
-                    setTimeout(() => setDashToast(null), 3000);
-                  }}
-                  className="hidden sm:flex px-3.5 py-1.5 rounded-xl border border-[#253243] bg-[#141b24] text-white font-mono text-xs font-semibold hover:bg-[#1a2330] transition-colors items-center gap-1.5 cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[16px] text-[#38d9d9]">call_split</span>
-                  <span>Split Bill</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDashToast('Opened New Entry Modal');
-                    setTimeout(() => setDashToast(null), 3000);
-                  }}
-                  className="px-3.5 py-1.5 rounded-xl bg-[#38d9d9] text-[#042124] font-mono text-xs font-bold hover:opacity-95 shadow-xs flex items-center gap-1.5 cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[16px]">add</span>
-                  <span>New Entry</span>
-                </button>
-
-                <div className="w-8 h-8 rounded-xl bg-[#141b24] border border-[#222e3d] flex items-center justify-center text-[#8a99a8] relative cursor-pointer">
-                  <span className="material-symbols-outlined text-[16px]">notifications</span>
-                  <span className="w-2 h-2 rounded-full bg-[#38d9d9] absolute top-1.5 right-1.5" />
+        <div
+          ref={containerRef}
+          className="w-full relative overflow-hidden bg-[#0b0f14]"
+          style={{ height: `${Math.round(scale * 800)}px` }}
+        >
+          <div
+            style={{
+              width: '1280px',
+              height: '800px',
+              transform: `scale(${scale})`,
+              transformOrigin: 'top left',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+            }}
+            className="flex bg-[#0b0f14] text-[#e6edf3]"
+          >
+            {/* Authentic Left Sidebar (Exact match to Image 1) */}
+            <aside className="w-[240px] border-r border-[#1e2634] bg-[#0d1117] flex flex-col justify-between p-4 shrink-0 select-none">
+              <div className="space-y-4">
+                {/* Brand Logo Header */}
+                <div className="flex items-center gap-3 px-1">
+                  <div className="w-9 h-9 rounded-xl bg-[#004d4f] border border-[#006e70] flex items-center justify-center text-[#38d9d9] shadow-sm shrink-0">
+                    <span className="material-symbols-outlined text-[20px]">sync_alt</span>
+                  </div>
+                  <div>
+                    <h1 className="font-heading font-extrabold text-base text-white tracking-tight leading-none">
+                      DebtSync
+                    </h1>
+                    <span className="text-[9px] font-mono tracking-widest text-[#6f7f95] uppercase font-bold">
+                      Synced Ledgers
+                    </span>
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-2 pl-1.5 py-1 pr-2 rounded-xl bg-[#141b24] border border-[#222e3d] text-xs font-mono text-white cursor-pointer">
-                  <Avatar name="Aayush Singh" size="xs" src="https://api.dicebear.com/7.x/bottts/svg?seed=DebtSyncTeal" />
-                  <span className="hidden md:inline font-semibold">Aayush Singh</span>
-                  <span className="material-symbols-outlined text-[16px] text-[#8a99a8]">expand_more</span>
+                {/* Action Button: + New Transaction */}
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDashToast('Opened Propose Transaction Modal (Simulation)');
+                      setTimeout(() => setDashToast(null), 3000);
+                    }}
+                    className="w-full py-2.5 px-3 rounded-2xl bg-[#38d9d9] text-[#042124] font-heading font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm hover:opacity-95 active:scale-98 transition-all cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">add</span>
+                    <span>New Transaction</span>
+                  </button>
+                </div>
+
+                {/* Navigation Items */}
+                <nav className="space-y-1 pt-1">
+                  {navItems.map((item) => {
+                    const isActive =
+                      (activeTab === 'dashboard' && item.id === 'dashboard') ||
+                      (activeTab === 'directory' && item.id === 'directory') ||
+                      (activeTab === 'detail' && item.id === 'detail') ||
+                      (activeTab === 'analytics' && item.id === 'analytics') ||
+                      (activeTab === 'split' && item.id === 'dashboard') ||
+                      (activeTab === 'reminders' && item.id === 'dashboard') ||
+                      (activeTab === 'share' && item.id === 'detail');
+
+                    return (
+                      <div
+                        key={item.id}
+                        className={`flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-mono transition-colors ${
+                          isActive
+                            ? 'bg-[#132d30] text-[#38d9d9] font-bold border border-[#005a5c]/40 shadow-2xs'
+                            : 'text-[#8a99a8] hover:text-white hover:bg-[#141b24]'
+                        }`}
+                      >
+                        <span className="material-symbols-outlined text-[18px] shrink-0">{item.icon}</span>
+                        <span>{item.label}</span>
+                      </div>
+                    );
+                  })}
+                </nav>
+              </div>
+
+              {/* Bottom Sidebar: Theme, Report, Sign Out */}
+              <div className="space-y-2.5 pt-3 border-t border-[#1e2634] text-xs font-mono text-[#8a99a8]">
+                <div className="flex items-center justify-between px-1">
+                  <span>Theme</span>
+                  <div className="flex bg-[#141b24] p-0.5 rounded-lg border border-[#222e3d]">
+                    <span className="material-symbols-outlined text-[13px] px-1 text-gray-400">light_mode</span>
+                    <span className="material-symbols-outlined text-[13px] px-1 text-[#38d9d9] bg-[#1a2330] rounded">dark_mode</span>
+                    <span className="material-symbols-outlined text-[13px] px-1 text-gray-400">laptop</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2.5 px-1 hover:text-white transition-colors cursor-pointer">
+                  <span className="material-symbols-outlined text-[16px]">warning</span>
+                  <span>Report Issue</span>
+                </div>
+
+                <div className="flex items-center gap-2.5 px-1 hover:text-white transition-colors cursor-pointer">
+                  <span className="material-symbols-outlined text-[16px]">logout</span>
+                  <span>Sign Out</span>
                 </div>
               </div>
-            </div>
+            </aside>
+
+            {/* Main Desktop Canvas Area: Fixed 1040px width */}
+            <main className="w-[1040px] p-6 flex flex-col justify-between overflow-x-hidden space-y-6">
+              {/* Top Bar Header (Exact match to Image 1) */}
+              <div className="flex items-center justify-between gap-4 pb-2 border-b border-[#1e2634]">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-[#141b24] border border-[#222e3d] flex items-center justify-center text-[#38d9d9] shrink-0 shadow-2xs">
+                    <span className="material-symbols-outlined text-[20px]">space_dashboard</span>
+                  </div>
+                  <div>
+                    <h2 className="font-heading font-extrabold text-xl text-white tracking-tight leading-tight">
+                      Global Dashboard
+                    </h2>
+                    <p className="font-mono text-xs text-[#8a99a8]">
+                      Real-time bilateral portfolio &amp; active obligations
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDashToast('Opened Split Bill Modal');
+                      setTimeout(() => setDashToast(null), 3000);
+                    }}
+                    className="flex px-3.5 py-1.5 rounded-xl border border-[#253243] bg-[#141b24] text-white font-mono text-xs font-semibold hover:bg-[#1a2330] transition-colors items-center gap-1.5 cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[16px] text-[#38d9d9]">call_split</span>
+                    <span>Split Bill</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDashToast('Opened New Entry Modal');
+                      setTimeout(() => setDashToast(null), 3000);
+                    }}
+                    className="px-3.5 py-1.5 rounded-xl bg-[#38d9d9] text-[#042124] font-mono text-xs font-bold hover:opacity-95 shadow-xs flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">add</span>
+                    <span>New Entry</span>
+                  </button>
+
+                  <div className="w-8 h-8 rounded-xl bg-[#141b24] border border-[#222e3d] flex items-center justify-center text-[#8a99a8] relative cursor-pointer">
+                    <span className="material-symbols-outlined text-[16px]">notifications</span>
+                    <span className="w-2 h-2 rounded-full bg-[#38d9d9] absolute top-1.5 right-1.5" />
+                  </div>
+
+                  <div className="flex items-center gap-2 pl-1.5 py-1 pr-2 rounded-xl bg-[#141b24] border border-[#222e3d] text-xs font-mono text-white cursor-pointer">
+                    <Avatar name="Aayush Singh" size="xs" src="https://api.dicebear.com/7.x/bottts/svg?seed=DebtSyncTeal" />
+                    <span className="font-semibold">Aayush Singh</span>
+                    <span className="material-symbols-outlined text-[16px] text-[#8a99a8]">expand_more</span>
+                  </div>
+                </div>
+              </div>
 
             {/* TAB CONTENT 1: DASHBOARD (Identical to Image 1) */}
             {activeTab === 'dashboard' && (
@@ -1225,13 +1260,14 @@ export function InteractivePreviewSandbox({
             <div className="pt-3 border-t border-[#1e2634] flex items-center justify-between text-xs font-mono text-[#6f7f95]">
               <span className="flex items-center gap-2 text-[#34d399]">
                 <span className="w-2 h-2 rounded-full bg-[#34d399] animate-pulse" />
-                <span>DebtSync 16-Inch High-Fidelity Interactive Sandbox</span>
+                <span>DebtSync 16-Inch High-Fidelity Interactive Sandbox (Zoomed-Out 16:10 Canvas)</span>
               </span>
               <span className="hidden sm:inline">Try toggling filters, buttons &amp; tabs above!</span>
             </div>
           </main>
         </div>
-      )}
-    </div>
-  );
+      </div>
+    )}
+  </div>
+);
 }
