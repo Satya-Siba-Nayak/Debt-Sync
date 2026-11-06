@@ -1101,23 +1101,23 @@ export default function GlobalDashboardPage() {
                         <td className="py-4">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <Chip
-                              label={isPurged ? 'purged' : d.status}
+                              label={isPurged ? 'purged' : effectiveStatus}
                               variant={
                                 isPurged
                                   ? 'purged'
-                                  : d.status === 'active'
+                                  : effectiveStatus === 'active'
                                   ? 'active'
-                                  : d.status === 'settled'
+                                  : effectiveStatus === 'settled'
                                   ? 'settled'
-                                  : d.status === 'pending'
+                                  : effectiveStatus === 'pending'
                                   ? 'pending'
-                                  : d.status === 'declined'
+                                  : effectiveStatus === 'declined'
                                   ? 'declined'
                                   : 'default'
                               }
                               icon={isPurged ? 'admin_panel_settings' : undefined}
                             />
-                            {dueDateInfo && d.status !== 'declined' && !isPurged && (
+                            {dueDateInfo && effectiveStatus !== 'declined' && !isPurged && (
                               <span className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-semibold border ${dueDateInfo.className} flex items-center gap-1`}>
                                 <span className="material-symbols-outlined text-[11px]">
                                   {dueDateInfo.isOverdue ? 'warning' : 'event'}
@@ -1125,7 +1125,7 @@ export default function GlobalDashboardPage() {
                                 {dueDateInfo.text}
                               </span>
                             )}
-                            {unverifiedCount > 0 && d.status === 'active' && !isPurged && (
+                            {unverifiedCount > 0 && effectiveStatus === 'active' && !isPurged && (
                               <span
                                 className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-bold border flex items-center gap-1 ${
                                   isLender
@@ -1155,7 +1155,7 @@ export default function GlobalDashboardPage() {
                               </a>
                             )}
 
-                            {!isPurged && d.status === 'active' && calc.currentBalance > 0 && (
+                            {!isPurged && effectiveStatus === 'active' && calc.currentBalance > 0 && (
                               isLender && unverifiedCount > 0 ? (
                                 <button
                                   type="button"
