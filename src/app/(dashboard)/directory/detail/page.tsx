@@ -4,7 +4,8 @@ import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Debt, Payment, ActivityLogEntry, Profile } from '@/lib/types/database';
-import { calculateDebtBalance, isDebtPurgedByAdmin, round2, sortDebtsActiveFirst, sortPaymentsPendingFirst } from '@/lib/utils/interest';
+import { calculateDebtBalance, isDebtPurgedByAdmin, round2, sortDebtsActiveFirst, sortPaymentsPendingFirst, getEffectiveDebtStatus } from '@/lib/utils/interest';
+import { autoSettleClearedDebts } from '@/lib/utils/auto-settle';
 import { formatCurrency } from '@/lib/utils/currency';
 import { Chip } from '@/components/ui/Chip';
 import { Avatar } from '@/components/ui/Avatar';
@@ -184,6 +185,15 @@ function PersonDebtDetailContent() {
         loadedPayments = (paymentRes.data as any) || [];
         setPayments(loadedPayments);
         setActivityLogs(logRes.data || []);
+
+        // Auto-heal: settle any active debts whose verified payments have cleared the balance (<= 0.01)
+        autoSettleClearedDebts(supabase, allDebts, loadedPayments).then((settledIds) => {
+          if (settledIds && settledIds.length > 0) {
+            setDebts((prev) =>
+              prev.map((d) => (settledIds.includes(d.id) ? { ...d, status: 'settled', settled_at: new Date().toISOString() } : d))
+            );
+          }
+        });
       } else {
         setPayments([]);
         setActivityLogs([]);
