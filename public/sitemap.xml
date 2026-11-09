@@ -41,6 +41,19 @@
     </image:image>
   </url>
 
+  <!-- Live Application Dashboard -->
+  <url>
+    <loc>https://debt-sync.satya-nayak.dev/dash</loc>
+    <lastmod>2026-11-09</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+    <image:image>
+      <image:loc>https://debt-sync.satya-nayak.dev/screenshots/dashboard-desktop.png</image:loc>
+      <image:title>DebtSync — Live Portfolio Dashboard</image:title>
+      <image:caption>Real-time peer-to-peer ledger, active debt balances, daily interest accrual tickers, and settlement controls.</image:caption>
+    </image:image>
+  </url>
+
   <!-- Authentication & Onboarding -->
   <url>
     <loc>https://debt-sync.satya-nayak.dev/signup</loc>
