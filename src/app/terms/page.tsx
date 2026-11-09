@@ -7,6 +7,9 @@ import type { Metadata } from 'next';
 export const metadata: Metadata = {
   title: 'Terms of Service • DebtSync',
   description: 'DebtSync terms of service, record-keeping disclaimers, acceptable use guidelines, and open-source licensing.',
+  alternates: {
+    canonical: 'https://debt-sync.satya-nayak.dev/terms',
+  },
 };
 
 export default function TermsOfServicePage() {

@@ -8,6 +8,9 @@ import type { Metadata } from 'next';
 export const metadata: Metadata = {
   title: 'Contact & Support • DebtSync',
   description: 'Get in touch with DebtSync support, report bugs, ask questions, or request account data deletion.',
+  alternates: {
+    canonical: 'https://debt-sync.satya-nayak.dev/contact',
+  },
 };
 
 export default function ContactPage() {

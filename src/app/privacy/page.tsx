@@ -7,6 +7,9 @@ import type { Metadata } from 'next';
 export const metadata: Metadata = {
   title: 'Privacy Policy • DebtSync',
   description: 'DebtSync privacy policy, data collection practices, India DPDP Act compliance, and user rights.',
+  alternates: {
+    canonical: 'https://debt-sync.satya-nayak.dev/privacy',
+  },
 };
 
 export default function PrivacyPolicyPage() {
