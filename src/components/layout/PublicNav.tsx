@@ -120,6 +120,7 @@ export function PublicNav({ currentPath }: PublicNavProps) {
           {profile ? (
             <Link
               href="/dash"
+              rel="nofollow"
               onClick={clearPublicSession}
               className="px-4 py-2 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 active:scale-95 transition-all shadow-sm flex items-center gap-1.5 min-h-[40px]"
             >
@@ -236,6 +237,7 @@ export function PublicNav({ currentPath }: PublicNavProps) {
             {profile ? (
               <Link
                 href="/dash"
+                rel="nofollow"
                 onClick={() => {
                   clearPublicSession();
                   setIsMobileMenuOpen(false);

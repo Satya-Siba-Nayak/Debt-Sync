@@ -157,6 +157,7 @@ function LandingPageContent() {
           </div>
           <Link
             href="/dash"
+            rel="nofollow"
             onClick={clearPublicSession}
             className="px-3.5 py-1.5 rounded-lg bg-[var(--primary)] text-[var(--on-primary)] font-bold shrink-0 hover:opacity-90 active:scale-95 transition-all flex items-center gap-1 text-[11px] shadow-xs cursor-pointer min-h-[32px]"
           >
@@ -212,6 +213,7 @@ function LandingPageContent() {
               {isLoggedIn ? (
                 <Link
                   href="/dash"
+                  rel="nofollow"
                   onClick={clearPublicSession}
                   className="w-full sm:w-auto px-7 py-3.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-sm font-bold hover:opacity-90 active:scale-95 transition-all shadow-md flex items-center justify-center gap-2 min-h-[48px]"
                 >
@@ -480,6 +482,7 @@ function LandingPageContent() {
                     {isLoggedIn ? (
                       <Link
                         href="/dash"
+                        rel="nofollow"
                         onClick={clearPublicSession}
                         className="px-5 py-2.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-xs font-bold hover:opacity-90 transition-opacity min-h-[44px] inline-flex items-center gap-1.5 shadow-xs"
                       >
@@ -721,6 +724,7 @@ function LandingPageContent() {
               {isLoggedIn ? (
                 <Link
                   href="/dash"
+                  rel="nofollow"
                   onClick={clearPublicSession}
                   className="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-[var(--primary)] text-[var(--on-primary)] font-mono text-sm font-bold hover:opacity-90 active:scale-95 transition-all shadow-md min-h-[48px] flex items-center justify-center gap-2"
                 >

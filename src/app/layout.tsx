@@ -15,23 +15,98 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "DebtSync — Synced Ledgers. Zero Friction.",
-  description: "Smart peer-to-peer ledger, interest engine, and debt management portal",
-  manifest: "/manifest.json",
+  metadataBase: new URL('https://debt-sync.satya-nayak.dev'),
+  title: {
+    default: 'DebtSync — Synced Ledgers. Zero Friction.',
+    template: '%s • DebtSync',
+  },
+  description: 'Smart peer-to-peer ledger, continuous interest engine, and mutual debt management portal. Track loans, split bills, and verify repayments seamlessly.',
+  applicationName: 'DebtSync',
+  authors: [{ name: 'Satya Nayak', url: 'https://debt-sync.satya-nayak.dev' }],
+  keywords: [
+    'DebtSync',
+    'peer-to-peer ledger',
+    'debt tracker',
+    'loan tracker',
+    'interest calculator',
+    'split bills',
+    'IOU tracker',
+    'shared expenses',
+    'personal finance',
+    'repayment tracking',
+  ],
+  creator: 'Satya Nayak',
+  publisher: 'DebtSync',
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-video-preview': -1,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+    },
+  },
+  alternates: {
+    canonical: '/',
+  },
+  openGraph: {
+    type: 'website',
+    locale: 'en_US',
+    url: 'https://debt-sync.satya-nayak.dev',
+    siteName: 'DebtSync',
+    title: 'DebtSync — Synced Ledgers. Zero Friction.',
+    description: 'Smart peer-to-peer ledger, continuous interest engine, and mutual debt management portal.',
+    images: [
+      {
+        url: '/screenshots/dashboard-desktop.png',
+        width: 1200,
+        height: 630,
+        alt: 'DebtSync — Peer-to-Peer Ledger & Live Interest Dashboard',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'DebtSync — Synced Ledgers. Zero Friction.',
+    description: 'Smart peer-to-peer ledger, continuous interest engine, and mutual debt management portal.',
+    images: ['/screenshots/dashboard-desktop.png'],
+  },
+  manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
-    statusBarStyle: "black-translucent",
-    title: "DebtSync",
+    statusBarStyle: 'black-translucent',
+    title: 'DebtSync',
   },
   icons: {
     icon: [
-      { url: "/favicon.svg", type: "image/svg+xml" },
-      { url: "/favicon.png", sizes: "32x32", type: "image/png" },
-      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/favicon.png', sizes: '32x32', type: 'image/png' },
+      { url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
     ],
     apple: [
-      { url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+      { url: '/icons/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
     ],
+  },
+};
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'WebApplication',
+  name: 'DebtSync',
+  url: 'https://debt-sync.satya-nayak.dev',
+  description: 'Smart peer-to-peer ledger, continuous interest engine, and mutual debt management portal.',
+  applicationCategory: 'FinanceApplication',
+  operatingSystem: 'All',
+  offers: {
+    '@type': 'Offer',
+    price: '0',
+    priceCurrency: 'USD',
+  },
+  author: {
+    '@type': 'Person',
+    name: 'Satya Nayak',
   },
 };
 
@@ -43,6 +118,10 @@ export default function RootLayout({
   return (
     <html lang="en" className="w-full max-w-full overflow-x-hidden" suppressHydrationWarning>
       <head>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        />
         <link rel="manifest" href="/manifest.json" />
         <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
         <meta name="mobile-web-app-capable" content="yes" />

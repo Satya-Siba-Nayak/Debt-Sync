@@ -241,6 +241,7 @@ function AcceptDebtContent() {
           </p>
           <Link
             href="/dash"
+            rel="nofollow"
             className="px-5 py-2.5 bg-primary text-on-primary rounded-xl font-mono text-xs font-bold inline-block"
           >
             Go to Dashboard
@@ -302,6 +303,7 @@ function AcceptDebtContent() {
             </button>
             <Link
               href="/dash"
+              rel="nofollow"
               className="flex-1 py-2.5 px-4 rounded-xl border border-outline-variant/40 text-on-surface font-mono text-xs font-semibold hover:bg-surface-container flex items-center justify-center"
             >
               Dashboard
@@ -453,6 +455,7 @@ function AcceptDebtContent() {
             </p>
             <Link
               href="/dash"
+              rel="nofollow"
               className="w-full inline-block py-2.5 px-4 rounded-xl bg-surface-container text-on-surface font-mono text-xs font-semibold hover:bg-surface-container-high"
             >
               Go to Dashboard
@@ -465,6 +468,7 @@ function AcceptDebtContent() {
             </p>
             <Link
               href="/dash"
+              rel="nofollow"
               className="w-full inline-block py-2.5 px-4 rounded-xl bg-primary text-on-primary font-mono text-xs font-bold hover:opacity-95 shadow-md"
             >
               View on Dashboard

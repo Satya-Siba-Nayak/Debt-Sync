@@ -114,6 +114,7 @@ export default function ContactPage() {
             <div className="pt-2">
               <Link
                 href="/dash"
+                rel="nofollow"
                 className="inline-flex items-center gap-1.5 font-mono text-xs font-bold text-[var(--primary)] hover:underline"
               >
                 <span>Open Dashboard</span>
